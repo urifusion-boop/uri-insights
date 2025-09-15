@@ -1,0 +1,19 @@
+version: "3.9"
+
+services:
+  uri-insight.api:
+    image: uriteam/urisvc:uriinsightdev
+    container_name: uri-insight.api
+    env_file:
+      - .env
+    environment:
+      - ENV=Production
+      - SSL_CERT_PATH=/https/fullchain.pem
+      - SSL_KEY_PATH=/https/privkey.pem
+    volumes:
+      - /etc/letsencrypt/archive/api.uricreative.com/fullchain1.pem:/https/fullchain.pem:ro
+      - /etc/letsencrypt/archive/api.uricreative.com/privkey1.pem:/https/privkey.pem:ro
+    restart: always
+    ports:
+      - "8002:80"
+      - "8445:443"

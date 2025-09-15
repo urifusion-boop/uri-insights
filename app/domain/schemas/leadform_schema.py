@@ -1,0 +1,171 @@
+from bson import ObjectId
+from pydantic import BaseModel, Field
+from typing import Optional, List
+from datetime import datetime
+
+from app.core.helpers.date_helper import DateHelper
+from app.domain.enums.apollo_enum import (
+    ContactEmailStatusEnum,
+    PersonSenioritiesEnum,
+)
+from app.domain.enums.leadform_enum import (
+    LeadFormDisabledReasonEnum,
+    LeadFormTypeEnum,
+)
+from app.core.helpers.date_helper import DateHelper
+from app.domain.enums.lead_enum import LeadsProcessedStatus
+
+
+class LeadSourceSettings(BaseModel):
+    max_search_iteration_count: int = 5
+    last_scraped_date: Optional[datetime] = None
+    last_scraped_status: Optional[LeadsProcessedStatus] = None
+
+
+class LeadFormBase(BaseModel):
+    lead_form_id: str = Field(default_factory=lambda: str(ObjectId()))
+    form_type: LeadFormTypeEnum
+    form_title: str
+    user_id: str
+    disabled: bool = False
+    disabled_reason: Optional[LeadFormDisabledReasonEnum] = None
+    ai_response_guide: Optional[str] = None
+    next_generation_date: datetime = Field(
+        default_factory=DateHelper.generate_next_lead_generation_date
+    )
+    add_to_history: Optional[bool] = True
+    auto_generate: Optional[bool] = None
+    settings: Optional[LeadSourceSettings] = LeadSourceSettings()
+
+    # Apollo Search Parameters
+    # Common Apollo fields
+    organization_locations: Optional[List[str]] = None
+    organization_ids: Optional[List[str]] = None
+    organization_num_employees_ranges: Optional[List[str]] = None
+
+    # Person Search fields
+    person_titles: Optional[List[str]] = None
+    include_similar_titles: bool = True
+    person_locations: Optional[List[str]] = None
+    person_seniorities: Optional[List[PersonSenioritiesEnum]] = None
+    q_organization_domains_list: Optional[List[str]] = None
+    contact_email_status: Optional[List[ContactEmailStatusEnum]] = None
+    q_keywords: Optional[str] = None
+
+    # Organization Search fields
+    organization_not_locations: Optional[List[str]] = None
+    revenue_range_min: Optional[int] = None
+    revenue_range_max: Optional[int] = None
+    technology_uids: Optional[List[str]] = None
+    q_organization_keyword_tags: Optional[List[str]] = None
+    q_organization_name: Optional[str] = None
+
+    # Business Form fields (holds some fields for conversational forms as well)
+    business_name: Optional[str] = None
+    business_summary: Optional[str] = None
+    business_website: Optional[str] = None
+    source_platforms: Optional[List[str]] = ["google"]
+
+    # Fields common to both conversational and business lead forms
+    keywords: Optional[List[str]] = None
+    competitors: Optional[List[str]] = None
+
+    # Conversational Form fields
+    buying_signals: Optional[List[str]] = None
+    excluded_keywords: Optional[List[str]] = None
+    location: Optional[List[str]] = None
+    intent_type: Optional[str] = None
+
+    # Pagination
+    page: Optional[int] = 1
+    per_page: Optional[int] = 10
+
+    # Date fields
+    created_date: datetime = Field(default_factory=datetime.utcnow)  # Creation date
+    last_updated: datetime = Field(default_factory=datetime.utcnow)
+
+    class Config:
+        use_enum_values = True
+        json_encoders = {datetime: lambda v: v.isoformat()}
+
+
+class LeadFormCreate(LeadFormBase):
+    pass
+
+
+class LeadFormUpdateBase(BaseModel):
+    form_title: Optional[str] = None
+    form_type: Optional[LeadFormTypeEnum] = None
+    disabled: bool = False
+    disabled_reason: Optional[LeadFormDisabledReasonEnum] = None
+    add_to_history: Optional[bool] = True
+    auto_generate: Optional[bool] = None
+    # Pagination
+    page: Optional[int] = None
+    per_page: Optional[int] = None
+
+    class Config:
+        use_enum_values = True
+
+
+class ApolloFormsFields(BaseModel):
+    organization_locations: Optional[List[str]] = None
+    organization_ids: Optional[List[str]] = None
+    organization_num_employees_ranges: Optional[List[str]] = None
+
+
+class PersonLeadFormUpdate(LeadFormUpdateBase, ApolloFormsFields):
+    # Person Search fields
+    person_titles: Optional[List[str]] = None
+    include_similar_titles: bool = True
+    person_locations: Optional[List[str]] = None
+    person_seniorities: Optional[List[PersonSenioritiesEnum]] = None
+    q_organization_domains_list: Optional[List[str]] = None
+    contact_email_status: Optional[List[ContactEmailStatusEnum]] = None
+    q_keywords: Optional[str] = None
+
+
+class OrganizationLeadFormUpdate(LeadFormUpdateBase, ApolloFormsFields):
+    # Organization Search fields
+    organization_not_locations: Optional[List[str]] = None
+    revenue_range_min: Optional[int] = None
+    revenue_range_max: Optional[int] = None
+    technology_uids: Optional[List[str]] = None
+    q_organization_keyword_tags: Optional[List[str]] = None
+    q_organization_name: Optional[str] = None
+
+
+class BizConvLeadFormUpdateBase(LeadFormUpdateBase):
+    keywords: Optional[List[str]] = None
+    competitors: Optional[List[str]] = None
+    ai_response_guide: Optional[str] = None
+
+
+class BusinessLeadFormUpdate(BizConvLeadFormUpdateBase):
+    # Business Form fields
+    business_name: Optional[str] = None
+    business_summary: Optional[str] = None
+    business_website: Optional[str] = None
+    source_platforms: Optional[List[str]] = ["google"]
+    next_generation_date: datetime = Field(
+        default_factory=DateHelper.generate_next_lead_generation_date
+    )
+    settings: Optional[LeadSourceSettings] = None
+
+    class Config:
+        json_encoders = {datetime: lambda v: v.isoformat()}
+
+
+class ConversationalLeadFormUpdate(BizConvLeadFormUpdateBase):
+    # Conversational Form fields
+    buying_signals: Optional[List[str]] = None
+    excluded_keywords: Optional[List[str]] = None
+    location: Optional[List[str]] = None
+    intent_type: Optional[str] = None
+
+
+class LeadForm(LeadFormBase):
+    id: str = Field(default_factory=lambda: str(ObjectId()))
+
+    class Config:
+        json_encoders = {datetime: lambda v: v.isoformat()}
