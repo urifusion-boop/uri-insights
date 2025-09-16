@@ -22,8 +22,6 @@ class Settings(BaseSettings):
     GOOGLE_APPLICATION_CREDENTIALS: str
     X_APP_BEARER_TOKEN: str
     LINKEDIN_VERSION: str
-    SSL_CERT_PATH: str
-    SSL_KEY_PATH: str
     ENV: str
     DEV_ENV: str
     AZURE_SERVICE_BUS_CONNECTION_STRING: str
