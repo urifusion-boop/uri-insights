@@ -42,10 +42,10 @@ EXPOSE 443
 COPY --from=build /app/app/uri-creative-805581062eaa.json /app/app/uri-creative-805581062eaa.json
 
 # Set environment variables
-ENV SSL_CERT_PATH=/https/fullchain.pem \
-    SSL_KEY_PATH=/https/privkey.pem \
-    GOOGLE_APPLICATION_CREDENTIALS=/app/uri-creative-805581062eaa.json \
-    ENV=Production
+# ENV SSL_CERT_PATH=/https/fullchain.pem \
+#     SSL_KEY_PATH=/https/privkey.pem \
+#     GOOGLE_APPLICATION_CREDENTIALS=/app/uri-creative-805581062eaa.json \
+#     ENV=Production
 
 # Set the entrypoint to run the FastAPI application with Uvicorn and SSL
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "443", "--ssl-keyfile", "/https/privkey.pem", "--ssl-certfile", "/https/fullchain.pem"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "443"]
