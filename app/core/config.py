@@ -63,6 +63,12 @@ class Settings(BaseSettings):
     URI_CLIENT_ID: str
     URI_CLIENT_SECRET: str
 
+    SECRETS_HASH: str
+    PIPEOPS_PROJECT_NAME: str
+    PIPEOPS_VERSION: str
+    CACHE_BUSTER: str
+    CI: str
+
     class Config:
         env_file = ".env"
 
