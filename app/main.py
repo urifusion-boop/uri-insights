@@ -407,13 +407,13 @@ def custom_openapi():
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=443)
-    # if Settings.ENV == "Development":
-    # else:
-    #     uvicorn.run(
-    #         app,
-    #         host="0.0.0.0",
-    #         port=443,
-    #         ssl_keyfile=settings.SSL_KEY_PATH,  # Path to the private key
-    #         ssl_certfile=settings.SSL_CERT_PATH,  # Path to the certificate
-    #     )
+    if Settings.ENV == "Development":
+        uvicorn.run(app, host="0.0.0.0", port=443)
+    else:
+        uvicorn.run(
+            app,
+            host="0.0.0.0",
+            port=443,
+            ssl_keyfile=settings.SSL_KEY_PATH,  # Path to the private key
+            ssl_certfile=settings.SSL_CERT_PATH,  # Path to the certificate
+        )
