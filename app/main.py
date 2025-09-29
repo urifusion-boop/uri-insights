@@ -358,6 +358,11 @@ def read_root() -> dict:
     return {"message": "Welcome to URI Insights API"}
 
 
+@app.get("/metrics")
+async def metrics_stub():
+    return {"status": "metrics not enabled"}
+
+
 @app.get("/swagger", include_in_schema=False)
 async def custom_swagger_ui_html() -> Any:
     return get_swagger_ui_html(
