@@ -62,12 +62,8 @@ class Settings(BaseSettings):
     APOLLO_API_KEY: str
     URI_CLIENT_ID: str
     URI_CLIENT_SECRET: str
-
-    SECRETS_HASH: str
-    PIPEOPS_PROJECT_NAME: str
-    PIPEOPS_VERSION: str
-    CACHE_BUSTER: str
-    CI: str
+    SSL_KEY_PATH: str
+    SSL_CERT_PATH: str
 
     class Config:
         env_file = ".env"

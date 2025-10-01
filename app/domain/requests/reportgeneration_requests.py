@@ -69,6 +69,8 @@ class ReportGenerationRequest(BaseModel):
             rtype == ReportGenerationTypeEnum.KEYWORD_TRACKING.value
             or rtype == ReportGenerationTypeEnum.HASHTAG_TRACKING.value
         ):
+            if rsubtype:
+                values["report_generation_subtypes"] = None
             if not values.get("tracker_id"):
                 raise ValueError(
                     "tracker_id is required for hashtag tracking and keyword tracking reports"
