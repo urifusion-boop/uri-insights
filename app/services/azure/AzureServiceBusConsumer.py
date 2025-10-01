@@ -70,6 +70,7 @@ class AzureServiceBusConsumer:
                                     b"messageType"
                                 )
                                 print(f"\n\nReceived from queue: {self.queue_name}")
+                                print(f"\nData: {msg}")
                                 try:
                                     await self.handle_message(
                                         msg, message_type.decode("utf-8")
