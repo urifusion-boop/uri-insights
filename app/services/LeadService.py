@@ -766,9 +766,18 @@ class LeadService:
     async def generate_follow_up_message(lead: dict, lead_form: dict) -> str:
         ai_response_guide = lead_form.get("ai_response_guide")
 
+        def safe_dumps(obj):
+            try:
+                return json.dumps(obj, default=str, ensure_ascii=False)
+            except Exception as e:
+                print(f"JSON serialization failed: {e}")
+                return {}  # fallback to empty object if it really fails
+
         if ai_response_guide:
-            prompt = ai_response_guide + json.dumps(lead) + json.dumps(lead_form)
+            print("AI response guide is present.")
+            prompt = ai_response_guide + safe_dumps(lead) + safe_dumps(lead_form)
         else:
+            print("AI response guide is not present.")
             prompt = LeadFollowUpMessagePromptEnum.LEAD_CAPTURE.value.format(
                 business_info=lead_form, lead_post=lead
             )
