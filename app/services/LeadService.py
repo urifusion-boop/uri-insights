@@ -341,8 +341,6 @@ class LeadService:
         user_id = loaded_leads[0].get("assigned_to")
         db = get_db()
 
-        print("Loaded leads: ", loaded_leads)
-
         if not user_id:
             raise Exception("No user ID found in imported leads")
 
@@ -357,8 +355,6 @@ class LeadService:
                 )
             ).get("responseData", [])
 
-            print("\nConversational lead form: ", conversational_lead_form)
-
             if not conversational_lead_form:
                 raise Exception("Lead form not found for conversational leads import.")
 
@@ -371,21 +367,16 @@ class LeadService:
                 *enrichment_tasks, return_exceptions=True
             )
 
-            print("\nTask results: ", tasks_results)
-
             lead_objs: List[dict[str, Any]] = [
                 lead.model_dump(mode="json")
                 for lead in tasks_results
                 if not isinstance(lead, BaseException)
             ]
 
-            print(f"Lead objs: ", lead_objs)
-
             leads_to_create = await LeadService._attach_follow_ups(
                 lead_objs, conversational_lead_form[0]
             )
 
-            print('Leads to create: ', leads_to_create)
         else:
             leads_to_create = [LeadCreate(**lead) for lead in loaded_leads]
 
@@ -807,6 +798,8 @@ class LeadService:
         follow_up_results = await asyncio.gather(
             *follow_up_tasks, return_exceptions=True
         )
+
+        print("Follow up results: ", follow_up_results)
 
         ready_leads = []
         for lead, follow_up in zip(leads, follow_up_results):
