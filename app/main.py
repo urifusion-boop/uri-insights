@@ -402,7 +402,7 @@ def custom_openapi():
 if __name__ == "__main__":
     import uvicorn
 
-    if Settings.ENV == "Development":
+    if settings.ENV == "Development":
         uvicorn.run(app, host="0.0.0.0", port=443)
     else:
         uvicorn.run(
