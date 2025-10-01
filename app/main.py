@@ -48,7 +48,6 @@ from app.routers import (
 )
 from app.core.auth_bearer import JWTBearer
 from app.core.handlers.exception_handler import global_exception_handler
-from app.core.config import Settings
 from app.services.BackgroundService import BackgroundService
 from app.core.cache.manager.cache_manager import CacheManager  # 🔹 Import CacheManager
 from app.core.managers.ProcessPoolManager import process_pool_manager
@@ -402,13 +401,13 @@ def custom_openapi():
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=443)
-    # if Settings.ENV == "Development":
+    # if settings.ENV == "Development":
+    #     uvicorn.run(app, host="0.0.0.0", port=443)
     # else:
-    #     uvicorn.run(
-    #         app,
-    #         host="0.0.0.0",
-    #         port=443,
-    #         ssl_keyfile=settings.SSL_KEY_PATH,  # Path to the private key
-    #         ssl_certfile=settings.SSL_CERT_PATH,  # Path to the certificate
-    #     )
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=443,
+        ssl_keyfile=settings.SSL_KEY_PATH,  # Path to the private key
+        ssl_certfile=settings.SSL_CERT_PATH,  # Path to the certificate
+    )

@@ -48,4 +48,4 @@ COPY --from=build /app/app/uri-creative-805581062eaa.json /app/app/uri-creative-
 #     ENV=Production
 
 # Set the entrypoint to run the FastAPI application with Uvicorn and SSL
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "443"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "443", "--ssl-keyfile", "/https/privkey.pem", "--ssl-certfile", "/https/fullchain.pem"]
