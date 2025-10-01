@@ -789,9 +789,12 @@ class LeadService:
         Given a list of LeadCreate objects, generate follow-up messages
         concurrently and return only valid leads with follow-ups attached.
         """
-        del lead_form["created_date"]
-        del lead_form["last_updated"]
-        del lead_form["next_generation_date"]
+        for key, value in lead_form.items():
+            if isinstance(value, datetime):
+                del lead_form[key]
+
+        print("Lead form: ", lead_form)
+        
         follow_up_tasks = [
             LeadService.generate_follow_up_message(lead, lead_form) for lead in leads
         ]
