@@ -48,7 +48,6 @@ from app.routers import (
 )
 from app.core.auth_bearer import JWTBearer
 from app.core.handlers.exception_handler import global_exception_handler
-from app.core.config import Settings
 from app.services.BackgroundService import BackgroundService
 from app.core.cache.manager.cache_manager import CacheManager  # 🔹 Import CacheManager
 from app.core.managers.ProcessPoolManager import process_pool_manager
