@@ -30,3 +30,7 @@ aiofiles
 types-aiofiles
 chardet
 PyPDF2
+httpx>=0.24.0
+asyncio>=3.4.3
+aiohttp>=3.8.0
+websockets>=10.0

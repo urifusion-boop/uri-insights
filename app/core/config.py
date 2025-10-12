@@ -64,6 +64,12 @@ class Settings(BaseSettings):
     URI_CLIENT_SECRET: str
     SSL_KEY_PATH: str
     SSL_CERT_PATH: str
+    
+    # Browsercloud Configuration
+    BROWSERCLOUD_API_KEY: str
+    BROWSERCLOUD_API_URL: str = "https://api.browsercloud.io"
+    BROWSERCLOUD_WEBHOOK_SECRET: str
+    BROWSERCLOUD_MAX_CONCURRENT_TASKS: int = 10
 
     class Config:
         env_file = ".env"
