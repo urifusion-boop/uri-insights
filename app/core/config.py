@@ -2,8 +2,8 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    MONGODB_USER: str
-    MONGODB_PASSWORD: str
+    MONGODB_USER: str = ""
+    MONGODB_PASSWORD: str = ""
     MONGODB_HOST: str
     MONGODB_DB: str
     MONGODB_URI: str
