@@ -32,6 +32,7 @@ from app.routers import (
     tiktok_insights,
     twitter_insights,
     twitter_media,
+    twitter_monitoring,
     mention_insights,
     facebook_insights,
     lead_insights,
@@ -266,6 +267,13 @@ app.include_router(
     twitter_media.router,
     prefix="/x-media",
     tags=["X Media"],
+    dependencies=[Depends(JWTBearer(validate_subscription=True))],
+)
+
+app.include_router(
+    twitter_monitoring.router,
+    prefix="/twitter-monitoring",
+    tags=["Twitter Monitoring (Playwright)"],
     dependencies=[Depends(JWTBearer(validate_subscription=True))],
 )
 

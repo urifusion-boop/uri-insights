@@ -24,14 +24,19 @@ class RealtimeLeadProcessor:
         self,
         db: AsyncIOMotorDatabase,
         payload: dict,
-        signature: str
+        signature: str = "",
+        skip_validation: bool = False
     ) -> dict:
         """Process incoming webhook from Browsercloud."""
         try:
             # Validate and process posts from webhook
-            posts = await self.browsercloud_service.handle_webhook_payload(
-                payload, signature
-            )
+            # Skip validation for internal calls (e.g., from TwitterMonitoringOrchestrator)
+            if skip_validation or not signature:
+                posts = self._parse_posts_from_payload(payload)
+            else:
+                posts = await self.browsercloud_service.handle_webhook_payload(
+                    payload, signature
+                )
             
             if not posts:
                 return {
@@ -169,3 +174,15 @@ class RealtimeLeadProcessor:
         except Exception as e:
             print(f"Error generating AI reply: {e}")
             return ""
+
+    def _parse_posts_from_payload(self, payload: dict) -> List[BrowsercloudSocialPost]:
+        """Parse social posts from payload without signature validation (for internal calls)."""
+        posts = []
+        for post_data in payload.get("results", []):
+            try:
+                post = BrowsercloudSocialPost(**post_data)
+                posts.append(post)
+            except Exception as e:
+                print(f"Error parsing post: {e}")
+                continue
+        return posts

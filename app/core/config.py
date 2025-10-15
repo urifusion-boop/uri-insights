@@ -71,8 +71,13 @@ class Settings(BaseSettings):
     BROWSERCLOUD_WEBHOOK_SECRET: str
     BROWSERCLOUD_MAX_CONCURRENT_TASKS: int = 10
 
+    # Twitter Monitoring with Playwright
+    TWITTER_USERNAME: str = ""
+    TWITTER_PASSWORD: str = ""
+
     class Config:
         env_file = ".env"
+        extra = "ignore"  # Allow extra fields to be ignored
 
 
 settings = Settings()
