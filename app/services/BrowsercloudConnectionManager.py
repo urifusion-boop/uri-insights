@@ -25,8 +25,9 @@ class BrowsercloudConnectionManager:
     def _build_connection_url(self) -> str:
         """Build WebSocket connection URL for Browsercloud."""
         api_key = settings.BROWSERCLOUD_API_KEY
-        # Browsercloud.io connection format
-        return f"wss://chrome-v2.browsercloud.io/playwright?token={api_key}"
+        # Browsercloud.io connection format (uses CDP protocol)
+        # Using stealth-v2 mode for best bot detection bypass
+        return f"wss://chrome-v2.browsercloud.io?token={api_key}&stealthMode=stealth-v2"
 
     async def connect(self) -> Browser:
         """Establish connection to Browsercloud remote browser."""
@@ -39,8 +40,9 @@ class BrowsercloudConnectionManager:
                 logger.info("Connecting to Browsercloud remote browser...")
                 self.playwright = await async_playwright().start()
 
-                # Connect to remote browser via WebSocket
-                self.browser = await self.playwright.chromium.connect(
+                # Connect to remote browser via CDP (Chrome DevTools Protocol)
+                # Browsercloud requires connect_over_cdp instead of connect
+                self.browser = await self.playwright.chromium.connect_over_cdp(
                     self.connection_url,
                     timeout=60000  # 60 second timeout
                 )
@@ -59,16 +61,23 @@ class BrowsercloudConnectionManager:
         if not self.browser or not self.is_connected:
             await self.connect()
 
-        # Default context options for stealth
-        context_options = {
-            "viewport": {"width": 1920, "height": 1080},
-            "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "locale": "en-US",
-            "timezone_id": "America/New_York",
-            **kwargs
-        }
-
-        self.context = await self.browser.new_context(**context_options)
+        # When using CDP connection (Browsercloud), use the default context
+        # CDP connections come with a default context already created
+        contexts = self.browser.contexts
+        if contexts:
+            logger.info("Using existing default context from CDP connection")
+            self.context = contexts[0]
+        else:
+            # Fallback: create new context (for local browser)
+            logger.info("Creating new browser context")
+            context_options = {
+                "viewport": {"width": 1920, "height": 1080},
+                "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "locale": "en-US",
+                "timezone_id": "America/New_York",
+                **kwargs
+            }
+            self.context = await self.browser.new_context(**context_options)
 
         # Add stealth scripts to avoid detection
         await self._apply_stealth_scripts(self.context)
