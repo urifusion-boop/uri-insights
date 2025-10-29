@@ -74,6 +74,9 @@ class Settings(BaseSettings):
     # Twitter Monitoring with Playwright
     TWITTER_USERNAME: str = ""
     TWITTER_PASSWORD: str = ""
+    
+    # Apify Configuration
+    APIFY_API_TOKEN: str = ""
 
     class Config:
         env_file = ".env"
