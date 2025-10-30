@@ -6,17 +6,23 @@ client: AsyncIOMotorClient | None = None
 
 
 def connect_to_mongo(database_name: str) -> None:
+    global client
 
     if settings.DEV_ENV == "Development":
-
-        global client
-        user = quote_plus(settings.MONGODB_USER)
-        password = quote_plus(settings.MONGODB_PASSWORD)
-        host = settings.MONGODB_HOST
-        uri = f"mongodb://{user}:{password}@{host}/{database_name}"
-        print(f"Generated URI: {uri.replace(password, '*****')}")
+        # Check if username and password are provided
+        if settings.MONGODB_USER and settings.MONGODB_PASSWORD:
+            user = quote_plus(settings.MONGODB_USER)
+            password = quote_plus(settings.MONGODB_PASSWORD)
+            host = settings.MONGODB_HOST
+            uri = f"mongodb://{user}:{password}@{host}/{database_name}"
+            print(f"Generated URI: {uri.replace(password, '*****')}")
+        else:
+            # Local MongoDB without authentication
+            uri = settings.MONGODB_URI
+            print(f"Generated URI: {uri}")
         client = AsyncIOMotorClient(uri)
-    client = AsyncIOMotorClient(settings.MONGODB_URI)
+    else:
+        client = AsyncIOMotorClient(settings.MONGODB_URI)
 
 
 def get_db() -> AsyncIOMotorDatabase:

@@ -1,0 +1,457 @@
+{
+	"info": {
+		"_postman_id": "twitter-monitoring-playwright-2024",
+		"name": "Twitter Monitoring (Playwright)",
+		"description": "API endpoints for Twitter monitoring using Playwright + Browsercloud",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Health Check",
+			"item": [
+				{
+					"name": "API Root Health",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								""
+							]
+						},
+						"description": "Check if the API server is running"
+					},
+					"response": []
+				},
+				{
+					"name": "Twitter Monitoring Health",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/twitter-monitoring/health",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"twitter-monitoring",
+								"health"
+							]
+						},
+						"description": "Check health of Twitter monitoring system. No authentication required."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Monitoring Control",
+			"item": [
+				{
+					"name": "Start Monitoring",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"lead_form_id\": \"{{lead_form_id}}\",\n    \"poll_interval\": 60\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/twitter-monitoring/start",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"twitter-monitoring",
+								"start"
+							]
+						},
+						"description": "Start Twitter monitoring for a specific lead form. Returns a task_id for tracking."
+					},
+					"response": [
+						{
+							"name": "Success",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"lead_form_id\": \"67703b2dd5f6dc2a5026367d\",\n    \"poll_interval\": 60\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{base_url}}/twitter-monitoring/start",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"twitter-monitoring",
+										"start"
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [],
+							"cookie": [],
+							"body": "{\n    \"status\": \"success\",\n    \"message\": \"Twitter monitoring started for lead form 67703b2dd5f6dc2a5026367d\",\n    \"task_id\": \"twitter_monitor_67703b2dd5f6dc2a5026367d_1729008123.456\"\n}"
+						}
+					]
+				},
+				{
+					"name": "Stop Monitoring Task",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/twitter-monitoring/stop/{{task_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"twitter-monitoring",
+								"stop",
+								"{{task_id}}"
+							]
+						},
+						"description": "Stop a specific Twitter monitoring task by task_id"
+					},
+					"response": [
+						{
+							"name": "Success",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/twitter-monitoring/stop/twitter_monitor_123",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"twitter-monitoring",
+										"stop",
+										"twitter_monitor_123"
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [],
+							"cookie": [],
+							"body": "{\n    \"status\": \"success\",\n    \"message\": \"Monitoring task twitter_monitor_123 stopped\"\n}"
+						}
+					]
+				},
+				{
+					"name": "Stop All Monitoring",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/twitter-monitoring/stop-all",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"twitter-monitoring",
+								"stop-all"
+							]
+						},
+						"description": "Stop all active Twitter monitoring tasks"
+					},
+					"response": [
+						{
+							"name": "Success",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/twitter-monitoring/stop-all",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"twitter-monitoring",
+										"stop-all"
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [],
+							"cookie": [],
+							"body": "{\n    \"status\": \"success\",\n    \"message\": \"Stopped 3 monitoring tasks\"\n}"
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "Status & Monitoring",
+			"item": [
+				{
+					"name": "Get Task Status",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/twitter-monitoring/status/{{task_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"twitter-monitoring",
+								"status",
+								"{{task_id}}"
+							]
+						},
+						"description": "Get status of a specific monitoring task"
+					},
+					"response": [
+						{
+							"name": "Success",
+							"originalRequest": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/twitter-monitoring/status/twitter_monitor_123",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"twitter-monitoring",
+										"status",
+										"twitter_monitor_123"
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [],
+							"cookie": [],
+							"body": "{\n    \"task_id\": \"twitter_monitor_67703b2dd5f6dc2a5026367d_1729008123.456\",\n    \"lead_form_id\": \"67703b2dd5f6dc2a5026367d\",\n    \"user_id\": \"user123\",\n    \"is_running\": true,\n    \"created_at\": \"2025-10-15T10:30:00Z\",\n    \"last_run\": \"2025-10-15T10:35:00Z\",\n    \"tweets_processed\": 45,\n    \"leads_generated\": 12,\n    \"poll_interval\": 60\n}"
+						}
+					]
+				},
+				{
+					"name": "Get All Tasks Status",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/twitter-monitoring/status",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"twitter-monitoring",
+								"status"
+							]
+						},
+						"description": "Get status of all active monitoring tasks"
+					},
+					"response": [
+						{
+							"name": "Success",
+							"originalRequest": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/twitter-monitoring/status",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"twitter-monitoring",
+										"status"
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [],
+							"cookie": [],
+							"body": "[\n    {\n        \"task_id\": \"twitter_monitor_67703b2dd5f6dc2a5026367d_1729008123.456\",\n        \"lead_form_id\": \"67703b2dd5f6dc2a5026367d\",\n        \"user_id\": \"user123\",\n        \"is_running\": true,\n        \"created_at\": \"2025-10-15T10:30:00Z\",\n        \"last_run\": \"2025-10-15T10:35:00Z\",\n        \"tweets_processed\": 45,\n        \"leads_generated\": 12,\n        \"poll_interval\": 60\n    },\n    {\n        \"task_id\": \"twitter_monitor_67703b2dd5f6dc2a5026368e_1729008200.789\",\n        \"lead_form_id\": \"67703b2dd5f6dc2a5026368e\",\n        \"user_id\": \"user456\",\n        \"is_running\": true,\n        \"created_at\": \"2025-10-15T11:00:00Z\",\n        \"last_run\": \"2025-10-15T11:02:00Z\",\n        \"tweets_processed\": 23,\n        \"leads_generated\": 5,\n        \"poll_interval\": 60\n    }\n]"
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "Lead Forms (for testing)",
+			"item": [
+				{
+					"name": "Create Test Lead Form",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"user_id\": \"{{user_id}}\",\n    \"type\": \"conversational\",\n    \"keywords\": [\n        \"looking for CRM\",\n        \"need sales software\",\n        \"CRM recommendations\",\n        \"sales automation\"\n    ],\n    \"buying_signals\": [\n        \"budget approved\",\n        \"ready to buy\",\n        \"need help\",\n        \"looking for solution\",\n        \"recommend\"\n    ],\n    \"excluded_keywords\": [\n        \"free only\",\n        \"competitor_name\"\n    ],\n    \"ai_response_guide\": \"Be friendly and helpful. Mention our CRM features. Ask qualifying questions about their business size and needs.\",\n    \"business_summary\": \"We provide AI-powered CRM solutions for small to medium-sized businesses. Our platform includes lead tracking, email automation, and analytics.\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/lead-forms/conversation-search/create",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"lead-forms",
+								"conversation-search",
+								"create"
+							]
+						},
+						"description": "Create a test lead form for Twitter monitoring. Save the returned lead_form_id for starting monitoring."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Lead Form by ID",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/lead-forms/getById?lead_form_id={{lead_form_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"lead-forms",
+								"getById"
+							],
+							"query": [
+								{
+									"key": "lead_form_id",
+									"value": "{{lead_form_id}}"
+								}
+							]
+						},
+						"description": "Get details of a specific lead form"
+					},
+					"response": []
+				}
+			]
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8080",
+			"type": "string"
+		},
+		{
+			"key": "jwt_token",
+			"value": "your_jwt_token_here",
+			"type": "string"
+		},
+		{
+			"key": "lead_form_id",
+			"value": "67703b2dd5f6dc2a5026367d",
+			"type": "string"
+		},
+		{
+			"key": "task_id",
+			"value": "twitter_monitor_67703b2dd5f6dc2a5026367d_1729008123.456",
+			"type": "string"
+		},
+		{
+			"key": "user_id",
+			"value": "test_user_123",
+			"type": "string"
+		}
+	]
+}

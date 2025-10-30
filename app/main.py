@@ -32,6 +32,7 @@ from app.routers import (
     tiktok_insights,
     twitter_insights,
     twitter_media,
+    twitter_monitoring,
     mention_insights,
     facebook_insights,
     lead_insights,
@@ -45,6 +46,7 @@ from app.routers import (
     ai_message,
     ai_run,
     webhook,
+    openai_apify_twitter,
 )
 from app.core.auth_bearer import JWTBearer
 from app.core.handlers.exception_handler import global_exception_handler
@@ -270,6 +272,13 @@ app.include_router(
 )
 
 app.include_router(
+    twitter_monitoring.router,
+    prefix="/twitter-monitoring",
+    tags=["Twitter Monitoring (Playwright)"],
+    dependencies=[Depends(JWTBearer(validate_subscription=True))],
+)
+
+app.include_router(
     facebook_insights.router,
     prefix="/facebook-insights",
     tags=["Facebook Insights"],
@@ -349,6 +358,12 @@ app.include_router(
 app.include_router(
     webhook.router,
     prefix="/webhooks",
+)
+
+app.include_router(
+    openai_apify_twitter.router,
+    prefix="/openai-apify-twitter",
+    tags=["OpenAI Apify Twitter Integration"],
 )
 
 
