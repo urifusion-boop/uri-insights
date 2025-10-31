@@ -1,0 +1,618 @@
+{
+	"info": {
+		"name": "Uri Lead Generation System V2.0",
+		"description": "Postman collection for testing Uri's real-time lead generation features including Browsercloud integration, WebSocket notifications, and real-time lead processing",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "uri-insights-v2"
+	},
+	"auth": {
+		"type": "bearer",
+		"bearer": [
+			{
+				"key": "token",
+				"value": "{{JWT_TOKEN}}",
+				"type": "string"
+			}
+		]
+	},
+	"variable": [
+		{
+			"key": "BASE_URL",
+			"value": "https://localhost:443",
+			"type": "string"
+		},
+		{
+			"key": "JWT_TOKEN",
+			"value": "your_jwt_token_here",
+			"type": "string"
+		},
+		{
+			"key": "USER_ID",
+			"value": "your_user_id_here",
+			"type": "string"
+		},
+		{
+			"key": "LEAD_FORM_ID",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "BROWSERCLOUD_WEBHOOK_SECRET",
+			"value": "your_webhook_secret_here",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "1. Lead Form Management",
+			"item": [
+				{
+					"name": "Create Person Search Lead Form",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200 || pm.response.code === 201) {",
+									"    const response = pm.response.json();",
+									"    if (response.data && response.data.id) {",
+									"        pm.collectionVariables.set(\"LEAD_FORM_ID\", response.data.id);",
+									"        pm.environment.set(\"LEAD_FORM_ID\", response.data.id);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_id\": \"{{USER_ID}}\",\n  \"form_type\": \"PERSON_SEARCH\",\n  \"keywords\": [\n    \"looking for CRM solution\",\n    \"need customer management tool\",\n    \"seeking sales automation\"\n  ],\n  \"buying_signals\": [\n    \"budget approved\",\n    \"looking to buy\",\n    \"need urgent solution\",\n    \"comparing tools\"\n  ],\n  \"excluded_keywords\": [\n    \"free only\",\n    \"student project\",\n    \"just browsing\"\n  ],\n  \"target_location\": \"United States\",\n  \"enable_realtime_monitoring\": true,\n  \"platforms\": [\"TWITTER\", \"LINKEDIN\", \"FACEBOOK\", \"THREADS\"]\n}"
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/lead-forms/person-search/create",
+							"host": ["{{BASE_URL}}"],
+							"path": ["lead-forms", "person-search", "create"]
+						},
+						"description": "Create a new person search lead form with real-time monitoring enabled across multiple social platforms"
+					},
+					"response": []
+				},
+				{
+					"name": "Create Business Search Lead Form",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_id\": \"{{USER_ID}}\",\n  \"form_type\": \"BUSINESS_SEARCH\",\n  \"keywords\": [\n    \"hiring software developers\",\n    \"need development team\",\n    \"looking for tech talent\"\n  ],\n  \"buying_signals\": [\n    \"immediate hire\",\n    \"project starting soon\",\n    \"budget allocated\"\n  ],\n  \"target_industries\": [\"Technology\", \"Software\", \"SaaS\"],\n  \"target_company_size\": \"50-200\",\n  \"enable_realtime_monitoring\": true\n}"
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/lead-forms/business-search/create",
+							"host": ["{{BASE_URL}}"],
+							"path": ["lead-forms", "business-search", "create"]
+						},
+						"description": "Create a business search lead form for B2B lead generation"
+					},
+					"response": []
+				},
+				{
+					"name": "Create Conversational Search Lead Form",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_id\": \"{{USER_ID}}\",\n  \"form_type\": \"CONVERSATIONAL_SEARCH\",\n  \"conversation_context\": \"Looking for leads interested in project management software with team collaboration features\",\n  \"keywords\": [\n    \"project management\",\n    \"team collaboration\",\n    \"task tracking\"\n  ],\n  \"enable_realtime_monitoring\": true\n}"
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/lead-forms/conversation-search/create",
+							"host": ["{{BASE_URL}}"],
+							"path": ["lead-forms", "conversation-search", "create"]
+						},
+						"description": "Create a conversational lead form using AI-powered context understanding"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Lead Form by ID",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{BASE_URL}}/lead-forms/getById?lead_form_id={{LEAD_FORM_ID}}",
+							"host": ["{{BASE_URL}}"],
+							"path": ["lead-forms", "getById"],
+							"query": [
+								{
+									"key": "lead_form_id",
+									"value": "{{LEAD_FORM_ID}}"
+								}
+							]
+						},
+						"description": "Retrieve a specific lead form configuration"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Lead Forms by User ID",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{BASE_URL}}/lead-forms/getByUserId?user_id={{USER_ID}}",
+							"host": ["{{BASE_URL}}"],
+							"path": ["lead-forms", "getByUserId"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{USER_ID}}"
+								}
+							]
+						},
+						"description": "Get all lead forms for a specific user"
+					},
+					"response": []
+				},
+				{
+					"name": "Update Person Lead Form",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"keywords\": [\n    \"looking for CRM solution\",\n    \"need customer management tool\",\n    \"seeking sales automation\",\n    \"CRM recommendations needed\"\n  ],\n  \"buying_signals\": [\n    \"budget approved\",\n    \"looking to buy\",\n    \"need urgent solution\",\n    \"comparing tools\",\n    \"ready to purchase\"\n  ],\n  \"enable_realtime_monitoring\": true\n}"
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/lead-forms/person-search/update?lead_form_id={{LEAD_FORM_ID}}",
+							"host": ["{{BASE_URL}}"],
+							"path": ["lead-forms", "person-search", "update"],
+							"query": [
+								{
+									"key": "lead_form_id",
+									"value": "{{LEAD_FORM_ID}}"
+								}
+							]
+						},
+						"description": "Update an existing person search lead form"
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Lead Form",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{BASE_URL}}/lead-forms/delete?lead_form_id={{LEAD_FORM_ID}}",
+							"host": ["{{BASE_URL}}"],
+							"path": ["lead-forms", "delete"],
+							"query": [
+								{
+									"key": "lead_form_id",
+									"value": "{{LEAD_FORM_ID}}"
+								}
+							]
+						},
+						"description": "Delete a lead form"
+					},
+					"response": []
+				}
+			],
+			"description": "Endpoints for managing lead forms with real-time monitoring capabilities"
+		},
+		{
+			"name": "2. Browsercloud Webhook (Testing)",
+			"item": [
+				{
+					"name": "Simulate Browsercloud Webhook - Twitter Post",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "X-Browsercloud-Signature",
+								"value": "{{BROWSERCLOUD_WEBHOOK_SECRET}}",
+								"description": "Webhook signature for validation"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"task_id\": \"test-task-123\",\n  \"platform\": \"twitter\",\n  \"results\": [\n    {\n      \"platform\": \"twitter\",\n      \"post_id\": \"1234567890\",\n      \"content\": \"Looking for a good CRM solution for my startup. Need something with sales automation and budget is approved. Any recommendations?\",\n      \"url\": \"https://twitter.com/testuser/status/1234567890\",\n      \"author_name\": \"John Startup\",\n      \"author_handle\": \"@johnstartup\",\n      \"author_url\": \"https://twitter.com/johnstartup\",\n      \"posted_at\": \"2025-10-13T10:30:00Z\",\n      \"engagement_metrics\": {\n        \"likes\": 15,\n        \"retweets\": 3,\n        \"replies\": 8,\n        \"views\": 450\n      },\n      \"matched_keywords\": [\"CRM solution\", \"sales automation\"],\n      \"matched_signals\": [\"budget is approved\"]\n    }\n  ]\n}"
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/webhooks/browsercloud",
+							"host": ["{{BASE_URL}}"],
+							"path": ["webhooks", "browsercloud"]
+						},
+						"description": "Simulate a webhook from Browsercloud with a Twitter post containing lead signals"
+					},
+					"response": []
+				},
+				{
+					"name": "Simulate Browsercloud Webhook - LinkedIn Post",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "X-Browsercloud-Signature",
+								"value": "{{BROWSERCLOUD_WEBHOOK_SECRET}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"task_id\": \"test-task-456\",\n  \"platform\": \"linkedin\",\n  \"results\": [\n    {\n      \"platform\": \"linkedin\",\n      \"post_id\": \"9876543210\",\n      \"content\": \"Our team is comparing different customer management tools. Looking to buy within the next month. What are your experiences with modern CRM systems?\",\n      \"url\": \"https://linkedin.com/posts/sarahmktg-9876543210\",\n      \"author_name\": \"Sarah Marketing\",\n      \"author_handle\": \"sarahmktg\",\n      \"author_url\": \"https://linkedin.com/in/sarahmktg\",\n      \"posted_at\": \"2025-10-13T11:45:00Z\",\n      \"engagement_metrics\": {\n        \"likes\": 42,\n        \"comments\": 18,\n        \"shares\": 5\n      },\n      \"matched_keywords\": [\"customer management tools\", \"CRM systems\"],\n      \"matched_signals\": [\"looking to buy\", \"comparing tools\"]\n    }\n  ]\n}"
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/webhooks/browsercloud",
+							"host": ["{{BASE_URL}}"],
+							"path": ["webhooks", "browsercloud"]
+						},
+						"description": "Simulate a webhook from Browsercloud with a LinkedIn post"
+					},
+					"response": []
+				},
+				{
+					"name": "Simulate Browsercloud Webhook - Multiple Posts",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "X-Browsercloud-Signature",
+								"value": "{{BROWSERCLOUD_WEBHOOK_SECRET}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"task_id\": \"test-task-789\",\n  \"platform\": \"twitter\",\n  \"results\": [\n    {\n      \"platform\": \"twitter\",\n      \"post_id\": \"1111111111\",\n      \"content\": \"Need urgent solution for sales automation. Our current system is failing us.\",\n      \"url\": \"https://twitter.com/urgentuser/status/1111111111\",\n      \"author_name\": \"Mike Sales\",\n      \"author_handle\": \"@mikesales\",\n      \"author_url\": \"https://twitter.com/mikesales\",\n      \"posted_at\": \"2025-10-13T12:00:00Z\",\n      \"engagement_metrics\": {\n        \"likes\": 8,\n        \"retweets\": 2,\n        \"replies\": 5,\n        \"views\": 220\n      },\n      \"matched_keywords\": [\"sales automation\"],\n      \"matched_signals\": [\"need urgent solution\"]\n    },\n    {\n      \"platform\": \"twitter\",\n      \"post_id\": \"2222222222\",\n      \"content\": \"Finally got budget approved for new CRM! Time to research options.\",\n      \"url\": \"https://twitter.com/happycto/status/2222222222\",\n      \"author_name\": \"Jane CTO\",\n      \"author_handle\": \"@janecto\",\n      \"author_url\": \"https://twitter.com/janecto\",\n      \"posted_at\": \"2025-10-13T12:15:00Z\",\n      \"engagement_metrics\": {\n        \"likes\": 25,\n        \"retweets\": 4,\n        \"replies\": 12,\n        \"views\": 580\n      },\n      \"matched_keywords\": [\"CRM\"],\n      \"matched_signals\": [\"budget approved\"]\n    }\n  ]\n}"
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/webhooks/browsercloud",
+							"host": ["{{BASE_URL}}"],
+							"path": ["webhooks", "browsercloud"]
+						},
+						"description": "Simulate a batch webhook with multiple posts from Browsercloud"
+					},
+					"response": []
+				}
+			],
+			"description": "Test endpoints for simulating Browsercloud webhook events. These simulate real-time lead detection from social media platforms."
+		},
+		{
+			"name": "3. Real-time Leads",
+			"item": [
+				{
+					"name": "Get Real-time Leads by User",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{BASE_URL}}/lead/realtime/getByUserId?user_id={{USER_ID}}",
+							"host": ["{{BASE_URL}}"],
+							"path": ["lead", "realtime", "getByUserId"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{USER_ID}}"
+								}
+							]
+						},
+						"description": "Retrieve all real-time leads for a user"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Real-time Leads by Lead Form",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{BASE_URL}}/lead/realtime/getByLeadForm?lead_form_id={{LEAD_FORM_ID}}",
+							"host": ["{{BASE_URL}}"],
+							"path": ["lead", "realtime", "getByLeadForm"],
+							"query": [
+								{
+									"key": "lead_form_id",
+									"value": "{{LEAD_FORM_ID}}"
+								}
+							]
+						},
+						"description": "Get real-time leads for a specific lead form"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Real-time Leads by Platform",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{BASE_URL}}/lead/realtime/getByPlatform?user_id={{USER_ID}}&platform=twitter",
+							"host": ["{{BASE_URL}}"],
+							"path": ["lead", "realtime", "getByPlatform"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{USER_ID}}"
+								},
+								{
+									"key": "platform",
+									"value": "twitter",
+									"description": "Options: twitter, linkedin, facebook, threads"
+								}
+							]
+						},
+						"description": "Filter real-time leads by social media platform"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Recent Real-time Leads",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{BASE_URL}}/lead/realtime/recent?user_id={{USER_ID}}&limit=50&hours=24",
+							"host": ["{{BASE_URL}}"],
+							"path": ["lead", "realtime", "recent"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{USER_ID}}"
+								},
+								{
+									"key": "limit",
+									"value": "50",
+									"description": "Number of leads to return"
+								},
+								{
+									"key": "hours",
+									"value": "24",
+									"description": "Leads from last N hours"
+								}
+							]
+						},
+						"description": "Get the most recent real-time leads within a time window"
+					},
+					"response": []
+				},
+				{
+					"name": "Update Real-time Lead Status",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"status\": \"contacted\",\n  \"metadata\": {\n    \"contacted_at\": \"2025-10-13T14:30:00Z\",\n    \"contacted_via\": \"Twitter DM\",\n    \"notes\": \"Sent personalized message with product demo link\"\n  }\n}"
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/lead/realtime/update?lead_id={{LEAD_ID}}",
+							"host": ["{{BASE_URL}}"],
+							"path": ["lead", "realtime", "update"],
+							"query": [
+								{
+									"key": "lead_id",
+									"value": "{{LEAD_ID}}"
+								}
+							]
+						},
+						"description": "Update the status and metadata of a real-time lead"
+					},
+					"response": []
+				}
+			],
+			"description": "Endpoints for retrieving and managing real-time leads captured from social media monitoring"
+		},
+		{
+			"name": "4. WebSocket Connection (Info)",
+			"item": [
+				{
+					"name": "WebSocket Connection Details",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{BASE_URL}}/",
+							"host": ["{{BASE_URL}}"],
+							"path": [""]
+						},
+						"description": "# WebSocket Real-time Notifications\n\nConnect to WebSocket for real-time lead notifications:\n\n## Connection URL\n```\nwss://your-domain.com/ws/leads?token={{JWT_TOKEN}}&user_id={{USER_ID}}\n```\n\n## Event Types\n\n### 1. New Lead Event\n```json\n{\n  \"event\": \"new_lead\",\n  \"data\": {\n    \"lead_id\": \"uuid\",\n    \"user_id\": \"user123\",\n    \"lead_form_id\": \"form456\",\n    \"source\": {\n      \"platform\": \"twitter\",\n      \"post_url\": \"https://twitter.com/user/status/123\",\n      \"post_content\": \"Looking for CRM...\",\n      \"author_name\": \"John Doe\",\n      \"author_handle\": \"@johndoe\",\n      \"matched_keywords\": [\"CRM\"],\n      \"matched_signals\": [\"budget approved\"]\n    },\n    \"ai_suggested_reply\": \"Hi John! I saw you're looking for...\",\n    \"score\": 0.85,\n    \"created_at\": \"2025-10-13T10:30:00Z\"\n  }\n}\n```\n\n### 2. Lead Updated Event\n```json\n{\n  \"event\": \"lead_updated\",\n  \"data\": {\n    \"lead_id\": \"uuid\",\n    \"status\": \"contacted\",\n    \"updated_at\": \"2025-10-13T11:00:00Z\"\n  }\n}\n```\n\n### 3. Monitoring Status Event\n```json\n{\n  \"event\": \"monitoring_status\",\n  \"data\": {\n    \"lead_form_id\": \"form456\",\n    \"status\": \"active\",\n    \"platforms\": [\"twitter\", \"linkedin\"],\n    \"leads_today\": 12\n  }\n}\n```\n\n## JavaScript Example\n```javascript\nconst ws = new WebSocket(`wss://your-domain.com/ws/leads?token=${token}&user_id=${userId}`);\n\nws.onopen = () => {\n  console.log('Connected to real-time lead notifications');\n};\n\nws.onmessage = (event) => {\n  const message = JSON.parse(event.data);\n  \n  if (message.event === 'new_lead') {\n    // Handle new lead\n    console.log('New lead detected:', message.data);\n    // Update UI, play notification sound, etc.\n  }\n};\n\nws.onerror = (error) => {\n  console.error('WebSocket error:', error);\n};\n\nws.onclose = () => {\n  console.log('Disconnected from notifications');\n};\n```\n\n## Testing with wscat\n```bash\nnpm install -g wscat\nwscat -c \"wss://your-domain.com/ws/leads?token=YOUR_TOKEN&user_id=YOUR_USER_ID\"\n```"
+					},
+					"response": []
+				}
+			],
+			"description": "Information about WebSocket connections for real-time notifications (actual WebSocket testing requires a WebSocket client)"
+		},
+		{
+			"name": "5. Service Health & Monitoring",
+			"item": [
+				{
+					"name": "Health Check",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{BASE_URL}}/service-health/health",
+							"host": ["{{BASE_URL}}"],
+							"path": ["service-health", "health"]
+						},
+						"description": "Check if the service is running"
+					},
+					"response": []
+				},
+				{
+					"name": "Browsercloud Service Status",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{BASE_URL}}/service-health/browsercloud-status",
+							"host": ["{{BASE_URL}}"],
+							"path": ["service-health", "browsercloud-status"]
+						},
+						"description": "Check Browsercloud integration status and active monitoring tasks"
+					},
+					"response": []
+				},
+				{
+					"name": "WebSocket Connection Stats",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{BASE_URL}}/service-health/websocket-stats",
+							"host": ["{{BASE_URL}}"],
+							"path": ["service-health", "websocket-stats"]
+						},
+						"description": "Get statistics about active WebSocket connections"
+					},
+					"response": []
+				},
+				{
+					"name": "Real-time Processing Metrics",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{BASE_URL}}/service-health/processing-metrics?user_id={{USER_ID}}",
+							"host": ["{{BASE_URL}}"],
+							"path": ["service-health", "processing-metrics"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{USER_ID}}"
+								}
+							]
+						},
+						"description": "Get metrics about real-time lead processing performance"
+					},
+					"response": []
+				}
+			],
+			"description": "Endpoints for monitoring system health and performance of V2 features"
+		},
+		{
+			"name": "6. AI Features",
+			"item": [
+				{
+					"name": "Generate AI Response Suggestion",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"lead_id\": \"{{LEAD_ID}}\",\n  \"post_content\": \"Looking for a good CRM solution for my startup. Need something with sales automation and budget is approved.\",\n  \"author_name\": \"John Startup\",\n  \"platform\": \"twitter\",\n  \"context\": {\n    \"product_name\": \"UriCRM\",\n    \"key_features\": [\"sales automation\", \"lead tracking\", \"real-time insights\"],\n    \"tone\": \"friendly and professional\"\n  }\n}"
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/openai/generate-response",
+							"host": ["{{BASE_URL}}"],
+							"path": ["openai", "generate-response"]
+						},
+						"description": "Generate AI-powered response suggestion for a lead"
+					},
+					"response": []
+				},
+				{
+					"name": "Analyze Lead Quality Score",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"post_content\": \"Looking for a CRM solution with budget approved and need to purchase within 2 weeks\",\n  \"matched_keywords\": [\"CRM solution\"],\n  \"matched_signals\": [\"budget approved\", \"purchase within\"],\n  \"engagement_metrics\": {\n    \"likes\": 25,\n    \"retweets\": 5,\n    \"replies\": 10\n  },\n  \"author_followers\": 1500\n}"
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/openai/analyze-lead-quality",
+							"host": ["{{BASE_URL}}"],
+							"path": ["openai", "analyze-lead-quality"]
+						},
+						"description": "Use AI to calculate lead quality score based on multiple factors"
+					},
+					"response": []
+				}
+			],
+			"description": "AI-powered features for lead response generation and quality scoring"
+		},
+		{
+			"name": "7. Testing Scenarios",
+			"item": [
+				{
+					"name": "Complete Flow Test - Create Form & Simulate Lead",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{BASE_URL}}/",
+							"host": ["{{BASE_URL}}"],
+							"path": [""]
+						},
+						"description": "# Complete Testing Flow\n\n## Step 1: Setup\n1. Set your `JWT_TOKEN`, `USER_ID`, and `BROWSERCLOUD_WEBHOOK_SECRET` in collection variables\n2. Ensure your server is running on the configured BASE_URL\n\n## Step 2: Create Lead Form\n1. Run: \"Create Person Search Lead Form\"\n2. The `LEAD_FORM_ID` will be automatically saved\n3. Verify the form was created by running \"Get Lead Form by ID\"\n\n## Step 3: Simulate Real-time Lead Detection\n1. Run: \"Simulate Browsercloud Webhook - Twitter Post\"\n2. This simulates Browsercloud detecting a matching post\n3. The system should:\n   - Validate webhook signature\n   - Process the social media post\n   - Match it against your lead form\n   - Create a real-time lead\n   - Send WebSocket notification (if connected)\n   - Generate AI response suggestion\n\n## Step 4: Retrieve Real-time Leads\n1. Run: \"Get Real-time Leads by User\"\n2. Verify the lead was created from the webhook\n3. Check the AI-generated response suggestion\n4. Review matched keywords and buying signals\n\n## Step 5: Update Lead Status\n1. Copy a `lead_id` from the previous response\n2. Set it as `LEAD_ID` variable\n3. Run: \"Update Real-time Lead Status\"\n4. Mark the lead as contacted with notes\n\n## Step 6: Test Multiple Platforms\n1. Run: \"Simulate Browsercloud Webhook - LinkedIn Post\"\n2. Run: \"Simulate Browsercloud Webhook - Multiple Posts\"\n3. Run: \"Get Real-time Leads by Platform\" for each platform\n\n## Step 7: Monitor System Health\n1. Run: \"Health Check\"\n2. Run: \"Browsercloud Service Status\"\n3. Run: \"Real-time Processing Metrics\"\n4. Verify all systems are operational\n\n## Expected Results\n- ✅ Lead form created successfully\n- ✅ Webhook processed without errors\n- ✅ Real-time leads created instantly\n- ✅ AI response suggestions generated\n- ✅ Lead quality scores calculated\n- ✅ Status updates work correctly\n- ✅ All health checks pass\n\n## WebSocket Testing (Optional)\n1. Use wscat or a WebSocket client\n2. Connect to: `wss://your-domain/ws/leads?token={{JWT_TOKEN}}&user_id={{USER_ID}}`\n3. Trigger webhook simulation\n4. Observe real-time notification\n\n## Performance Expectations (V2 Improvements)\n- Lead detection: **Instant** (vs 10-12 hour delay in V1)\n- Notification delivery: **< 1 second**\n- AI response generation: **2-3 seconds**\n- Webhook processing: **< 500ms**"
+					},
+					"response": []
+				}
+			],
+			"description": "Step-by-step testing scenarios and complete workflow testing"
+		}
+	]
+}

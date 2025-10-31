@@ -259,14 +259,13 @@ async def get_tweets(
 async def get_tweet_by_id(
     tweet_id: str,
     access_token: str = Depends(get_x_access_token),
-    params: Optional[SingleTweetParams] = Depends(),
     db: AsyncIOMotorDatabase = Depends(get_db_dependency),
 ):
     """
     Fetch details for a single Tweet by its ID using the Tweet Lookup API.
     """
     response = await TweetLookupService.get_tweet_by_id(
-        db, tweet_id, params, access_token
+        db, tweet_id, None, access_token
     )
     return UriResponse.get_status_response(
         response=response, status_code=response["responseCode"]

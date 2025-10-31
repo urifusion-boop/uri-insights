@@ -74,11 +74,17 @@ from app.services.azure.producers.ExceptionLogProducer import (
 from app.services.uri_microservices.UriTaskManagerService import UriTaskManagerService
 
 
+from app.services.BrowsercloudService import BrowsercloudService
+from app.services.RealtimeLeadProcessor import RealtimeLeadProcessor
+
 class LeadService:
     PLATFORM_SCRAPERS: dict[str, LeadDataScraper] = {
         "google": GoogleLeadDataScraper(),
         "twitter": TwitterLeadDataScraper(),
     }
+    
+    browsercloud_service = BrowsercloudService()
+    realtime_processor = RealtimeLeadProcessor()
 
     @staticmethod
     async def delete_lead(db: AsyncIOMotorDatabase, lead_id: str):
@@ -608,21 +614,58 @@ class LeadService:
         )
 
     @staticmethod
+    async def start_realtime_monitoring(db: AsyncIOMotorDatabase, lead_form: dict) -> dict:
+        """Start real-time monitoring for a conversational lead form using Browsercloud."""
+        try:
+            keywords = lead_form.get("keywords", [])
+            buying_signals = lead_form.get("buying_signals", [])
+            excluded_keywords = lead_form.get("excluded_keywords", [])
+            location = lead_form.get("location")
+
+            # Start monitoring tasks for all platforms
+            tasks = await LeadService.browsercloud_service.start_platform_monitoring(
+                keywords=keywords,
+                buying_signals=buying_signals,
+                excluded_keywords=excluded_keywords,
+                location=location
+            )
+
+            return {
+                "status": True,
+                "message": "Real-time monitoring started successfully",
+                "tasks": [task.dict() for task in tasks]
+            }
+        except Exception as e:
+            return {
+                "status": False,
+                "message": f"Failed to start real-time monitoring: {str(e)}"
+            }
+
+    @staticmethod
     async def generate_conversational_leads_background_job(db: AsyncIOMotorDatabase):
+        """Now handles both real-time and legacy conversational leads."""
         async for batch in LeadFormRepository.fetch_lead_forms_in_batches(
             db=db, filter={"form_type": LeadFormTypeEnum.CONVERSATIONAL.value}
         ):
-            tasks = [
+            # Start real-time monitoring for each form
+            monitoring_tasks = [
+                LeadService.start_realtime_monitoring(db, lead_form)
+                for lead_form in batch
+                if lead_form.get("auto_generate", False)
+            ]
+
+            # Process existing pre-stored leads
+            legacy_tasks = [
                 LeadService.expose_pre_stored_leads(db, lead_form.get("user_id", ""))
                 for lead_form in batch
             ]
 
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+            results = await asyncio.gather(*(monitoring_tasks + legacy_tasks), return_exceptions=True)
 
+            # Handle errors
             for lead_form, result in zip(batch, results):
                 if isinstance(result, Exception):
                     user_id = lead_form.get("user_id", "")
-
                     log_data = {
                         "userId": user_id,
                         "exceptionDate": datetime.utcnow().isoformat(),

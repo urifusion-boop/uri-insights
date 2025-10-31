@@ -2,8 +2,8 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    MONGODB_USER: str
-    MONGODB_PASSWORD: str
+    MONGODB_USER: str = ""
+    MONGODB_PASSWORD: str = ""
     MONGODB_HOST: str
     MONGODB_DB: str
     MONGODB_URI: str
@@ -64,9 +64,23 @@ class Settings(BaseSettings):
     URI_CLIENT_SECRET: str
     SSL_KEY_PATH: str
     SSL_CERT_PATH: str
+    
+    # Browsercloud Configuration
+    BROWSERCLOUD_API_KEY: str
+    BROWSERCLOUD_API_URL: str = "https://api.browsercloud.io"
+    BROWSERCLOUD_WEBHOOK_SECRET: str
+    BROWSERCLOUD_MAX_CONCURRENT_TASKS: int = 10
+
+    # Twitter Monitoring with Playwright
+    TWITTER_USERNAME: str = ""
+    TWITTER_PASSWORD: str = ""
+    
+    # Apify Configuration
+    APIFY_API_TOKEN: str = ""
 
     class Config:
         env_file = ".env"
+        extra = "ignore"  # Allow extra fields to be ignored
 
 
 settings = Settings()
