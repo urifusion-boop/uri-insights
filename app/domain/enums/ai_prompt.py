@@ -556,7 +556,7 @@ class LeadFormAutoPopulateEnum(Enum):
     """
 
     CONVERSATIONAL_FORM_PROMPT = """
-        You are a search term generation and social listening assistant. A user has described what they want to find or monitor online. Your job is to extract intent-agnostic, high-quality search parameters that can be used across any use case (e.g., sales, hiring, partnership, research, marketing, events).
+        You are a search term generation and social listening assistant with expertise in identifying buying intent. A user has described what they want to find or monitor online. Your job is to extract intent-agnostic, high-quality search parameters that can be used across any use case (e.g., sales, hiring, partnership, research, marketing, events).
 
         Based on the user's description, return structured parameters to populate a Conversational Lead form for tracking relevant social media discussions.
 
@@ -575,21 +575,31 @@ class LeadFormAutoPopulateEnum(Enum):
             "location": ["<city or region>", "..."],  
             // Only include if explicitly specified or confidently inferred.
             "buying_signals": ["<string>", "..."],  
-            // Optional; use when the user implies interest or intent cues relevant to their goal.
-            "excluded_keywords": ["<string>", "..."] ,
+            // CRITICAL: Include phrases that indicate DIRECT INTENT such as: "looking for", "need help with", "recommendations for", "anyone know", "searching for", "can someone suggest", "who provides", "best solution for", "help me find", etc.
+            // Also include IMPLIED INTENT signals: "struggling with", "frustrated by", "wish I had", "tired of", "problem with", "doesn't work", "need better", "outgrown", etc.
+            "excluded_keywords": ["<string>", "..."],
+            // Include spam indicators: "buy followers", "click here", "limited time", generic promotional language
             "add_to_history": <boolean>,
             "auto_generate": <boolean>
         }}
 
-        ### Rules:
-        - Keep keywords concise and specific; avoid overly generic terms (e.g., "news", "content").
-        - Include obvious synonyms or related phrases if they improve coverage.
-        - Prefer named entities (brands, products, roles, technologies) when relevant.
-        - Deduplicate entries; do not include repeated values.
-        - Do not bias toward any single scenario (e.g., hiring or sales) unless the user clearly indicates it.
-        - If the intent is ambiguous, set "intent_type" to "other" and focus on strong keywords.
-
-        The JSON above is a guide; always return an object that reflects the user's preferences and is optimized for effective conversation tracking.
+        ### Enhanced Rules for Intent Detection:
+        - **Keywords**: Must be specific to the product/service category, not just industry buzzwords
+        - **Buying Signals**: Focus on action-oriented phrases that show someone is actively looking or has a pain point
+        - **Direct Intent Examples**: "looking for [X]", "need [X]", "recommend [X]", "best [X] for [Y]"
+        - **Implied Intent Examples**: "struggling with [problem]", "wish I could [desired outcome]", "tired of [current solution]"
+        - **Exclude Generic Terms**: Avoid "news", "update", "announcement" unless they indicate a specific need
+        - **Competition Awareness**: If competitors mentioned, include phrases like "alternative to [competitor]", "better than [competitor]"
+        - **Question Patterns**: Include question-based signals: "what's the best", "how do I", "where can I find"
+        
+        ### Intent Type Guidance:
+        - **Sales**: User wants to find people buying/seeking products or services
+        - **Hiring**: User wants to find talent, contractors, or service providers
+        - **Partnership**: User wants to find potential collaborators or co-marketing opportunities
+        - **Research**: User wants to monitor trends, sentiment, or industry discussions
+        - **Marketing**: User wants to identify brand mentions or engagement opportunities
+        
+        The JSON above is a guide; always return an object that reflects the user's preferences and is optimized for effective conversation tracking with strong intent signals.
         Populate location only when specified or confidently inferred from the request.
     """
 
@@ -653,13 +663,66 @@ class LeadFollowUpMessagePromptEnum(Enum):
         - Lead Post: {lead_post}
 
         Task:
-        Generate a concise, professional, and persuasive response to the lead’s post.
+        Generate a concise, professional, and persuasive response to the lead's post.
         Your response should:
-        - Directly address the need expressed in the lead’s post.
-        - Clearly present how the business’s product/service solves their problem.
+        - Directly address the need expressed in the lead's post.
+        - Clearly present how the business's product/service solves their problem.
         - Encourage the lead to take the next step (e.g., contact sales, schedule a call, sign up).
         - Sound natural and human, not generic or templated.
         - Must not be more than 2 sentences.
 
         Output only the message text that the business could send to the lead.
+    """
+
+
+class LeadIntentScoringPromptEnum(Enum):
+    INTENT_ANALYSIS = """
+You are an expert lead qualification analyst. Analyze this social media post/content to determine if it represents a genuine lead opportunity.
+
+BUSINESS CONTEXT:
+{business_summary}
+
+TARGET KEYWORDS: {keywords}
+BUYING SIGNALS: {buying_signals}
+INTENT TYPE: {intent_type}
+
+LEAD CONTENT:
+{lead_content}
+
+ANALYSIS REQUIREMENTS:
+1. Determine intent type:
+   - DIRECT: Explicitly seeking product/service, asking for recommendations, expressing immediate need
+     Examples: "looking for", "need help with", "can someone recommend", "what's the best"
+   - IMPLIED: Discussing pain points or problems that suggest future need
+     Examples: "struggling with", "frustrated by", "wish I had", "current solution doesn't"
+   - NONE: Just mentioning keywords casually, no actual purchase or interest intent
+
+2. Score relevance from 0.0 to 1.0:
+   - 0.9-1.0: Perfect match - clear, explicit buying intent or urgent pain point
+   - 0.7-0.89: Strong match - probable interest, good fit with business offering
+   - 0.5-0.69: Moderate match - some relevance but unclear commitment
+   - 0.3-0.49: Weak match - tangential mention only
+   - 0.0-0.29: Poor match - irrelevant or spam
+
+3. Critical Filters (automatic 0.0-0.2 score):
+   - Bot/spam content (repetitive, promotional language)
+   - News articles or announcements (no personal need expressed)
+   - Complaints about unrelated products
+   - Generic industry chatter without specific need
+   - Job postings (unless intent_type is "hiring")
+
+4. Buying Stage Assessment:
+   - DECISION: Ready to buy, comparing options, asking for demos
+   - CONSIDERATION: Researching solutions, evaluating alternatives
+   - AWARENESS: Just discovered problem, exploring options
+   - NONE: No buying journey evident
+
+Respond ONLY with valid JSON:
+{{
+    "score": 0.85,
+    "intent_type": "direct|implied|none",
+    "reasoning": "Brief explanation focusing on why this is/isn't a qualified lead",
+    "buying_stage": "decision|consideration|awareness|none",
+    "red_flags": ["list any spam/bot indicators if present"]
+}}
     """

@@ -76,6 +76,7 @@ from app.services.uri_microservices.UriTaskManagerService import UriTaskManagerS
 
 from app.services.BrowsercloudService import BrowsercloudService
 from app.services.RealtimeLeadProcessor import RealtimeLeadProcessor
+from app.services.LeadIntentAnalyzer import LeadIntentAnalyzer
 
 class LeadService:
     PLATFORM_SCRAPERS: dict[str, LeadDataScraper] = {
@@ -85,6 +86,7 @@ class LeadService:
     
     browsercloud_service = BrowsercloudService()
     realtime_processor = RealtimeLeadProcessor()
+    intent_analyzer = LeadIntentAnalyzer()
 
     @staticmethod
     async def delete_lead(db: AsyncIOMotorDatabase, lead_id: str):
@@ -536,13 +538,39 @@ class LeadService:
         if not leads_to_create:
             print("No leads found with your search criteria.")
             return
+        
+        # Apply AI intent filtering for Apollo leads
+        print(f"Applying AI filter to {len(leads_to_create)} Apollo leads...")
+        business_context = {
+            "business_summary": lead_form.get("form_title", "") + " lead search",
+            "keywords": lead_form.get("person_titles", []) or lead_form.get("q_keywords", "").split() or [],
+            "buying_signals": [],
+            "intent_type": lead_form_type.lower(),
+            "ai_response_guide": "",
+        }
+        
+        # Convert leads to dicts for filtering
+        leads_as_dicts = [lead.dict() for lead in leads_to_create]
+        filtered_leads_dicts = await LeadService.intent_analyzer.analyze_lead_batch(
+            leads_as_dicts, business_context, threshold=0.5  # Lower threshold for Apollo leads
+        )
+        
+        # Convert back to LeadCreate objects
+        filtered_leads = [LeadCreate(**lead) for lead in filtered_leads_dicts]
+        
+        print(f"AI Filter: {len(filtered_leads)}/{len(leads_to_create)} Apollo leads passed relevance check")
+        
+        if not filtered_leads:
+            print("No relevant leads after AI filtering.")
+            return
+        
         print("Creating new leads......")
         response = await LeadRepository.multiple_create_leads(
             db=db,
             leads=(
-                leads_to_create[:limit_available]
+                filtered_leads[:limit_available]
                 if limit_available
-                else leads_to_create
+                else filtered_leads
             ),
         )
         leads_count = len(response.get("responseData", {}).get("leads", []))
@@ -840,28 +868,48 @@ class LeadService:
         """
         Given a list of LeadCreate objects, generate follow-up messages
         concurrently and return only valid leads with follow-ups attached.
+        Now includes AI-powered intent filtering to automatically remove irrelevant leads.
         """
         lead_form_copy = lead_form.copy()
         for key, value in lead_form_copy.items():
             if isinstance(value, datetime):
                 del lead_form[key]
 
-        print("Lead form: ", lead_form)
+        print(f"Processing {len(leads)} leads with AI intent filter...")
         
+        # Step 1: AI-powered intent filtering
+        business_context = {
+            "business_summary": lead_form.get("business_summary", ""),
+            "keywords": lead_form.get("keywords", []),
+            "buying_signals": lead_form.get("buying_signals", []),
+            "intent_type": lead_form.get("intent_type", "sales"),
+            "ai_response_guide": lead_form.get("ai_response_guide", ""),
+        }
+        
+        # Filter leads by AI relevance (only keeps leads scoring >= 0.65)
+        filtered_leads = await LeadService.intent_analyzer.analyze_lead_batch(
+            leads, business_context
+        )
+        
+        print(f"AI Filter: {len(filtered_leads)}/{len(leads)} leads passed relevance threshold")
+        
+        # Step 2: Generate follow-up messages for qualified leads
         follow_up_tasks = [
-            LeadService.generate_follow_up_message(lead, lead_form) for lead in leads
+            LeadService.generate_follow_up_message(lead, lead_form) 
+            for lead in filtered_leads
         ]
         follow_up_results = await asyncio.gather(
             *follow_up_tasks, return_exceptions=True
         )
 
-        print("Follow up results: ", follow_up_results)
-
+        # Step 3: Create final lead objects with all enrichments
         ready_leads = []
-        for lead, follow_up in zip(leads, follow_up_results):
+        for lead, follow_up in zip(filtered_leads, follow_up_results):
             if not isinstance(follow_up, Exception):
                 lead_to_create = LeadCreate(**lead)
                 lead_to_create.follow_up_message = follow_up
                 ready_leads.append(lead_to_create)
+            else:
+                print(f"Error generating follow-up for lead: {follow_up}")
 
         return ready_leads

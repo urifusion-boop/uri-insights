@@ -72,6 +72,11 @@ class LeadBase(BaseModel):
     follow_up_approach: Optional[str] = (
         None  # Best approach for following up (e.g., Email, LinkedIn)
     )
+    # AI-powered filtering and scoring fields
+    ai_relevance_score: Optional[float] = None  # 0.0-1.0 relevance score from AI analysis
+    intent_type: Optional[str] = None  # "direct", "implied", "none" - type of buying intent
+    match_reasoning: Optional[str] = None  # AI explanation of why this lead matches
+    buying_stage: Optional[str] = None  # "awareness", "consideration", "decision", "none"
     starred: bool = False
     lead_type: LeadFormTypeEnum = LeadFormTypeEnum.BUSINESS
     emailed: bool = False
@@ -139,6 +144,11 @@ class LeadUpdate(BaseModel):
     follow_up_approach: Optional[str] = (
         None  # Best approach for following up (e.g., Email, LinkedIn)
     )
+    # AI-powered filtering and scoring fields
+    ai_relevance_score: Optional[float] = None  # 0.0-1.0 relevance score from AI analysis
+    intent_type: Optional[str] = None  # "direct", "implied", "none" - type of buying intent
+    match_reasoning: Optional[str] = None  # AI explanation of why this lead matches
+    buying_stage: Optional[str] = None  # "awareness", "consideration", "decision", "none"
     emailed: Optional[bool] = None
     called: Optional[bool] = None
     apollo_id: Optional[str] = None
