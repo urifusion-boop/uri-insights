@@ -382,6 +382,7 @@ class LeadService:
             leads_to_create = await LeadService._attach_follow_ups(
                 lead_objs, conversational_lead_form[0]
             )
+
         else:
             leads_to_create = [LeadCreate(**lead) for lead in loaded_leads]
 
@@ -808,9 +809,18 @@ class LeadService:
     async def generate_follow_up_message(lead: dict, lead_form: dict) -> str:
         ai_response_guide = lead_form.get("ai_response_guide")
 
+        def safe_dumps(obj):
+            try:
+                return json.dumps(obj, default=str, ensure_ascii=False)
+            except Exception as e:
+                print(f"JSON serialization failed: {e}")
+                return {}  # fallback to empty object if it really fails
+
         if ai_response_guide:
-            prompt = ai_response_guide + json.dumps(lead) + json.dumps(lead_form)
+            print("AI response guide is present.")
+            prompt = ai_response_guide + safe_dumps(lead) + safe_dumps(lead_form)
         else:
+            print("AI response guide is not present.")
             prompt = LeadFollowUpMessagePromptEnum.LEAD_CAPTURE.value.format(
                 business_info=lead_form, lead_post=lead
             )
@@ -831,15 +841,21 @@ class LeadService:
         Given a list of LeadCreate objects, generate follow-up messages
         concurrently and return only valid leads with follow-ups attached.
         """
-        del lead_form["created_date"]
-        del lead_form["last_updated"]
-        del lead_form["next_generation_date"]
+        lead_form_copy = lead_form.copy()
+        for key, value in lead_form_copy.items():
+            if isinstance(value, datetime):
+                del lead_form[key]
+
+        print("Lead form: ", lead_form)
+        
         follow_up_tasks = [
             LeadService.generate_follow_up_message(lead, lead_form) for lead in leads
         ]
         follow_up_results = await asyncio.gather(
             *follow_up_tasks, return_exceptions=True
         )
+
+        print("Follow up results: ", follow_up_results)
 
         ready_leads = []
         for lead, follow_up in zip(leads, follow_up_results):

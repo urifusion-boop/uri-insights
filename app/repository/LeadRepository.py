@@ -257,6 +257,9 @@ class LeadRepository:
 
         for lead in leads:
             lead_data = lead.dict()
+            # Generate lead_id if not present
+            if not lead_data.get("lead_id"):
+                lead_data["lead_id"] = str(ObjectId())
             lead_data["created_date"] = datetime.utcnow().isoformat()
             lead_data["last_updated"] = datetime.utcnow().isoformat()
             lead_data["username"] = LeadHelper.cleanup_lead_username(lead.username)

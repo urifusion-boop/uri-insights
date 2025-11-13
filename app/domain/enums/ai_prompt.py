@@ -556,26 +556,41 @@ class LeadFormAutoPopulateEnum(Enum):
     """
 
     CONVERSATIONAL_FORM_PROMPT = """
-        You are a social listening and lead intelligence assistant. A user has described the kind of online conversations they are interested in monitoring, which could reveal potential leads.
+        You are a search term generation and social listening assistant. A user has described what they want to find or monitor online. Your job is to extract intent-agnostic, high-quality search parameters that can be used across any use case (e.g., sales, hiring, partnership, research, marketing, events).
 
-        Based on the user's description, extract structured parameters to populate a Conversational Lead form for tracking relevant social media discussions.
+        Based on the user's description, return structured parameters to populate a Conversational Lead form for tracking relevant social media discussions.
 
         ### User Input:
         {data}
 
-        Return a JSON object focused on CONVERSATIONAL lead tracking:
+        ### Output JSON (intent-agnostic):
         {{
             "form_title": "<string>",
+            "form_type": "CONVERSATIONAL",
+            "intent_type": "<string>",  
+            // One of: "sales", "hiring", "partnership", "research", "marketing", "support", "event", "other" — infer from the input.
             "keywords": ["<string>", "..."],
             "competitors": ["<string>", "..."],
             "ai_response_guide": "<string>",
-            "location": "<string>",
-            "buying_signals": "<string>",
-            "excluded_keywords": "<string>"
+            "location": ["<city or region>", "..."],  
+            // Only include if explicitly specified or confidently inferred.
+            "buying_signals": ["<string>", "..."],  
+            // Optional; use when the user implies interest or intent cues relevant to their goal.
+            "excluded_keywords": ["<string>", "..."] ,
+            "add_to_history": <boolean>,
+            "auto_generate": <boolean>
         }}
 
-        The JSON object above only serves as an example. Always return an object that reflects the user's preferences and is optimized for effective conversation tracking.
-        Fields like location should only be populated if the user specifies a location, or you can infer the user's location from their request
+        ### Rules:
+        - Keep keywords concise and specific; avoid overly generic terms (e.g., "news", "content").
+        - Include obvious synonyms or related phrases if they improve coverage.
+        - Prefer named entities (brands, products, roles, technologies) when relevant.
+        - Deduplicate entries; do not include repeated values.
+        - Do not bias toward any single scenario (e.g., hiring or sales) unless the user clearly indicates it.
+        - If the intent is ambiguous, set "intent_type" to "other" and focus on strong keywords.
+
+        The JSON above is a guide; always return an object that reflects the user's preferences and is optimized for effective conversation tracking.
+        Populate location only when specified or confidently inferred from the request.
     """
 
 
