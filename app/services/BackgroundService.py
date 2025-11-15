@@ -25,14 +25,10 @@ class BackgroundService:
             replace_existing=False,
         )
 
-        # TODO: TESTING MODE - Change to minutes=1 for testing, then back to hours=1
-        # Testing: runs every 1 minute | Production: runs every 1 hour
-        testing_mode = settings.ENV.lower() != "production"
-
         scheduler.add_job(
             func=LeadService.fetch_and_save_conversational_twitter_leads,
             trigger="interval",
-            minutes=1 if testing_mode else 60,  # 1 min for testing, 60 min for production
+            hours=1,
             kwargs={"db": db},
             id="conversational_twitter_fetch_job",
             replace_existing=False,

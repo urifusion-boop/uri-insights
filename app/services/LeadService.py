@@ -175,54 +175,30 @@ class LeadService:
         if not user_id or not keywords:
             return
 
-        # Try to get user's subscription plan from Task Manager
+        # Get user's subscription plan from Task Manager
         feature_limit_response = await UriTaskManagerService.get_user_feature_limit(
             user_id
         )
 
-        # TODO: TESTING MODE - Allow testing without Task Manager service
-        testing_mode = settings.ENV.lower() != "production"
-
         if not feature_limit_response or not feature_limit_response.get("status"):
-            if testing_mode:
-                # In testing mode, use mock data if Task Manager is unavailable
-                print(f"⚠️  Task Manager unavailable in testing mode - using mock plan")
-                # You can override this by setting a test plan in the form's settings
-                mock_plan = lead_form.get("settings", {}).get("test_subscription_plan", "STANDARD")
-                plan = mock_plan
-            else:
-                # In production, Task Manager is required
-                return
-        else:
-            fl_data = feature_limit_response.get("responseData", {}).get("data", {})
-            plan = (
-                fl_data.get("subscriptionPlan")
-                or feature_limit_response.get("responseData", {}).get("subscriptionPlan")
-                or "STANDARD"
-            )
+            # Task Manager is required - skip if unavailable
+            return
+
+        fl_data = feature_limit_response.get("responseData", {}).get("data", {})
+        plan = (
+            fl_data.get("subscriptionPlan")
+            or feature_limit_response.get("responseData", {}).get("subscriptionPlan")
+            or "STANDARD"
+        )
         plan_upper = str(plan).upper()
 
-        # TODO: TESTING MODE - Remove after testing
-        # Reduced intervals for testing (minutes instead of hours)
-        testing_mode = settings.ENV.lower() != "production"
-
-        if testing_mode:
-            # Testing intervals in MINUTES
-            if plan_upper == "BUSINESS" or plan_upper == "LEAD_ONLY":
-                max_tweets, interval_minutes = 5, 2  # 5 tweets every 2 minutes
-            elif plan_upper == "PROFESSIONAL":
-                max_tweets, interval_minutes = 4, 4  # 4 tweets every 4 minutes
-            else:
-                max_tweets, interval_minutes = 3, 6  # 3 tweets every 6 minutes (STANDARD)
-            interval_hours = interval_minutes / 60  # Convert to hours for timedelta
+        # Set intervals based on subscription plan
+        if plan_upper == "BUSINESS" or plan_upper == "LEAD_ONLY":
+            max_tweets, interval_hours = 40, 1
+        elif plan_upper == "PROFESSIONAL":
+            max_tweets, interval_hours = 30, 3
         else:
-            # Production intervals in HOURS
-            if plan_upper == "BUSINESS" or plan_upper == "LEAD_ONLY":
-                max_tweets, interval_hours = 40, 1
-            elif plan_upper == "PROFESSIONAL":
-                max_tweets, interval_hours = 30, 3
-            else:
-                max_tweets, interval_hours = 20, 7
+            max_tweets, interval_hours = 20, 7
 
         settings_obj = lead_form.get("settings", {})
         tw_settings = settings_obj.get("conversational_twitter_fetch", {})
