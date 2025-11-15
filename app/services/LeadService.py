@@ -62,6 +62,9 @@ from app.services.FileExportService import FileExportService
 from app.domain.enums.lead_enum import (
     LeadInterestLevelEnum,
     LeadsProcessedStatus,
+    LeadSourceEnum,
+    LeadStatusEnum,
+    LeadOpportunityTypeEnum,
 )
 from app.domain.schemas.lead_schema import LeadCreate
 from app.services.LeadExporterService import LeadExporter
@@ -72,6 +75,7 @@ from app.services.azure.producers.ExceptionLogProducer import (
     ExceptionLogQueueProducerService,
 )
 from app.services.uri_microservices.UriTaskManagerService import UriTaskManagerService
+from app.services.OpenAIApifyTwitterService import OpenAIApifyTwitterService
 
 
 from app.services.BrowsercloudService import BrowsercloudService
@@ -150,6 +154,159 @@ class LeadService:
         except Exception as e:
             print(f"Error while regenerating lead follow-up message: {e}")
             return None
+
+    @staticmethod
+    async def fetch_and_save_conversational_twitter_leads(db: AsyncIOMotorDatabase):
+        async for batch in LeadFormRepository.fetch_lead_forms_in_batches(
+            db=db, filter={"form_type": LeadFormTypeEnum.CONVERSATIONAL.value}
+        ):
+            tasks = [
+                LeadService._process_conversational_twitter_fetch(db, lead_form)
+                for lead_form in batch
+            ]
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    @staticmethod
+    async def _process_conversational_twitter_fetch(
+        db: AsyncIOMotorDatabase, lead_form: dict
+    ):
+        user_id = lead_form.get("user_id", "")
+        keywords = lead_form.get("keywords", [])
+        if not user_id or not keywords:
+            return
+
+        # Try to get user's subscription plan from Task Manager
+        feature_limit_response = await UriTaskManagerService.get_user_feature_limit(
+            user_id
+        )
+
+        # TODO: TESTING MODE - Allow testing without Task Manager service
+        testing_mode = settings.ENV.lower() != "production"
+
+        if not feature_limit_response or not feature_limit_response.get("status"):
+            if testing_mode:
+                # In testing mode, use mock data if Task Manager is unavailable
+                print(f"⚠️  Task Manager unavailable in testing mode - using mock plan")
+                # You can override this by setting a test plan in the form's settings
+                mock_plan = lead_form.get("settings", {}).get("test_subscription_plan", "STANDARD")
+                plan = mock_plan
+            else:
+                # In production, Task Manager is required
+                return
+        else:
+            fl_data = feature_limit_response.get("responseData", {}).get("data", {})
+            plan = (
+                fl_data.get("subscriptionPlan")
+                or feature_limit_response.get("responseData", {}).get("subscriptionPlan")
+                or "STANDARD"
+            )
+        plan_upper = str(plan).upper()
+
+        # TODO: TESTING MODE - Remove after testing
+        # Reduced intervals for testing (minutes instead of hours)
+        testing_mode = settings.ENV.lower() != "production"
+
+        if testing_mode:
+            # Testing intervals in MINUTES
+            if plan_upper == "BUSINESS" or plan_upper == "LEAD_ONLY":
+                max_tweets, interval_minutes = 5, 2  # 5 tweets every 2 minutes
+            elif plan_upper == "PROFESSIONAL":
+                max_tweets, interval_minutes = 4, 4  # 4 tweets every 4 minutes
+            else:
+                max_tweets, interval_minutes = 3, 6  # 3 tweets every 6 minutes (STANDARD)
+            interval_hours = interval_minutes / 60  # Convert to hours for timedelta
+        else:
+            # Production intervals in HOURS
+            if plan_upper == "BUSINESS" or plan_upper == "LEAD_ONLY":
+                max_tweets, interval_hours = 40, 1
+            elif plan_upper == "PROFESSIONAL":
+                max_tweets, interval_hours = 30, 3
+            else:
+                max_tweets, interval_hours = 20, 7
+
+        settings_obj = lead_form.get("settings", {})
+        tw_settings = settings_obj.get("conversational_twitter_fetch", {})
+        last_fetched_at = tw_settings.get("last_fetched_at")
+        should_fetch = True
+        if last_fetched_at:
+            try:
+                last_dt = datetime.fromisoformat(last_fetched_at)
+                should_fetch = datetime.utcnow() - last_dt >= timedelta(
+                    hours=interval_hours
+                )
+            except Exception:
+                should_fetch = True
+
+        if not should_fetch:
+            return
+
+        service = OpenAIApifyTwitterService()
+        keyword = keywords[0]
+        result = await service.fetch_tweets_with_analysis(
+            keyword=keyword, max_tweets=max_tweets, analyze_sentiment=False
+        )
+        if not result or not result.get("success"):
+            return
+
+        tweets = result.get("tweets", [])
+        leads_to_create: List[LeadCreate] = []
+        for t in tweets:
+            # Parse Twitter date format: 'Sat Nov 15 16:00:13 +0000 2025'
+            created_at_str = t.get("created_at")
+            if created_at_str:
+                try:
+                    # Twitter uses this format: '%a %b %d %H:%M:%S %z %Y'
+                    created_dt = datetime.strptime(created_at_str, '%a %b %d %H:%M:%S %z %Y')
+                    created_iso = created_dt.isoformat()
+                except Exception:
+                    # Fallback to current time if parsing fails
+                    created_iso = datetime.utcnow().isoformat()
+            else:
+                created_iso = datetime.utcnow().isoformat()
+
+            leads_to_create.append(
+                LeadCreate(
+                    first_name=t.get("author") or "Twitter User",
+                    last_name=None,
+                    username=t.get("author") or "",
+                    mention=t.get("text") or "",
+                    lead_reason=t.get("text") or "",
+                    lead_status=LeadStatusEnum.NEW,
+                    opportunity_type=LeadOpportunityTypeEnum.OTHER,
+                    tags=[],
+                    twitter_url=t.get("url") or None,
+                    lead_link=t.get("url") or None,
+                    social_profile_link=t.get("url") or None,
+                    picture_url=None,
+                    created_date=created_iso,
+                    last_updated=created_iso,
+                    lead_type=LeadFormTypeEnum.CONVERSATIONAL,
+                    website_url=t.get("url") or None,
+                    lead_source=LeadSourceEnum.X,
+                    assigned_to=user_id,
+                    starred=False,
+                )
+            )
+
+        if leads_to_create:
+            await LeadRepository.multiple_create_leads(db, leads_to_create)
+
+        update_payload = {
+            "settings.conversational_twitter_fetch": {
+                "last_fetched_at": datetime.utcnow().isoformat(),
+                "last_fetch_count": len(tweets),
+                "keyword": keyword,
+                "interval_hours": interval_hours,
+                "max_tweets": max_tweets,
+                "plan": plan_upper,
+            }
+        }
+        await db[LeadFormRepository.COLLECTION_NAME].update_one(
+            {
+                "lead_form_id": lead_form.get("lead_form_id"),
+            },
+            {"$set": update_payload},
+        )
 
     @staticmethod
     async def generate_leads_background_job(
