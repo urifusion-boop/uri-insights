@@ -37,7 +37,10 @@ class OpenAIApifyTiktokService:
 
     async def _fetch_posts_from_apify(self, keyword: str, max_posts: int) -> Dict[str, Any]:
         try:
-            run_input = {"searchTerms": [keyword], "maxItems": max_posts}
+            run_input = {
+                "hashtags": [keyword] if not keyword.startswith("#") else [keyword[1:]],
+                "resultsPerPage": max_posts
+            }
             run = self.apify_client.actor("clockworks/tiktok-scraper").call(run_input=run_input)
             if run.get("status") != "SUCCEEDED":
                 return {"success": False, "error_message": f"Apify actor failed: {run.get('status')}", "posts": []}
