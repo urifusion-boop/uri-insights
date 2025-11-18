@@ -47,6 +47,7 @@ from app.routers import (
     ai_run,
     webhook,
     openai_apify_twitter,
+    openai_apify_tiktok,
 )
 from app.core.auth_bearer import JWTBearer
 from app.core.handlers.exception_handler import global_exception_handler
@@ -364,6 +365,11 @@ app.include_router(
     openai_apify_twitter.router,
     prefix="/openai-apify-twitter",
     tags=["OpenAI Apify Twitter Integration"],
+)
+app.include_router(
+    openai_apify_tiktok.router,
+    prefix="/openai-apify-tiktok",
+    tags=["OpenAI Apify TikTok Integration"],
 )
 
 
