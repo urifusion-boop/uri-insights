@@ -76,6 +76,7 @@ from app.services.azure.producers.ExceptionLogProducer import (
 )
 from app.services.uri_microservices.UriTaskManagerService import UriTaskManagerService
 from app.services.OpenAIApifyTwitterService import OpenAIApifyTwitterService
+from app.services.OpenAIApifyTiktokService import OpenAIApifyTiktokService
 
 
 from app.services.BrowsercloudService import BrowsercloudService
@@ -274,6 +275,132 @@ class LeadService:
                 "keyword": keyword,
                 "interval_hours": interval_hours,
                 "max_tweets": max_tweets,
+                "plan": plan_upper,
+            }
+        }
+        await db[LeadFormRepository.COLLECTION_NAME].update_one(
+            {
+                "lead_form_id": lead_form.get("lead_form_id"),
+            },
+            {"$set": update_payload},
+        )
+
+    @staticmethod
+    async def fetch_and_save_conversational_tiktok_leads(db: AsyncIOMotorDatabase):
+        async for batch in LeadFormRepository.fetch_lead_forms_in_batches(
+            db=db, filter={"form_type": LeadFormTypeEnum.CONVERSATIONAL.value}
+        ):
+            tasks = [
+                LeadService._process_conversational_tiktok_fetch(db, lead_form)
+                for lead_form in batch
+            ]
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    @staticmethod
+    async def _process_conversational_tiktok_fetch(
+        db: AsyncIOMotorDatabase, lead_form: dict
+    ):
+        user_id = lead_form.get("user_id", "")
+        keywords = lead_form.get("keywords", [])
+        if not user_id or not keywords:
+            return
+
+        feature_limit_response = await UriTaskManagerService.get_user_feature_limit(
+            user_id
+        )
+        if not feature_limit_response or not feature_limit_response.get("status"):
+            return
+
+        fl_data = feature_limit_response.get("responseData", {}).get("data", {})
+        plan = (
+            fl_data.get("subscriptionPlan")
+            or feature_limit_response.get("responseData", {}).get("subscriptionPlan")
+            or "STANDARD"
+        )
+        plan_upper = str(plan).upper()
+
+        if plan_upper == "BUSINESS" or plan_upper == "LEAD_ONLY":
+            max_posts, interval_hours = 40, 1
+        elif plan_upper == "PROFESSIONAL":
+            max_posts, interval_hours = 30, 3
+        else:
+            max_posts, interval_hours = 20, 7
+
+        settings_obj = lead_form.get("settings", {})
+        tk_settings = settings_obj.get("conversational_tiktok_fetch", {})
+        last_fetched_at = tk_settings.get("last_fetched_at")
+        should_fetch = True
+        if last_fetched_at:
+            try:
+                last_dt = datetime.fromisoformat(last_fetched_at)
+                should_fetch = datetime.utcnow() - last_dt >= timedelta(
+                    hours=interval_hours
+                )
+            except Exception:
+                should_fetch = True
+
+        if not should_fetch:
+            return
+
+        service = OpenAIApifyTiktokService()
+        keyword = keywords[0]
+        result = await service.fetch_posts_with_analysis(
+            keyword=keyword, max_posts=max_posts, analyze_sentiment=False
+        )
+        if not result or not result.get("success"):
+            return
+
+        posts = result.get("posts", [])
+        leads_to_create: List[LeadCreate] = []
+        for p in posts:
+            created_iso = datetime.utcnow().isoformat()
+            ts = p.get("created_at") or p.get("createTime")
+            if ts:
+                try:
+                    if isinstance(ts, str):
+                        created_iso = datetime.fromisoformat(ts).isoformat()
+                    else:
+                        created_iso = datetime.utcfromtimestamp(int(ts)).isoformat()
+                except Exception:
+                    created_iso = datetime.utcnow().isoformat()
+
+            url = p.get("url") or p.get("webVideoUrl") or p.get("video_url")
+            author = p.get("author") or p.get("username") or "TikTok User"
+            text = p.get("text") or p.get("desc") or ""
+
+            leads_to_create.append(
+                LeadCreate(
+                    first_name=author,
+                    last_name=None,
+                    username=author,
+                    mention=text,
+                    lead_reason=text,
+                    lead_status=LeadStatusEnum.NEW,
+                    opportunity_type=LeadOpportunityTypeEnum.OTHER,
+                    tags=[],
+                    lead_link=url or None,
+                    social_profile_link=url or None,
+                    picture_url=None,
+                    created_date=created_iso,
+                    last_updated=created_iso,
+                    lead_type=LeadFormTypeEnum.CONVERSATIONAL,
+                    website_url=url or None,
+                    lead_source=LeadSourceEnum.TIKTOK,
+                    assigned_to=user_id,
+                    starred=False,
+                )
+            )
+
+        if leads_to_create:
+            await LeadRepository.multiple_create_leads(db, leads_to_create)
+
+        update_payload = {
+            "settings.conversational_tiktok_fetch": {
+                "last_fetched_at": datetime.utcnow().isoformat(),
+                "last_fetch_count": len(posts),
+                "keyword": keyword,
+                "interval_hours": interval_hours,
+                "max_posts": max_posts,
                 "plan": plan_upper,
             }
         }

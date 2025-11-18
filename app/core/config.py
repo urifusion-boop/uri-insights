@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings
+from typing import Optional
 
 
 class Settings(BaseSettings):
@@ -29,6 +30,7 @@ class Settings(BaseSettings):
     URI_INSTAGRAM_ID: str
     WEBHOOK_VERIFY_TOKEN: str
     LEAD_GENERATION_INTERVAL: int
+    LEAD_GENERATION_INTERVAL_MINUTES_FOR_TEST: Optional[int] = None
     KEYWORD_TRACKING_ASSISTANT_ID: str
     CONTENT_MANAGEMENT_ASSISTANT_ID: str
     HASHTAG_TRACKING_ASSISTANT_ID: str
