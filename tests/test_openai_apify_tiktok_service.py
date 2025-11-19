@@ -1,0 +1,47 @@
+import pytest
+from app.services.OpenAIApifyTiktokService import OpenAIApifyTiktokService
+
+
+class _FakeDataset:
+    def iterate_items(self):
+        return [
+            {
+                "authorMeta": {"name": "alice"},
+                "text": "hello",
+                "createTime": 1730000000,
+                "webVideoUrl": "https://tiktok.com/@alice/video/1",
+            }
+        ]
+
+
+class _FakeActor:
+    def call(self, run_input=None):
+        return {"status": "SUCCEEDED", "defaultDatasetId": "ds1"}
+
+
+class _FakeClient:
+    def actor(self, actor_id):
+        return _FakeActor()
+
+    def dataset(self, dataset_id):
+        return _FakeDataset()
+
+
+@pytest.mark.asyncio
+async def test_fetch_posts_with_analysis_success():
+    svc = OpenAIApifyTiktokService()
+    svc.apify_client = _FakeClient()
+    res = await svc.fetch_posts_with_analysis(keyword="test", max_posts=1)
+    assert res.get("success") is True
+    assert res.get("total_posts") == 1
+    p = res.get("posts")[0]
+    assert p.get("author") == "alice"
+    assert p.get("url")
+
+
+@pytest.mark.asyncio
+async def test_fetch_posts_with_analysis_no_client():
+    svc = OpenAIApifyTiktokService()
+    svc.apify_client = None
+    res = await svc.fetch_posts_with_analysis(keyword="test")
+    assert res.get("success") is False

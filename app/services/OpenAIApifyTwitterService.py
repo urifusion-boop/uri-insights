@@ -1,5 +1,6 @@
 import os
 import asyncio
+import hashlib
 from typing import List, Dict, Any, Optional
 from apify_client import ApifyClient
 from openai import OpenAI
@@ -33,15 +34,16 @@ class OpenAIApifyTwitterService:
             self.openai_client = OpenAI(api_key=settings.OPENAI_API_KEY)
 
     async def fetch_tweets_with_analysis(
-        self, keyword: str, max_tweets: int = 10
+        self, keyword: str, max_tweets: int = 10, analyze_sentiment: bool = False
     ) -> Dict[str, Any]:
         """
         Fetch tweets using Apify and analyze them with OpenAI.
-        
+
         Args:
             keyword: The keyword to search for
             max_tweets: Maximum number of tweets to fetch
-            
+            analyze_sentiment: Whether to analyze sentiment with OpenAI (default: False)
+
         Returns:
             Dictionary containing tweets and analysis results
         """
@@ -66,19 +68,23 @@ class OpenAIApifyTwitterService:
                 return tweets_result
             
             tweets = tweets_result["tweets"]
-            
-            # Analyze tweets with OpenAI
+
+            # Analyze tweets with OpenAI if requested
             analyzed_tweets = []
             for tweet in tweets:
-                analysis = await self._analyze_tweet_sentiment(tweet["text"])
-                analyzed_tweets.append({
+                tweet_data = {
                     "author": tweet["author"],
                     "text": tweet["text"],
                     "url": tweet.get("url", ""),
                     "created_at": tweet.get("created_at", ""),
-                    "sentiment": analysis.get("sentiment", "neutral"),
-                    "confidence": analysis.get("confidence", 0.5)
-                })
+                }
+
+                if analyze_sentiment:
+                    analysis = await self._analyze_tweet_sentiment(tweet["text"])
+                    tweet_data["sentiment"] = analysis.get("sentiment", "neutral")
+                    tweet_data["confidence"] = analysis.get("confidence", 0.5)
+
+                analyzed_tweets.append(tweet_data)
             
             return {
                 "success": True,
@@ -160,27 +166,41 @@ class OpenAIApifyTwitterService:
                 # Extract author information
                 author_data = item.get("author", {})
                 author_username = author_data.get("userName", "Unknown")
+                tweet_text = item.get("text", "")
+                tweet_id = item.get("id", "")
+                created_at = item.get("createdAt", "")
 
                 # Try multiple fields for URL, or construct it manually
                 tweet_url = (
                     item.get("url") or
                     item.get("tweetUrl") or
-                    item.get("link") or
-                    f"https://twitter.com/{author_username}/status/{item.get('id', '')}" if item.get('id') else ""
+                    item.get("link")
                 )
 
-                # Log if URL is missing for debugging
+                # If still no URL, try to construct from ID
+                if not tweet_url and tweet_id:
+                    tweet_url = f"https://twitter.com/{author_username}/status/{tweet_id}"
+
+                # Final fallback: create a hash-based identifier for deduplication
                 if not tweet_url:
-                    logger.warning(f"Tweet URL missing for tweet from @{author_username}. Available fields: {list(item.keys())}")
+                    # Create a unique hash from username, text, and timestamp
+                    unique_string = f"{author_username}:{tweet_text[:100]}:{created_at}"
+                    url_hash = hashlib.md5(unique_string.encode()).hexdigest()[:12]
+                    tweet_url = f"https://twitter.com/{author_username}/tweet/{url_hash}"
+                    logger.warning(
+                        f"Tweet URL missing for @{author_username}, generated hash-based URL: {tweet_url}. "
+                        f"Available fields: {list(item.keys())}"
+                    )
 
                 tweet = {
                     "author": author_username,
-                    "text": item.get("text", ""),
-                    "created_at": item.get("createdAt", ""),
+                    "text": tweet_text,
+                    "created_at": created_at,
                     "likes": item.get("likeCount", 0),
                     "retweets": item.get("retweetCount", 0),
                     "replies": item.get("replyCount", 0),
-                    "url": tweet_url
+                    "url": tweet_url,
+                    "tweet_id": tweet_id  # Include original ID for reference
                 }
                 tweets.append(tweet)
             
