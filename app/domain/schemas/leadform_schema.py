@@ -16,6 +16,18 @@ from app.core.helpers.date_helper import DateHelper
 from app.domain.enums.lead_enum import LeadsProcessedStatus
 
 
+class PlatformConfig(BaseModel):
+    platform: str
+    enabled: bool
+    min_followers: Optional[int] = None
+    exclude_retweets: Optional[bool] = None
+    verified_only: Optional[bool] = None
+    content_types: Optional[List[str]] = None
+
+    class Config:
+        extra = "forbid"
+
+
 class LeadSourceSettings(BaseModel):
     max_search_iteration_count: int = 5
     last_scraped_date: Optional[datetime] = None
@@ -75,6 +87,11 @@ class LeadFormBase(BaseModel):
     excluded_keywords: Optional[List[str]] = None
     location: Optional[List[str]] = None
     intent_type: Optional[str] = None
+
+    # V2 Real-time Monitoring fields (for conversational forms)
+    enable_realtime: Optional[bool] = False
+    monitoring_platforms: Optional[List[str]] = None
+    platform_configs: Optional[List[PlatformConfig]] = None
 
     # Pagination
     page: Optional[int] = 1
@@ -162,6 +179,11 @@ class ConversationalLeadFormUpdate(BizConvLeadFormUpdateBase):
     excluded_keywords: Optional[List[str]] = None
     location: Optional[List[str]] = None
     intent_type: Optional[str] = None
+
+    # V2 Real-time Monitoring fields
+    enable_realtime: Optional[bool] = None
+    monitoring_platforms: Optional[List[str]] = None
+    platform_configs: Optional[List[PlatformConfig]] = None
 
 
 class LeadForm(LeadFormBase):
