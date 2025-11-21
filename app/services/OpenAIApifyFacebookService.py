@@ -53,10 +53,10 @@ class OpenAIApifyFacebookService:
     async def _fetch_posts_from_apify(self, keyword: str, max_posts: int) -> Dict[str, Any]:
         try:
             run_input = {
-                "search": keyword,
-                "maxItems": max_posts,
+                "query": keyword,
+                "resultsCount": max_posts,
             }
-            run = self.apify_client.actor("apify/facebook-posts-scraper").call(run_input=run_input)
+            run = self.apify_client.actor("scraper_one/facebook-posts-search").call(run_input=run_input)
             if run.get("status") != "SUCCEEDED":
                 return {"success": False, "error_message": f"Apify actor failed: {run.get('status')}", "posts": []}
 
