@@ -194,13 +194,13 @@ class LeadService:
         )
         plan_upper = str(plan).upper()
 
-        # Set intervals based on subscription plan
+        # Set intervals based on subscription plan, with uniform max tweets
         if plan_upper == "BUSINESS" or plan_upper == "LEAD_ONLY":
-            max_tweets, interval_hours = 40, 1
+            max_tweets, interval_hours = 5, 1
         elif plan_upper == "PROFESSIONAL":
-            max_tweets, interval_hours = 30, 3
+            max_tweets, interval_hours = 5, 3
         else:
-            max_tweets, interval_hours = 20, 7
+            max_tweets, interval_hours = 5, 7
 
         settings_obj = lead_form.get("settings", {})
         tw_settings = settings_obj.get("conversational_twitter_fetch", {})
