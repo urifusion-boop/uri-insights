@@ -78,7 +78,9 @@ class LeadFormService:
 
     @staticmethod
     async def create_conversational_lead_form(
-        db: AsyncIOMotorDatabase, lead_form: LeadFormCreate
+        db: AsyncIOMotorDatabase,
+        lead_form: LeadFormCreate,
+        background_tasks: Optional[BackgroundTasks] = None
     ):
         create_response = await LeadFormRepository.create(db, lead_form)
 
@@ -86,6 +88,17 @@ class LeadFormService:
             await LeadFormService.send_lead_request_notification(
                 db, create_response.get("responseData", {}), lead_form.user_id
             )
+
+            # Trigger immediate background job to fetch leads
+            if background_tasks:
+                from app.services.ConversationalLeadJobService import ConversationalLeadJobService
+                lead_form_data = create_response.get("responseData", {})
+                background_tasks.add_task(
+                    ConversationalLeadJobService.fetch_leads_from_platforms,
+                    db,
+                    lead_form_data,
+                    lead_form.user_id
+                )
 
         return create_response
 
@@ -179,6 +192,7 @@ class LeadFormService:
         db: AsyncIOMotorDatabase,
         lead_form_id: str,
         updates: ConversationalLeadFormUpdate,
+        background_tasks: Optional[BackgroundTasks] = None
     ):
         update_response = await LeadFormRepository.update(db, updates, lead_form_id)
 
@@ -186,6 +200,16 @@ class LeadFormService:
             lead_form = update_response.get("responseData", {})
             user_id = lead_form.get("user_id", "")
             await LeadFormService.send_lead_request_notification(db, lead_form, user_id)
+
+            # Trigger immediate background job to fetch leads
+            if background_tasks:
+                from app.services.ConversationalLeadJobService import ConversationalLeadJobService
+                background_tasks.add_task(
+                    ConversationalLeadJobService.fetch_leads_from_platforms,
+                    db,
+                    lead_form,
+                    user_id
+                )
 
         return update_response
 
