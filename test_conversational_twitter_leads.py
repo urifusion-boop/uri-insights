@@ -135,18 +135,18 @@ async def test_plan_configuration(db, test_user_id: str, plan_name: str):
 
     # Verify plan-specific configuration
     expected_config = {
-        "LEAD_ONLY": {"max_tweets": 5, "interval": 2/60},  # Testing mode
-        "BUSINESS": {"max_tweets": 5, "interval": 2/60},
-        "PROFESSIONAL": {"max_tweets": 5, "interval": 4/60},
-        "STANDARD": {"max_tweets": 5, "interval": 6/60},
+        "LEAD_ONLY": {"max_tweets": 2, "interval": 2/60},  # Testing mode
+        "BUSINESS": {"max_tweets": 2, "interval": 2/60},
+        "PROFESSIONAL": {"max_tweets": 2, "interval": 4/60},
+        "STANDARD": {"max_tweets": 2, "interval": 6/60},
     }
 
     if settings.ENV.lower() == "production":
         expected_config = {
-            "LEAD_ONLY": {"max_tweets": 5, "interval": 1},
-            "BUSINESS": {"max_tweets": 5, "interval": 1},
-            "PROFESSIONAL": {"max_tweets": 5, "interval": 3},
-            "STANDARD": {"max_tweets": 5, "interval": 7},
+            "LEAD_ONLY": {"max_tweets": 2, "interval": 1},
+            "BUSINESS": {"max_tweets": 2, "interval": 1},
+            "PROFESSIONAL": {"max_tweets": 2, "interval": 3},
+            "STANDARD": {"max_tweets": 2, "interval": 7},
         }
 
     expected = expected_config.get(plan_name, {})

@@ -29,11 +29,23 @@ class OpenAIApifyFacebookService:
                 (it.get("author") or {})
                 if isinstance(it.get("author"), str)
                 else (it.get("author") or {}).get("name")
-            ) or it.get("username") or it.get("pageName") or "Facebook User"
+            ) or it.get("username") or it.get("pageName") or it.get("ownerName") or "Facebook User"
 
-            text = it.get("text") or it.get("message") or it.get("title") or ""
-            created = it.get("created_time") or it.get("createdAt") or it.get("publishedAt")
-            url = it.get("url") or it.get("permalink_url") or it.get("postUrl")
+            # Try multiple possible field names for post content
+            text = (
+                it.get("text")
+                or it.get("message")
+                or it.get("title")
+                or it.get("content")
+                or it.get("description")
+                or it.get("caption")
+                or it.get("post_text")
+                or it.get("postText")
+                or ""
+            )
+
+            created = it.get("created_time") or it.get("createdAt") or it.get("publishedAt") or it.get("timestamp")
+            url = it.get("url") or it.get("permalink_url") or it.get("postUrl") or it.get("link")
             if not url:
                 unique = f"{author}:{text[:120]}:{created}"
                 url_hash = hashlib.md5(unique.encode()).hexdigest()[:12]
@@ -63,6 +75,11 @@ class OpenAIApifyFacebookService:
             items: List[Dict[str, Any]] = []
             for item in self.apify_client.dataset(run["defaultDatasetId"]).iterate_items():
                 items.append(item)
+
+            # Log the first item structure for debugging
+            if items:
+                logger.debug(f"Sample Apify Facebook item structure: {list(items[0].keys())}")
+                logger.debug(f"Sample Apify Facebook item data: {items[0]}")
 
             logger.info(f"Fetched {len(items)} Facebook posts for keyword: {keyword}")
             return {"success": True, "posts": items[:max_posts], "total_count": len(items)}
