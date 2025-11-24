@@ -208,6 +208,8 @@ class LeadFormService:
             if background_tasks:
                 from app.services.ConversationalLeadJobService import ConversationalLeadJobService
                 print(f"✅ Adding background task for conversational lead form update {lead_form.get('lead_form_id')}")
+                print(f"   Lead form has platform_configs: {bool(lead_form.get('platform_configs'))}")
+                print(f"   Lead form has keywords: {bool(lead_form.get('keywords'))}")
                 background_tasks.add_task(
                     ConversationalLeadJobService.fetch_leads_from_platforms,
                     db,

@@ -39,7 +39,13 @@ class ConversationalLeadJobService:
             lead_form: The lead form document containing platform configs and keywords
             user_id: User ID to assign leads to
         """
-        print(f"🚀 BACKGROUND JOB STARTED: Fetching leads for form {lead_form.get('lead_form_id')}")
+        try:
+            print(f"🚀 BACKGROUND JOB STARTED: Fetching leads for form {lead_form.get('lead_form_id')}")
+            print(f"   Platform configs: {lead_form.get('platform_configs', [])}")
+            print(f"   Keywords: {lead_form.get('keywords', [])}")
+        except Exception as log_error:
+            print(f"Error in initial logging: {str(log_error)}")
+
         try:
             platform_configs = lead_form.get("platform_configs", [])
             keywords = lead_form.get("keywords", [])
@@ -142,7 +148,9 @@ class ConversationalLeadJobService:
                 print(f"No leads found for keyword '{keyword}' across enabled platforms")
 
         except Exception as e:
-            print(f"Error in fetch_leads_from_platforms: {str(e)}")
+            import traceback
+            print(f"❌ ERROR in fetch_leads_from_platforms: {str(e)}")
+            print(f"   Traceback: {traceback.format_exc()}")
             # Don't raise - this is a background job, we just log the error
 
     @staticmethod
