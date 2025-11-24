@@ -168,8 +168,8 @@ class DateHelper:
     def get_date_range(filter_option: DateFilterEnum):
         """Returns start and end dates based on predefined date filters."""
         end_date = datetime.utcnow().replace(
-            microsecond=0, second=0, minute=0
-        )  # Ensure consistency
+            microsecond=999999, second=59, minute=59, hour=23
+        )  # End of day
         time_deltas = {
             DateFilterEnum.LAST_24_HOURS: timedelta(days=1),
             DateFilterEnum.LAST_3_DAYS: timedelta(days=3),

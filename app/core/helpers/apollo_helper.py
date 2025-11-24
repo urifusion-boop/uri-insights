@@ -67,6 +67,12 @@ class ApolloHelper:
             "excluded_keywords",
             "location",
             "intent_type",
+            "category_context",
+            "implied_keywords",
+            "scoring_thresholds",
+            "enable_realtime",
+            "monitoring_platforms",
+            "platform_configs",
         ]
 
         lead_form.copy()
@@ -114,6 +120,12 @@ class ApolloHelper:
             "excluded_keywords",
             "location",
             "intent_type",
+            "category_context",
+            "implied_keywords",
+            "scoring_thresholds",
+            "enable_realtime",
+            "monitoring_platforms",
+            "platform_configs",
         ]
         organization_search_request_dict = DictHelper.remove_keys(
             lead_form.copy(), unwanted_keys
