@@ -556,40 +556,64 @@ class LeadFormAutoPopulateEnum(Enum):
     """
 
     CONVERSATIONAL_FORM_PROMPT = """
-        You are a search term generation and social listening assistant. A user has described what they want to find or monitor online. Your job is to extract intent-agnostic, high-quality search parameters that can be used across any use case (e.g., sales, hiring, partnership, research, marketing, events).
+        You are an advanced lead generation and social listening assistant. A user has described what they want to find or monitor online. Your job is to extract high-quality search parameters that can detect BOTH direct and implied buying intent across social media platforms.
 
         Based on the user's description, return structured parameters to populate a Conversational Lead form for tracking relevant social media discussions.
 
         ### User Input:
         {data}
 
-        ### Output JSON (intent-agnostic):
+        ### Output JSON:
         {{
             "form_title": "<string>",
             "form_type": "CONVERSATIONAL",
-            "intent_type": "<string>",  
+            "intent_type": "<string>",
             // One of: "sales", "hiring", "partnership", "research", "marketing", "support", "event", "other" — infer from the input.
+            "category_context": "<string>",
+            // The industry or category context (e.g., "skincare", "fintech", "coffee makers", "AI tools"). This helps the AI understand the domain for intent analysis.
             "keywords": ["<string>", "..."],
+            // Direct search terms people would use when looking to buy/engage (e.g., "moisturizer", "buy sunscreen", "need CRM").
+            "implied_keywords": ["<string>", "..."],
+            // Indirect signals that suggest buying intent through problems, situations, or lifestyle changes (e.g., "harmattan", "dry skin", "winter", "cracked lips", "acne won't go away", "skin is breaking out").
             "competitors": ["<string>", "..."],
+            // Known competitor brands to monitor for switching intent (e.g., "CeraVe", "The Ordinary", "Salesforce"). People frustrated with competitors are high-intent leads.
             "ai_response_guide": "<string>",
-            "location": ["<city or region>", "..."],  
+            "location": ["<city or region>", "..."],
             // Only include if explicitly specified or confidently inferred.
-            "buying_signals": ["<string>", "..."],  
-            // Optional; use when the user implies interest or intent cues relevant to their goal.
-            "excluded_keywords": ["<string>", "..."] ,
+            "buying_signals": ["<string>", "..."],
+            // Phrases indicating purchase readiness (e.g., "looking to buy", "need recommendation", "budget approved", "which is better").
+            "excluded_keywords": ["<string>", "..."],
             "add_to_history": <boolean>,
             "auto_generate": <boolean>
         }}
 
         ### Rules:
-        - Keep keywords concise and specific; avoid overly generic terms (e.g., "news", "content").
-        - Include obvious synonyms or related phrases if they improve coverage.
+        - **category_context**: Always identify the industry/category from the user input. This is critical for intent analysis.
+        - **keywords**: Focus on direct purchase/engagement terms. Keep concise and specific.
+        - **implied_keywords**: Think about PROBLEMS and SITUATIONS that lead people to need the product/service:
+            - Seasonal triggers (e.g., "harmattan", "winter", "summer heat")
+            - Problems (e.g., "acne", "dry skin", "slow software", "team burnout")
+            - Life changes (e.g., "just moved", "new job", "starting business")
+            - Frustrations (e.g., "tired of", "struggling with", "can't find")
+        - **competitors**: Include major brands in the space. People complaining about competitors are prime leads.
         - Prefer named entities (brands, products, roles, technologies) when relevant.
         - Deduplicate entries; do not include repeated values.
-        - Do not bias toward any single scenario (e.g., hiring or sales) unless the user clearly indicates it.
         - If the intent is ambiguous, set "intent_type" to "other" and focus on strong keywords.
 
-        The JSON above is a guide; always return an object that reflects the user's preferences and is optimized for effective conversation tracking.
+        ### Examples of Implied Intent Detection:
+        - User Input: "Find people interested in skincare in Nigeria"
+          - category_context: "skincare"
+          - keywords: ["moisturizer", "sunscreen", "skincare routine"]
+          - implied_keywords: ["harmattan", "dry skin", "cracked lips", "oily face", "acne", "dark spots", "skin glowing"]
+          - competitors: ["CeraVe", "The Ordinary", "Neutrogena", "Nivea"]
+
+        - User Input: "Find startup founders looking for project management tools"
+          - category_context: "project management software"
+          - keywords: ["project management tool", "task manager", "team collaboration"]
+          - implied_keywords: ["missing deadlines", "team communication issues", "project delays", "scaling team", "remote work chaos"]
+          - competitors: ["Asana", "Monday.com", "Trello", "Jira", "ClickUp"]
+
+        The JSON above is a guide; always return an object that reflects the user's preferences and is optimized for capturing both direct AND implied buying intent.
         Populate location only when specified or confidently inferred from the request.
     """
 

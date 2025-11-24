@@ -82,15 +82,180 @@ from app.services.OpenAIApifyFacebookService import OpenAIApifyFacebookService
 
 from app.services.BrowsercloudService import BrowsercloudService
 from app.services.RealtimeLeadProcessor import RealtimeLeadProcessor
+from app.services.IntentAnalysisService import (
+    IntentAnalysisService,
+    CategoryConfig,
+    IntentAnalysisResult,
+)
+from app.domain.enums.lead_enum import IntentCategoryEnum, SentimentTypeEnum
 
 class LeadService:
     PLATFORM_SCRAPERS: dict[str, LeadDataScraper] = {
         "google": GoogleLeadDataScraper(),
         "twitter": TwitterLeadDataScraper(),
     }
-    
+
     browsercloud_service = BrowsercloudService()
     realtime_processor = RealtimeLeadProcessor()
+
+    # ================== CLG Upgrade - Intent Analysis Methods ==================
+
+    @staticmethod
+    def _build_category_config_from_lead_form(lead_form: dict) -> CategoryConfig:
+        """
+        Build CategoryConfig from lead form for intent analysis.
+        Uses new CLG fields: category_context, implied_keywords, etc.
+        """
+        return CategoryConfig(
+            category_context=lead_form.get("category_context", "general"),
+            keywords=lead_form.get("keywords", []),
+            implied_keywords=lead_form.get("implied_keywords", []),
+            competitors=lead_form.get("competitors", []),
+            buying_signals=lead_form.get("buying_signals", []),
+            excluded_keywords=lead_form.get("excluded_keywords", []),
+        )
+
+    @staticmethod
+    def _get_scoring_thresholds(lead_form: dict) -> tuple[float, float, float]:
+        """
+        Get scoring thresholds from lead form, with defaults.
+        Returns: (intent_min, relevance_min, final_min)
+        """
+        thresholds = lead_form.get("scoring_thresholds", {})
+        if isinstance(thresholds, dict):
+            return (
+                thresholds.get("intent_score_min", 0.55),
+                thresholds.get("relevance_score_min", 0.50),
+                thresholds.get("final_score_min", 0.60),
+            )
+        return (0.55, 0.50, 0.60)
+
+    @staticmethod
+    async def analyze_and_enrich_lead(
+        lead: LeadCreate,
+        lead_form: dict,
+        skip_if_below_threshold: bool = True
+    ) -> Optional[LeadCreate]:
+        """
+        Analyze a lead's mention text for buying intent and enrich with scores.
+
+        Args:
+            lead: The lead to analyze
+            lead_form: The lead form configuration
+            skip_if_below_threshold: If True, returns None for leads below thresholds
+
+        Returns:
+            Enriched lead with intent scores, or None if below threshold
+        """
+        mention_text = lead.mention or lead.lead_reason or ""
+        if not mention_text:
+            return lead if not skip_if_below_threshold else None
+
+        try:
+            # Build config from lead form
+            config = LeadService._build_category_config_from_lead_form(lead_form)
+
+            # Analyze intent
+            result = await IntentAnalysisService.analyze_post(
+                text=mention_text,
+                config=config,
+                model="gpt-4o-mini"  # Use cheapest model for bulk analysis
+            )
+
+            # Calculate final score
+            final_score = IntentAnalysisService.calculate_final_score(
+                result.intent_score,
+                result.relevance_score,
+                result.urgency_flag
+            )
+
+            # Check thresholds
+            intent_min, relevance_min, final_min = LeadService._get_scoring_thresholds(lead_form)
+
+            meets_threshold = (
+                result.intent_score >= intent_min and
+                result.relevance_score >= relevance_min and
+                final_score >= final_min
+            )
+
+            if skip_if_below_threshold and not meets_threshold:
+                return None
+
+            # Enrich lead with intent data
+            lead.intent_score = result.intent_score
+            lead.relevance_score = result.relevance_score
+            lead.urgency_flag = result.urgency_flag
+            lead.sentiment = SentimentTypeEnum(result.sentiment.value)
+            lead.intent_category = IntentCategoryEnum(result.intent_category.value)
+            lead.final_score = final_score
+            lead.intent_reasoning = result.reasoning
+
+            # Set interest level based on final score
+            if final_score >= 0.75:
+                lead.interest_level = LeadInterestLevelEnum.HIGH
+            elif final_score >= 0.60:
+                lead.interest_level = LeadInterestLevelEnum.MEDIUM
+            else:
+                lead.interest_level = LeadInterestLevelEnum.LOW
+
+            return lead
+
+        except Exception as e:
+            print(f"Intent analysis failed for lead: {e}")
+            # Return lead without enrichment on error
+            return lead if not skip_if_below_threshold else None
+
+    @staticmethod
+    async def analyze_and_filter_leads(
+        leads: List[LeadCreate],
+        lead_form: dict,
+        enable_intent_analysis: bool = True
+    ) -> List[LeadCreate]:
+        """
+        Analyze multiple leads for intent and filter out low-quality ones.
+
+        Args:
+            leads: List of leads to analyze
+            lead_form: The lead form configuration
+            enable_intent_analysis: If False, returns all leads without analysis
+
+        Returns:
+            List of qualified leads with intent scores
+        """
+        if not enable_intent_analysis:
+            return leads
+
+        # Check if lead form has CLG fields configured
+        has_clg_config = bool(
+            lead_form.get("category_context") or
+            lead_form.get("implied_keywords")
+        )
+
+        if not has_clg_config:
+            # No CLG config, skip analysis
+            return leads
+
+        # Analyze leads concurrently
+        tasks = [
+            LeadService.analyze_and_enrich_lead(lead, lead_form, skip_if_below_threshold=True)
+            for lead in leads
+        ]
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Filter out None results and exceptions
+        qualified_leads = []
+        for result in results:
+            if isinstance(result, Exception):
+                print(f"Lead analysis error: {result}")
+                continue
+            if result is not None:
+                qualified_leads.append(result)
+
+        print(f"Intent analysis: {len(leads)} leads -> {len(qualified_leads)} qualified")
+        return qualified_leads
+
+    # ================== End CLG Upgrade Methods ==================
 
     @staticmethod
     async def delete_lead(db: AsyncIOMotorDatabase, lead_id: str):
@@ -267,7 +432,19 @@ class LeadService:
             )
 
         if leads_to_create:
-            await LeadRepository.multiple_create_leads(db, leads_to_create)
+            # CLG Upgrade: Analyze leads for intent and filter by thresholds
+            # Only runs if lead_form has category_context or implied_keywords configured
+            original_count = len(leads_to_create)
+            leads_to_create = await LeadService.analyze_and_filter_leads(
+                leads=leads_to_create,
+                lead_form=lead_form,
+                enable_intent_analysis=True
+            )
+            filtered_count = len(leads_to_create)
+
+            if leads_to_create:
+                await LeadRepository.multiple_create_leads(db, leads_to_create)
+                print(f"Twitter leads: {original_count} fetched, {filtered_count} qualified and saved")
 
         update_payload = {
             "settings.conversational_twitter_fetch": {
@@ -393,7 +570,19 @@ class LeadService:
             )
 
         if leads_to_create:
-            await LeadRepository.multiple_create_leads(db, leads_to_create)
+            # CLG Upgrade: Analyze leads for intent and filter by thresholds
+            # Only runs if lead_form has category_context or implied_keywords configured
+            original_count = len(leads_to_create)
+            leads_to_create = await LeadService.analyze_and_filter_leads(
+                leads=leads_to_create,
+                lead_form=lead_form,
+                enable_intent_analysis=True
+            )
+            filtered_count = len(leads_to_create)
+
+            if leads_to_create:
+                await LeadRepository.multiple_create_leads(db, leads_to_create)
+                print(f"TikTok leads: {original_count} fetched, {filtered_count} qualified and saved")
 
         update_payload = {
             "settings.conversational_tiktok_fetch": {
@@ -718,9 +907,9 @@ class LeadService:
                 db, lead=LeadCreate(**lead_dict, lead_type=LeadFormTypeEnum.BUSINESS)
             )
             # Send lead email
-            await LeadService.send_lead_email(
-                db, created_lead.get("responseData"), cache_key
-            )
+            lead_data = created_lead.get("responseData")
+            if lead_data:
+                await LeadService.send_lead_email(db, lead_data, cache_key)
             print("New lead created successfully: ", created_lead)
         except Exception as e:
             print("Exception occurred in creating lead: ", e)
@@ -900,7 +1089,7 @@ class LeadService:
 
         lead_form_type = lead_form.get("form_type")
 
-        leads_to_create: Optional[List[Lead]] = []
+        leads_to_create: Optional[List[LeadCreate]] = []
 
         if not lead_form_type:
             raise ValueError("Empty lead form type.")
@@ -1243,7 +1432,7 @@ class LeadService:
 
         ready_leads = []
         for lead, follow_up in zip(leads, follow_up_results):
-            if not isinstance(follow_up, Exception):
+            if isinstance(follow_up, str):
                 lead_to_create = LeadCreate(**lead)
                 lead_to_create.follow_up_message = follow_up
                 ready_leads.append(lead_to_create)
