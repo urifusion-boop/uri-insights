@@ -63,40 +63,75 @@ class ConversationalLeadJobService:
 
             all_leads: List[LeadCreate] = []
 
-            # Create tasks for concurrent fetching
-            fetch_tasks = []
+            # TODO: Uncomment below for concurrent fetching in production
+            # # Create tasks for concurrent fetching
+            # fetch_tasks = []
+            #
+            # if BrowsercloudPlatformEnum.TWITTER.value in enabled_platforms:
+            #     fetch_tasks.append(
+            #         ConversationalLeadJobService._fetch_twitter_leads(
+            #             keyword, user_id, lead_form.get("lead_form_id")
+            #         )
+            #     )
+            #
+            # if BrowsercloudPlatformEnum.FACEBOOK.value in enabled_platforms:
+            #     fetch_tasks.append(
+            #         ConversationalLeadJobService._fetch_facebook_leads(
+            #             keyword, user_id, lead_form.get("lead_form_id")
+            #         )
+            #     )
+            #
+            # if BrowsercloudPlatformEnum.TIKTOK.value in enabled_platforms:
+            #     fetch_tasks.append(
+            #         ConversationalLeadJobService._fetch_tiktok_leads(
+            #             keyword, user_id, lead_form.get("lead_form_id")
+            #         )
+            #     )
+            #
+            # # Execute all fetch tasks concurrently
+            # if fetch_tasks:
+            #     results = await asyncio.gather(*fetch_tasks, return_exceptions=True)
+            #
+            #     # Collect successful results
+            #     for result in results:
+            #         if isinstance(result, list):
+            #             all_leads.extend(result)
+            #         elif isinstance(result, Exception):
+            #             print(f"Error fetching leads: {str(result)}")
 
+            # TEMPORARY: Sequential fetching (replace with concurrent version above later)
+            # Fetch Twitter leads
             if BrowsercloudPlatformEnum.TWITTER.value in enabled_platforms:
-                fetch_tasks.append(
-                    ConversationalLeadJobService._fetch_twitter_leads(
+                try:
+                    twitter_leads = await ConversationalLeadJobService._fetch_twitter_leads(
                         keyword, user_id, lead_form.get("lead_form_id")
                     )
-                )
+                    all_leads.extend(twitter_leads)
+                    print(f"Fetched {len(twitter_leads)} leads from Twitter")
+                except Exception as e:
+                    print(f"Error fetching Twitter leads: {str(e)}")
 
+            # Fetch Facebook leads
             if BrowsercloudPlatformEnum.FACEBOOK.value in enabled_platforms:
-                fetch_tasks.append(
-                    ConversationalLeadJobService._fetch_facebook_leads(
+                try:
+                    facebook_leads = await ConversationalLeadJobService._fetch_facebook_leads(
                         keyword, user_id, lead_form.get("lead_form_id")
                     )
-                )
+                    all_leads.extend(facebook_leads)
+                    print(f"Fetched {len(facebook_leads)} leads from Facebook")
+                except Exception as e:
+                    print(f"Error fetching Facebook leads: {str(e)}")
 
+            # Fetch TikTok leads
             if BrowsercloudPlatformEnum.TIKTOK.value in enabled_platforms:
-                fetch_tasks.append(
-                    ConversationalLeadJobService._fetch_tiktok_leads(
+                try:
+                    tiktok_leads = await ConversationalLeadJobService._fetch_tiktok_leads(
                         keyword, user_id, lead_form.get("lead_form_id")
                     )
-                )
-
-            # Execute all fetch tasks concurrently
-            if fetch_tasks:
-                results = await asyncio.gather(*fetch_tasks, return_exceptions=True)
-
-                # Collect successful results
-                for result in results:
-                    if isinstance(result, list):
-                        all_leads.extend(result)
-                    elif isinstance(result, Exception):
-                        print(f"Error fetching leads: {str(result)}")
+                    all_leads.extend(tiktok_leads)
+                    print(f"Fetched {len(tiktok_leads)} leads from TikTok")
+                except Exception as e:
+                    print(f"Error fetching TikTok leads: {str(e)}")
 
             # Save all leads to database
             if all_leads:
