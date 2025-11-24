@@ -135,11 +135,10 @@ async def update_organization_lead_form(
 async def update_conversational_lead_form(
     lead_form_id: str,
     data: ConversationalLeadFormUpdate,
-    background_tasks: BackgroundTasks,
     db: AsyncIOMotorDatabase = Depends(get_db_dependency),
 ):
     result = await LeadFormService.update_conversational_lead_form(
-        db, updates=data, lead_form_id=lead_form_id, background_tasks=background_tasks
+        db, updates=data, lead_form_id=lead_form_id
     )
     return UriResponse.get_status_response(
         response=jsonable_encoder(result), status_code=result["responseCode"]

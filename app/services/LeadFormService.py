@@ -49,7 +49,7 @@ class LeadFormService:
                 db=db, background_tasks=background_tasks, lead_form=lead_form
             )
         elif lead_form.form_type == LeadFormTypeEnum.CONVERSATIONAL:
-            return await LeadFormService.create_conversational_lead_form(db, lead_form, background_tasks)
+            return await LeadFormService.create_conversational_lead_form(db, lead_form)
         else:
             if lead_form.per_page and lead_form.per_page == 0:
                 return UriResponse.custom_response(
@@ -80,7 +80,6 @@ class LeadFormService:
     async def create_conversational_lead_form(
         db: AsyncIOMotorDatabase,
         lead_form: LeadFormCreate,
-        background_tasks: Optional[BackgroundTasks] = None
     ):
         create_response = await LeadFormRepository.create(db, lead_form)
 
@@ -89,19 +88,8 @@ class LeadFormService:
                 db, create_response.get("responseData", {}), lead_form.user_id
             )
 
-            # Trigger immediate background job to fetch leads
-            if background_tasks:
-                from app.services.ConversationalLeadJobService import ConversationalLeadJobService
-                lead_form_data = create_response.get("responseData", {})
-                print(f"✅ Adding background task for conversational lead form {lead_form_data.get('lead_form_id')}")
-                background_tasks.add_task(
-                    ConversationalLeadJobService.fetch_leads_from_platforms,
-                    db,
-                    lead_form_data,
-                    lead_form.user_id
-                )
-            else:
-                print("⚠️ No background_tasks provided - skipping lead fetching")
+            # NOTE: Lead fetching is now handled by the frontend
+            # See ConversationLeadForm.tsx for sequential platform fetching
 
         return create_response
 
@@ -195,7 +183,6 @@ class LeadFormService:
         db: AsyncIOMotorDatabase,
         lead_form_id: str,
         updates: ConversationalLeadFormUpdate,
-        background_tasks: Optional[BackgroundTasks] = None
     ):
         update_response = await LeadFormRepository.update(db, updates, lead_form_id)
 
@@ -204,20 +191,8 @@ class LeadFormService:
             user_id = lead_form.get("user_id", "")
             await LeadFormService.send_lead_request_notification(db, lead_form, user_id)
 
-            # Trigger immediate background job to fetch leads
-            if background_tasks:
-                from app.services.ConversationalLeadJobService import ConversationalLeadJobService
-                print(f"✅ Adding background task for conversational lead form update {lead_form.get('lead_form_id')}")
-                print(f"   Lead form has platform_configs: {bool(lead_form.get('platform_configs'))}")
-                print(f"   Lead form has keywords: {bool(lead_form.get('keywords'))}")
-                background_tasks.add_task(
-                    ConversationalLeadJobService.fetch_leads_from_platforms,
-                    db,
-                    lead_form,
-                    user_id
-                )
-            else:
-                print("⚠️ No background_tasks provided - skipping lead fetching")
+            # NOTE: Lead fetching is now handled by the frontend
+            # See ConversationLeadForm.tsx for sequential platform fetching
 
         return update_response
 
