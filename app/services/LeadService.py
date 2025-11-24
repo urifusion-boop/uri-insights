@@ -178,6 +178,11 @@ class LeadService:
                 final_score >= final_min
             )
 
+            # Debug logging
+            print(f"Lead analysis: intent={result.intent_score:.2f}, relevance={result.relevance_score:.2f}, final={final_score:.2f}, meets={meets_threshold}")
+            print(f"  Thresholds: intent>={intent_min}, relevance>={relevance_min}, final>={final_min}")
+            print(f"  Category: {result.intent_category.value}, Reasoning: {result.reasoning[:100]}...")
+
             if skip_if_below_threshold and not meets_threshold:
                 return None
 
@@ -348,24 +353,24 @@ class LeadService:
         )
 
         if not feature_limit_response or not feature_limit_response.get("status"):
-            # Task Manager is required - skip if unavailable
-            return
+            return  # Task Manager is required - skip if unavailable
 
-        fl_data = feature_limit_response.get("responseData", {}).get("data", {})
-        plan = (
-            fl_data.get("subscriptionPlan")
-            or feature_limit_response.get("responseData", {}).get("subscriptionPlan")
-            or "STANDARD"
-        )
-        plan_upper = str(plan).upper()
-
-        # Set intervals based on subscription plan, with uniform max tweets/posts
-        if plan_upper == "BUSINESS" or plan_upper == "LEAD_ONLY":
-            max_tweets, interval_hours = 2, 1
-        elif plan_upper == "PROFESSIONAL":
-            max_tweets, interval_hours = 2, 3
         else:
-            max_tweets, interval_hours = 2, 7
+            fl_data = feature_limit_response.get("responseData", {}).get("data", {})
+            plan = (
+                fl_data.get("subscriptionPlan")
+                or feature_limit_response.get("responseData", {}).get("subscriptionPlan")
+                or "STANDARD"
+            )
+            plan_upper = str(plan).upper()
+
+            # Set intervals based on subscription plan, with uniform max tweets/posts
+            if plan_upper == "BUSINESS" or plan_upper == "LEAD_ONLY":
+                max_tweets, interval_hours = 2, 1
+            elif plan_upper == "PROFESSIONAL":
+                max_tweets, interval_hours = 2, 3
+            else:
+                max_tweets, interval_hours = 2, 7
 
         settings_obj = lead_form.get("settings", {})
         tw_settings = settings_obj.get("conversational_twitter_fetch", {})
@@ -487,22 +492,23 @@ class LeadService:
             user_id
         )
         if not feature_limit_response or not feature_limit_response.get("status"):
-            return
+            return  # Task Manager is required - skip if unavailable
 
-        fl_data = feature_limit_response.get("responseData", {}).get("data", {})
-        plan = (
-            fl_data.get("subscriptionPlan")
-            or feature_limit_response.get("responseData", {}).get("subscriptionPlan")
-            or "STANDARD"
-        )
-        plan_upper = str(plan).upper()
-
-        if plan_upper == "BUSINESS" or plan_upper == "LEAD_ONLY":
-            max_posts, interval_hours = 2, 1
-        elif plan_upper == "PROFESSIONAL":
-            max_posts, interval_hours = 2, 3
         else:
-            max_posts, interval_hours = 2, 7
+            fl_data = feature_limit_response.get("responseData", {}).get("data", {})
+            plan = (
+                fl_data.get("subscriptionPlan")
+                or feature_limit_response.get("responseData", {}).get("subscriptionPlan")
+                or "STANDARD"
+            )
+            plan_upper = str(plan).upper()
+
+            if plan_upper == "BUSINESS" or plan_upper == "LEAD_ONLY":
+                max_posts, interval_hours = 2, 1
+            elif plan_upper == "PROFESSIONAL":
+                max_posts, interval_hours = 2, 3
+            else:
+                max_posts, interval_hours = 2, 7
 
         settings_obj = lead_form.get("settings", {})
         tk_settings = settings_obj.get("conversational_tiktok_fetch", {})

@@ -62,7 +62,7 @@ class AIService:
                     messages=[message.dict() for message in request.messages],
                     response_format=response_model,
                     temperature=request.temperature,
-                    max_tokens=11000,
+                    max_tokens=2000,  # Reduced from 11000 - structured responses should be small
                 ),
             )
 

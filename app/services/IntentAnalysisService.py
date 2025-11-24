@@ -101,6 +101,11 @@ Scoring Guidelines:
   - "comparison": Comparing options/brands
   - "competitor_negative": Frustration with competitor brand
 
+IMPORTANT FILTERING RULES:
+- If the post contains EXCLUDED KEYWORDS, score intent_score and relevance_score as 0.0 - these are sellers, promoters, or spam.
+- If the author is SELLING/PROMOTING (e.g., "I built", "check out my", "launching", "sign up"), score 0.0 - we want BUYERS not sellers.
+- Content creators teaching/demonstrating (tutorials, tips, fixes) are NOT leads - they are sellers.
+
 Be generous with implied intent detection - the goal is to capture leads that keyword matching would miss."""
 
     @staticmethod
