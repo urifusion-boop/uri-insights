@@ -583,6 +583,7 @@ class LeadFormAutoPopulateEnum(Enum):
             "buying_signals": ["<string>", "..."],
             // Phrases indicating purchase readiness (e.g., "looking to buy", "need recommendation", "budget approved", "which is better").
             "excluded_keywords": ["<string>", "..."],
+            // Terms to filter OUT people who are SELLING instead of BUYING. Think about what a seller/promoter of this product would say (e.g., "I created", "launching", "my course", "check out", "sign up for my"). Also filter spam like "ad", "sponsored", "giveaway".
             "add_to_history": <boolean>,
             "auto_generate": <boolean>
         }}
@@ -596,6 +597,7 @@ class LeadFormAutoPopulateEnum(Enum):
             - Life changes (e.g., "just moved", "new job", "starting business")
             - Frustrations (e.g., "tired of", "struggling with", "can't find")
         - **competitors**: Include major brands in the space. People complaining about competitors are prime leads.
+        - **excluded_keywords**: Generate terms that SELLERS of this product/service would use. If looking for buyers of PM tools, exclude what PM tool sellers say. Context-specific, not generic.
         - Prefer named entities (brands, products, roles, technologies) when relevant.
         - Deduplicate entries; do not include repeated values.
         - If the intent is ambiguous, set "intent_type" to "other" and focus on strong keywords.
