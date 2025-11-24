@@ -69,10 +69,11 @@ async def create_business_lead_form(
 @router.post("/conversation-search/create")
 async def create_conversational_lead_form(
     data: ConversationalSearchFormInput,
+    background_tasks: BackgroundTasks,
     db: AsyncIOMotorDatabase = Depends(get_db_dependency),
 ):
     payload = LeadFormCreate(**data.model_dump())
-    result = await LeadFormService.create(db, payload)
+    result = await LeadFormService.create(db, payload, background_tasks)
 
     return UriResponse.get_status_response(
         response=jsonable_encoder(result), status_code=result["responseCode"]

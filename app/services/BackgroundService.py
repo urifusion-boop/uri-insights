@@ -78,6 +78,26 @@ class BackgroundService:
                 replace_existing=False,
             )
 
+        if test_minutes:
+            scheduler.add_job(
+                func=LeadService.fetch_and_save_conversational_facebook_leads,
+                trigger="interval",
+                minutes=test_minutes,
+                next_run_time=datetime.utcnow(),
+                kwargs={"db": db},
+                id="conversational_facebook_fetch_job",
+                replace_existing=False,
+            )
+        else:
+            scheduler.add_job(
+                func=LeadService.fetch_and_save_conversational_facebook_leads,
+                trigger="interval",
+                hours=1,
+                kwargs={"db": db},
+                id="conversational_facebook_fetch_job",
+                replace_existing=False,
+            )
+
         scheduler.add_job(
             SocialMediaPostService.post_scheduled_posts,
             trigger="interval",

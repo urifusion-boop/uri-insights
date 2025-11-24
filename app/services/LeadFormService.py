@@ -78,7 +78,8 @@ class LeadFormService:
 
     @staticmethod
     async def create_conversational_lead_form(
-        db: AsyncIOMotorDatabase, lead_form: LeadFormCreate
+        db: AsyncIOMotorDatabase,
+        lead_form: LeadFormCreate,
     ):
         create_response = await LeadFormRepository.create(db, lead_form)
 
@@ -86,6 +87,9 @@ class LeadFormService:
             await LeadFormService.send_lead_request_notification(
                 db, create_response.get("responseData", {}), lead_form.user_id
             )
+
+            # NOTE: Lead fetching is now handled by the frontend
+            # See ConversationLeadForm.tsx for sequential platform fetching
 
         return create_response
 
@@ -186,6 +190,9 @@ class LeadFormService:
             lead_form = update_response.get("responseData", {})
             user_id = lead_form.get("user_id", "")
             await LeadFormService.send_lead_request_notification(db, lead_form, user_id)
+
+            # NOTE: Lead fetching is now handled by the frontend
+            # See ConversationLeadForm.tsx for sequential platform fetching
 
         return update_response
 

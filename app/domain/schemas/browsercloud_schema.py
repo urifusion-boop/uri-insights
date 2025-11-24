@@ -10,6 +10,7 @@ class BrowsercloudPlatformEnum(str, Enum):
     LINKEDIN = "linkedin"
     FACEBOOK = "facebook"
     THREADS = "threads"
+    TIKTOK = "tiktok"
 
 
 class BrowsercloudTaskStatus(str, Enum):
