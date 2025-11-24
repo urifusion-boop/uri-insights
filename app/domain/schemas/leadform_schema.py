@@ -34,6 +34,16 @@ class LeadSourceSettings(BaseModel):
     last_scraped_status: Optional[LeadsProcessedStatus] = None
 
 
+class ScoringThresholds(BaseModel):
+    """Thresholds for lead qualification scoring"""
+    intent_score_min: float = 0.55
+    relevance_score_min: float = 0.50
+    final_score_min: float = 0.60
+
+    class Config:
+        extra = "forbid"
+
+
 class LeadFormBase(BaseModel):
     lead_form_id: str = Field(default_factory=lambda: str(ObjectId()))
     form_type: LeadFormTypeEnum
@@ -87,6 +97,11 @@ class LeadFormBase(BaseModel):
     excluded_keywords: Optional[List[str]] = None
     location: Optional[List[str]] = None
     intent_type: Optional[str] = None
+
+    # CLG Upgrade fields - Intent Analysis
+    category_context: Optional[str] = None  # Industry/category context (e.g., "skincare", "fintech")
+    implied_keywords: Optional[List[str]] = None  # Indirect signals (e.g., "harmattan", "dry skin", "winter")
+    scoring_thresholds: Optional[ScoringThresholds] = None  # Custom qualification thresholds
 
     # V2 Real-time Monitoring fields (for conversational forms)
     enable_realtime: Optional[bool] = False
@@ -179,6 +194,11 @@ class ConversationalLeadFormUpdate(BizConvLeadFormUpdateBase):
     excluded_keywords: Optional[List[str]] = None
     location: Optional[List[str]] = None
     intent_type: Optional[str] = None
+
+    # CLG Upgrade fields - Intent Analysis
+    category_context: Optional[str] = None  # Industry/category context (e.g., "skincare", "fintech")
+    implied_keywords: Optional[List[str]] = None  # Indirect signals (e.g., "harmattan", "dry skin", "winter")
+    scoring_thresholds: Optional[ScoringThresholds] = None  # Custom qualification thresholds
 
     # V2 Real-time Monitoring fields
     enable_realtime: Optional[bool] = None
