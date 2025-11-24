@@ -39,6 +39,7 @@ class ConversationalLeadJobService:
             lead_form: The lead form document containing platform configs and keywords
             user_id: User ID to assign leads to
         """
+        print(f"🚀 BACKGROUND JOB STARTED: Fetching leads for form {lead_form.get('lead_form_id')}")
         try:
             platform_configs = lead_form.get("platform_configs", [])
             keywords = lead_form.get("keywords", [])

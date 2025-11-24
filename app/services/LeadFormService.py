@@ -49,7 +49,7 @@ class LeadFormService:
                 db=db, background_tasks=background_tasks, lead_form=lead_form
             )
         elif lead_form.form_type == LeadFormTypeEnum.CONVERSATIONAL:
-            return await LeadFormService.create_conversational_lead_form(db, lead_form)
+            return await LeadFormService.create_conversational_lead_form(db, lead_form, background_tasks)
         else:
             if lead_form.per_page and lead_form.per_page == 0:
                 return UriResponse.custom_response(
@@ -93,12 +93,15 @@ class LeadFormService:
             if background_tasks:
                 from app.services.ConversationalLeadJobService import ConversationalLeadJobService
                 lead_form_data = create_response.get("responseData", {})
+                print(f"✅ Adding background task for conversational lead form {lead_form_data.get('lead_form_id')}")
                 background_tasks.add_task(
                     ConversationalLeadJobService.fetch_leads_from_platforms,
                     db,
                     lead_form_data,
                     lead_form.user_id
                 )
+            else:
+                print("⚠️ No background_tasks provided - skipping lead fetching")
 
         return create_response
 
@@ -204,12 +207,15 @@ class LeadFormService:
             # Trigger immediate background job to fetch leads
             if background_tasks:
                 from app.services.ConversationalLeadJobService import ConversationalLeadJobService
+                print(f"✅ Adding background task for conversational lead form update {lead_form.get('lead_form_id')}")
                 background_tasks.add_task(
                     ConversationalLeadJobService.fetch_leads_from_platforms,
                     db,
                     lead_form,
                     user_id
                 )
+            else:
+                print("⚠️ No background_tasks provided - skipping lead fetching")
 
         return update_response
 
