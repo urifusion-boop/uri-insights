@@ -170,10 +170,9 @@ class LeadHelper:
                 )
 
                 if not result or not result.get("status"):
-                    print(f"Feature limit verification failed for {user_id}, bypassing for local testing")
-                    # return UriResponse.custom_response(
-                    #     "Feature limit exceeded", 403, False
-                    # )  # ⚠️ Bypassed for local testing
+                    return UriResponse.custom_response(
+                        "Feature limit exceeded", 403, False
+                    )
 
                 return await func(*args, **kwargs)
 

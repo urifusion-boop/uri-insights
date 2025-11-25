@@ -353,8 +353,7 @@ class LeadService:
         )
 
         if not feature_limit_response or not feature_limit_response.get("status"):
-            print(f"Feature limit verification failed for {user_id}, bypassing for local testing")
-            # return  # ⚠️ Bypassed for local testing
+            return
 
         else:
             fl_data = feature_limit_response.get("responseData", {}).get("data", {})
