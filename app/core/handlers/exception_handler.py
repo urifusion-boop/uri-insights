@@ -24,7 +24,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
     log_data = {
         "userId": user_id,
-        "exceptionDate": datetime.utcnow().isoformat(),
+        "exceptionDate": DateHelper.utc_now_iso(),
         "method": request.method,
         "url": request.url.path,
         "status": 500,

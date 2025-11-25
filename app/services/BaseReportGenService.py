@@ -192,7 +192,7 @@ class BaseReportGenerator(ABC):
     async def _handle_failure(self, e: Exception, url: str) -> None:
         exception_log = {
             "userId": self.request.user_id,
-            "exceptionDate": datetime.utcnow().isoformat(),
+            "exceptionDate": DateHelper.utc_now_iso(),
             "method": "POST",
             "url": url,
             "status": 500,

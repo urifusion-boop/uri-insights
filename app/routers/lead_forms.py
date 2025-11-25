@@ -110,18 +110,34 @@ async def fetch_conversational_leads(
 
     # Trigger the background job to fetch and analyze leads
     try:
-        await ConversationalLeadJobService.fetch_leads_from_platforms(
+        stats = await ConversationalLeadJobService.fetch_leads_from_platforms(
             db=db,
             lead_form=lead_form,
             user_id=user_id
         )
 
+        # Build a professional message based on the results
+        message = "Lead fetching and intent analysis completed successfully"
+        if stats["new_leads_saved"] > 0 and stats["duplicates_skipped"] > 0:
+            message = f"Found {stats['new_leads_saved']} new leads. {stats['duplicates_skipped']} duplicates were already in your database."
+        elif stats["new_leads_saved"] > 0:
+            message = f"Successfully found {stats['new_leads_saved']} new leads!"
+        elif stats["duplicates_skipped"] > 0:
+            message = f"No new leads found. All {stats['duplicates_skipped']} qualified leads were already in your database."
+        elif stats["total_qualified"] == 0 and stats["total_fetched"] > 0:
+            message = f"Analyzed {stats['total_fetched']} posts but none matched your criteria."
+        elif stats["total_fetched"] == 0:
+            message = "No posts found matching your keywords."
+
         return UriResponse.get_status_response(
             response={
                 "status": True,
                 "responseCode": 200,
-                "responseMessage": "Lead fetching and intent analysis completed successfully",
-                "responseData": {"lead_form_id": lead_form_id}
+                "responseMessage": message,
+                "responseData": {
+                    "lead_form_id": lead_form_id,
+                    "stats": stats
+                }
             },
             status_code=200
         )

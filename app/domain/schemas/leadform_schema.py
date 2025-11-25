@@ -118,7 +118,7 @@ class LeadFormBase(BaseModel):
 
     class Config:
         use_enum_values = True
-        json_encoders = {datetime: lambda v: v.isoformat()}
+        json_encoders = {datetime: lambda v: v.isoformat() + "Z" if v else None}
 
 
 class LeadFormCreate(LeadFormBase):
@@ -185,7 +185,7 @@ class BusinessLeadFormUpdate(BizConvLeadFormUpdateBase):
     settings: Optional[LeadSourceSettings] = None
 
     class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}
+        json_encoders = {datetime: lambda v: v.isoformat() + "Z" if v else None}
 
 
 class ConversationalLeadFormUpdate(BizConvLeadFormUpdateBase):
@@ -210,4 +210,4 @@ class LeadForm(LeadFormBase):
     id: str = Field(default_factory=lambda: str(ObjectId()))
 
     class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}
+        json_encoders = {datetime: lambda v: v.isoformat() + "Z" if v else None}

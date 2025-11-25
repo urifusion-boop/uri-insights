@@ -232,3 +232,13 @@ class DateHelper:
             return None
 
         return raw_datetime.strftime("%d %b %y")  # e.g., "Jul 28, 2025"
+
+    @staticmethod
+    def utc_now_iso() -> str:
+        """
+        Returns current UTC time as ISO 8601 string with 'Z' suffix for proper timezone handling.
+
+        Returns:
+            str: ISO 8601 formatted UTC timestamp (e.g., "2025-11-25T12:24:00.123456Z")
+        """
+        return datetime.utcnow().isoformat() + 'Z'

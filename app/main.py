@@ -49,6 +49,7 @@ from app.routers import (
     openai_apify_twitter,
     openai_apify_tiktok,
     openai_apify_facebook,
+    lead_search_history,
 )
 from app.core.auth_bearer import JWTBearer
 from app.core.handlers.exception_handler import global_exception_handler
@@ -376,6 +377,13 @@ app.include_router(
     openai_apify_facebook.router,
     prefix="/openai-apify-facebook",
     tags=["OpenAI Apify Facebook Integration"],
+)
+
+app.include_router(
+    lead_search_history.router,
+    prefix="/api/v1",
+    tags=["Lead Search History"],
+    dependencies=[Depends(JWTBearer(validate_subscription=True))],
 )
 
 

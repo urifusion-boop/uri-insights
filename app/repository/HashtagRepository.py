@@ -1,3 +1,4 @@
+from app.core.helpers.date_helper import DateHelper
 from typing import Dict, Any, Optional
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from bson import ObjectId
@@ -13,8 +14,8 @@ class HashtagRepository:
     ) -> Dict[str, Any]:
         db_hashtag = hashtag.dict()
         db_hashtag["_id"] = str(ObjectId())
-        db_hashtag["createdAt"] = datetime.utcnow().isoformat()
-        db_hashtag["updatedAt"] = datetime.utcnow().isoformat()
+        db_hashtag["createdAt"] = DateHelper.utc_now_iso()
+        db_hashtag["updatedAt"] = DateHelper.utc_now_iso()
 
         await db["hashtags"].insert_one(db_hashtag)
 
@@ -45,7 +46,7 @@ class HashtagRepository:
         db: AsyncIOMotorDatabase, hashtag: schemas.HashtagUpdate
     ) -> Optional[Dict[str, Any]]:
         db_hashtag = hashtag.dict(exclude_unset=True)
-        db_hashtag["updatedAt"] = datetime.utcnow().isoformat()
+        db_hashtag["updatedAt"] = DateHelper.utc_now_iso()
 
         result = await db["hashtags"].update_one(
             {"_id": hashtag._id}, {"$set": db_hashtag}

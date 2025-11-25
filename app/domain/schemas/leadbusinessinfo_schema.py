@@ -36,7 +36,7 @@ class LeadBusinessInfoBase(BaseModel):
     settings: Optional[LeadSourceSettings] = None
 
     class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}
+        json_encoders = {datetime: lambda v: v.isoformat() + "Z" if v else None}
 
 
 class LeadBusinessInfoCreate(LeadBusinessInfoBase):
@@ -58,11 +58,11 @@ class LeadBusinessInfoUpdate(BaseModel):
     next_generation_date: Optional[datetime] = None
 
     class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}
+        json_encoders = {datetime: lambda v: v.isoformat() + "Z" if v else None}
 
 
 class LeadBusinessInfo(LeadBusinessInfoBase):
     id: str = Field(default_factory=lambda: str(ObjectId()))
 
     class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}
+        json_encoders = {datetime: lambda v: v.isoformat() + "Z" if v else None}

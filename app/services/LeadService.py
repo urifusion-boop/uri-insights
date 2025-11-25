@@ -408,9 +408,9 @@ class LeadService:
                     created_iso = created_dt.isoformat()
                 except Exception:
                     # Fallback to current time if parsing fails
-                    created_iso = datetime.utcnow().isoformat()
+                    created_iso = DateHelper.utc_now_iso()
             else:
-                created_iso = datetime.utcnow().isoformat()
+                created_iso = DateHelper.utc_now_iso()
 
             leads_to_create.append(
                 LeadCreate(
@@ -453,7 +453,7 @@ class LeadService:
 
         update_payload = {
             "settings.conversational_twitter_fetch": {
-                "last_fetched_at": datetime.utcnow().isoformat(),
+                "last_fetched_at": DateHelper.utc_now_iso(),
                 "last_fetch_count": len(tweets),
                 "keyword": keyword,
                 "interval_hours": interval_hours,
@@ -537,7 +537,7 @@ class LeadService:
         posts = result.get("posts", [])
         leads_to_create: List[LeadCreate] = []
         for p in posts:
-            created_iso = datetime.utcnow().isoformat()
+            created_iso = DateHelper.utc_now_iso()
             ts = p.get("created_at") or p.get("createTime")
             if ts:
                 try:
@@ -546,7 +546,7 @@ class LeadService:
                     else:
                         created_iso = datetime.utcfromtimestamp(int(ts)).isoformat()
                 except Exception:
-                    created_iso = datetime.utcnow().isoformat()
+                    created_iso = DateHelper.utc_now_iso()
 
             url = p.get("url") or p.get("webVideoUrl") or p.get("video_url")
             author = p.get("author") or p.get("username") or "TikTok User"
@@ -592,7 +592,7 @@ class LeadService:
 
         update_payload = {
             "settings.conversational_tiktok_fetch": {
-                "last_fetched_at": datetime.utcnow().isoformat(),
+                "last_fetched_at": DateHelper.utc_now_iso(),
                 "last_fetch_count": len(posts),
                 "keyword": keyword,
                 "interval_hours": interval_hours,
@@ -675,13 +675,13 @@ class LeadService:
         posts = result.get("posts", [])
         leads_to_create: List[LeadCreate] = []
         for p in posts:
-            created_iso = datetime.utcnow().isoformat()
+            created_iso = DateHelper.utc_now_iso()
             ts = p.get("created_at") or p.get("created_time")
             if ts:
                 try:
                     created_iso = datetime.fromisoformat(str(ts)).isoformat()
                 except Exception:
-                    created_iso = datetime.utcnow().isoformat()
+                    created_iso = DateHelper.utc_now_iso()
 
             url = p.get("url")
             author = p.get("author") or "Facebook User"
@@ -715,7 +715,7 @@ class LeadService:
 
         update_payload = {
             "settings.conversational_facebook_fetch": {
-                "last_fetched_at": datetime.utcnow().isoformat(),
+                "last_fetched_at": DateHelper.utc_now_iso(),
                 "last_fetch_count": len(posts),
                 "keyword": keyword,
                 "interval_hours": interval_hours,
@@ -1247,7 +1247,7 @@ class LeadService:
                     user_id = lead_form.get("user_id", "")
                     log_data = {
                         "userId": user_id,
-                        "exceptionDate": datetime.utcnow().isoformat(),
+                        "exceptionDate": DateHelper.utc_now_iso(),
                         "method": "POST",
                         "status": 500,
                         "exception": "".join(

@@ -3,6 +3,7 @@ from typing import AsyncGenerator, Dict, Any, Optional, List
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from bson import ObjectId
 from datetime import datetime, timedelta
+from app.core.helpers.date_helper import DateHelper
 from app.domain.enums.lead_enum import LeadsProcessedStatus
 from app.domain.responses.uri_response import UriResponse
 from app.domain.schemas.leadbusinessinfo_schema import (
@@ -30,8 +31,8 @@ class LeadBusinessInfoRepository:
             return UriResponse.conflict_response("lead business info", "already exists")
 
         lead_business_info_data["lead_business_info_id"] = str(ObjectId())
-        lead_business_info_data["created_date"] = datetime.now().isoformat()
-        lead_business_info_data["last_updated"] = datetime.now().isoformat()
+        lead_business_info_data["created_date"] = DateHelper.utc_now_iso()
+        lead_business_info_data["last_updated"] = DateHelper.utc_now_iso()
 
         await db["lead_business_info"].insert_one(lead_business_info_data)
 
@@ -46,7 +47,7 @@ class LeadBusinessInfoRepository:
         updates: LeadBusinessInfoUpdate,
     ):
         updates_data = updates.dict(exclude_unset=True)
-        updates_data["last_updated"] = datetime.now().isoformat()
+        updates_data["last_updated"] = DateHelper.utc_now_iso()
 
         result = await db["lead_business_info"].find_one_and_update(
             {"lead_business_info_id": lead_business_info_id},

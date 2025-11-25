@@ -95,7 +95,7 @@ class LeadBase(BaseModel):
     intent_reasoning: Optional[str] = None  # Brief explanation of intent analysis
 
     class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}
+        json_encoders = {datetime: lambda v: v.isoformat() + "Z" if v else None}
 
 
 # Models for CRUD Operations
@@ -168,7 +168,7 @@ class LeadUpdate(BaseModel):
     last_updated: datetime = Field(default_factory=datetime.utcnow)
 
     class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}
+        json_encoders = {datetime: lambda v: v.isoformat() + "Z" if v else None}
 
 
 class Lead(LeadBase):
@@ -179,4 +179,4 @@ class Lead(LeadBase):
     id: str = Field(default_factory=lambda: str(ObjectId()))  # MongoDB ObjectId
 
     class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}
+        json_encoders = {datetime: lambda v: v.isoformat() + "Z" if v else None}

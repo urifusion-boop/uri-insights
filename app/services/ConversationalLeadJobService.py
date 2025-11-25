@@ -4,6 +4,7 @@ Background job service for fetching leads from Twitter, Facebook, and TikTok
 when a conversational lead form is created or updated.
 """
 import asyncio
+import time
 from typing import Dict, List, Optional
 from datetime import datetime
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -13,7 +14,9 @@ from app.services.OpenAIApifyFacebookService import OpenAIApifyFacebookService
 from app.services.OpenAIApifyTiktokService import OpenAIApifyTiktokService
 from app.services.IntentAnalysisService import IntentAnalysisService, CategoryConfig
 from app.repository.LeadRepository import LeadRepository
+from app.repository.LeadSearchHistoryRepository import LeadSearchHistoryRepository
 from app.domain.schemas.lead_schema import LeadCreate
+from app.domain.schemas.lead_search_history_schema import LeadSearchHistoryCreate, SearchResultStats
 from app.domain.enums.lead_enum import LeadSourceEnum, LeadStatusEnum, LeadOpportunityTypeEnum, IntentCategoryEnum, SentimentTypeEnum
 from app.domain.enums.leadform_enum import LeadFormTypeEnum
 from app.domain.schemas.browsercloud_schema import BrowsercloudPlatformEnum
@@ -30,7 +33,7 @@ class ConversationalLeadJobService:
         db: AsyncIOMotorDatabase,
         lead_form: Dict,
         user_id: str,
-    ):
+    ) -> Dict:
         """
         Fetch leads from all enabled platforms in the lead form configuration.
         This runs as a background job immediately after form save/update.
@@ -39,7 +42,22 @@ class ConversationalLeadJobService:
             db: MongoDB database instance
             lead_form: The lead form document containing platform configs and keywords
             user_id: User ID to assign leads to
+
+        Returns:
+            Dict with statistics: total_fetched, total_qualified, new_leads_saved, duplicates_skipped
         """
+        stats = {
+            "total_fetched": 0,
+            "total_qualified": 0,
+            "new_leads_saved": 0,
+            "duplicates_skipped": 0
+        }
+
+        # Track start time for duration
+        start_time = time.time()
+        search_success = True
+        error_msg = None
+
         try:
             print(f"🚀 BACKGROUND JOB STARTED: Fetching leads for form {lead_form.get('lead_form_id')}")
             print(f"   Platform configs: {lead_form.get('platform_configs', [])}")
@@ -53,7 +71,7 @@ class ConversationalLeadJobService:
 
             if not keywords or len(keywords) == 0:
                 print(f"No keywords provided for lead form {lead_form.get('lead_form_id')}")
-                return
+                return stats
 
             # Use first keyword for fetching (can be enhanced to use multiple keywords)
             keyword = keywords[0]
@@ -146,6 +164,9 @@ class ConversationalLeadJobService:
                 except Exception as e:
                     print(f"Error fetching TikTok leads: {str(e)}")
 
+            # Update statistics
+            stats["total_fetched"] = len(all_leads)
+
             # Analyze leads for intent and filter qualified ones
             if all_leads:
                 print(f"📊 INTENT ANALYSIS: Analyzing {len(all_leads)} posts for lead qualification...")
@@ -164,12 +185,26 @@ class ConversationalLeadJobService:
                     all_leads, category_config, intent_min, relevance_min, final_min
                 )
 
+                stats["total_qualified"] = len(qualified_leads)
                 print(f"✅ INTENT ANALYSIS COMPLETE: {len(qualified_leads)}/{len(all_leads)} leads qualified")
 
                 # Save only qualified leads to database
                 if qualified_leads:
-                    await ConversationalLeadJobService._save_leads_batch(db, qualified_leads)
-                    print(f"Successfully saved {len(qualified_leads)} qualified leads from {len(enabled_platforms)} platform(s)")
+                    save_result = await ConversationalLeadJobService._save_leads_batch(db, qualified_leads)
+                    new_count = save_result.get("successful_count", 0)
+                    duplicate_count = save_result.get("skipped_duplicates", 0)
+
+                    stats["new_leads_saved"] = new_count
+                    stats["duplicates_skipped"] = duplicate_count
+
+                    if new_count > 0 and duplicate_count > 0:
+                        print(f"✅ Saved {new_count} new leads, {duplicate_count} duplicates skipped")
+                    elif new_count > 0:
+                        print(f"✅ Successfully saved {new_count} qualified leads from {len(enabled_platforms)} platform(s)")
+                    elif duplicate_count > 0:
+                        print(f"ℹ️ All {duplicate_count} qualified leads were already in your database")
+                    else:
+                        print(f"No new leads saved")
                 else:
                     print(f"No qualified leads found after intent analysis")
             else:
@@ -179,7 +214,34 @@ class ConversationalLeadJobService:
             import traceback
             print(f"❌ ERROR in fetch_leads_from_platforms: {str(e)}")
             print(f"   Traceback: {traceback.format_exc()}")
+            search_success = False
+            error_msg = str(e)
             # Don't raise - this is a background job, we just log the error
+
+        # Calculate duration
+        duration = time.time() - start_time
+
+        # Save search history
+        try:
+            search_history = LeadSearchHistoryCreate(
+                user_id=user_id,
+                lead_form_id=lead_form.get("lead_form_id", ""),
+                lead_form_name=lead_form.get("form_title", ""),
+                keyword=keywords[0] if keywords else "",
+                platforms=enabled_platforms,
+                results=SearchResultStats(**stats),
+                duration_seconds=round(duration, 2),
+                success=search_success,
+                error_message=error_msg
+            )
+
+            await LeadSearchHistoryRepository.create(db, search_history)
+            print(f"📝 Search history saved: {stats['new_leads_saved']} new, {stats['duplicates_skipped']} duplicates")
+        except Exception as history_error:
+            print(f"⚠️ Failed to save search history: {str(history_error)}")
+            # Don't fail the entire operation if history save fails
+
+        return stats
 
     @staticmethod
     async def _fetch_twitter_leads(
@@ -375,11 +437,11 @@ class ConversationalLeadJobService:
     async def _save_leads_batch(
         db: AsyncIOMotorDatabase,
         leads: List[LeadCreate]
-    ):
-        """Save multiple leads to database"""
+    ) -> Dict:
+        """Save multiple leads to database, returns statistics"""
         try:
-            for lead in leads:
-                await LeadRepository.create_lead(db, lead)
+            result = await LeadRepository.multiple_create_leads(db, leads)
+            return result.get("responseData", {})
         except Exception as e:
             print(f"Error saving leads batch: {str(e)}")
             raise
