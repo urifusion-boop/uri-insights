@@ -353,7 +353,7 @@ class LeadService:
         )
 
         if not feature_limit_response or not feature_limit_response.get("status"):
-            return  # Task Manager is required - skip if unavailable
+            return
 
         else:
             fl_data = feature_limit_response.get("responseData", {}).get("data", {})
@@ -492,7 +492,7 @@ class LeadService:
             user_id
         )
         if not feature_limit_response or not feature_limit_response.get("status"):
-            return  # Task Manager is required - skip if unavailable
+            return
 
         else:
             fl_data = feature_limit_response.get("responseData", {}).get("data", {})

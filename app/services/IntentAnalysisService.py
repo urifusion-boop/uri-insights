@@ -70,69 +70,78 @@ class IntentAnalysisService:
     Uses LLM to detect direct and implied intent signals
     """
 
-    SYSTEM_PROMPT = """You are an expert lead qualification analyst specializing in detecting buying intent from social media posts.
+    SYSTEM_PROMPT = """You are an expert lead qualification analyst. Your task is to determine if a social media post author matches what the user is looking for.
 
-Your task is to analyze a post and determine if the author shows buying intent for a specific product/service category.
+CRITICAL UNDERSTANDING:
+Read the USER'S BUSINESS CONTEXT carefully. They could be looking for ANYONE or ANYTHING:
+- Buyers/customers who need their product
+- Job seekers who want employment
+- Sellers/vendors who offer what they need
+- Partners, friends, spouses, prayer partners, study groups
+- Literally ANYTHING - always read their context first
 
-IMPORTANT: Real buyers often express intent INDIRECTLY through:
-- Problems: "My skin is so dry" (needs moisturizer)
-- Situations: "Harmattan is making my skin crack" (seasonal need)
-- Competitor frustration: "The Ordinary ruined my skin" (looking to switch)
-- Comparisons: "Which is better: CeraVe or La Roche Posay?" (researching purchase)
-- Life changes: "Just moved to a new city" (multiple needs)
+YOUR JOB:
+1. Understand WHAT the user wants to find (from their business context)
+2. Check if this POST AUTHOR is expressing that need/intent
+3. Distinguish between GENUINE personal expression vs PROMOTIONAL advertising
+
+UNIVERSAL FILTERING RULE - Detect Promotional Language:
+
+Posts are PROMOTIONAL (score 0.0) if they use:
+- **Audience-directed questions**: "Do YOU need?", "Are YOU looking for?", "Want to?", "Need a?"
+- **Advertising language**: "We offer", "Contact me", "PM me", "DM for", "Check out my", "Visit our"
+- **Sales tactics**: Prices listed, payment plans, "SALE", "PROMO", "Limited time", emojis for promotion (🔥💯✨)
+- **Call-to-action**: "Apply now", "Order today", "Book now", "Sign up", "Get yours"
+- **Business language**: "Our services", "We provide", "Available for", "Accepting orders"
+
+Posts are GENUINE (score normally) if they express:
+- **Personal need/want**: "I need", "I'm looking for", "Can someone help", "Does anyone know"
+- **Personal problems**: "My laptop is broken", "I can't find", "I'm struggling with"
+- **Personal situations**: "Just moved to", "Starting to", "Planning my"
+- **Questions seeking help**: "Where can I find", "Who knows a good", "Recommendations for"
+- **Complaints/frustrations**: "This is so expensive", "Why is X so hard", "Fed up with"
 
 Scoring Guidelines:
-- intent_score: 0.8-1.0 = Direct purchase language ("where to buy", "looking for")
-                0.6-0.79 = Strong implied intent (problems, comparisons, competitor issues)
-                0.4-0.59 = Moderate implied intent (situations, lifestyle mentions)
+- intent_score: 0.8-1.0 = Direct explicit match ("I need X", "Looking for Y")
+                0.6-0.79 = Strong implied intent (problems, frustrations, questions)
+                0.4-0.59 = Moderate implied (situations, lifestyle mentions)
                 0.2-0.39 = Weak signals
-                0.0-0.19 = No intent detected
+                0.0 = Promotional/advertising OR excluded keywords OR opposite side
 
-- relevance_score: How well does the post match the product/service category?
+- relevance_score: How well does the post match the user's specific context?
 
-- urgency_flag: True if words like "urgent", "asap", "now", "today", "immediately" or strong emotional language
+- urgency_flag: True if urgent/emotional language
 
-- sentiment: Negative sentiment about current situation often = higher buying intent
+- sentiment: Consider if negative sentiment indicates readiness for change
 
-- intent_category:
-  - "direct": Explicit purchase language
-  - "implied": Situational or lifestyle signals
-  - "problem": Describing a problem the product solves
-  - "comparison": Comparing options/brands
-  - "competitor_negative": Frustration with competitor brand
-
-IMPORTANT FILTERING RULES:
-- If the post contains EXCLUDED KEYWORDS, score intent_score and relevance_score as 0.0 - these are sellers, promoters, or spam.
-- If the author is SELLING/PROMOTING (e.g., "I built", "check out my", "launching", "sign up"), score 0.0 - we want BUYERS not sellers.
-- Content creators teaching/demonstrating (tutorials, tips, fixes) are NOT leads - they are sellers.
-
-Be generous with implied intent detection - the goal is to capture leads that keyword matching would miss."""
+Be generous with genuine personal expression, but ruthless with promotional content."""
 
     @staticmethod
     def _build_analysis_prompt(text: str, config: CategoryConfig) -> str:
         """Build the analysis prompt with category context"""
-        return f"""Analyze this social media post for interest/intent in the "{config.category_context}" category.
+        return f"""Analyze this social media post to determine if the author is a qualified lead based on the user's business context.
 
 POST: "{text}"
 
-CATEGORY CONTEXT: {config.category_context}
+USER'S BUSINESS CONTEXT (what they do and who they're looking for):
+{config.category_context}
 
-KEYWORDS TO LOOK FOR (direct signals):
+DIRECT KEYWORDS (explicit signals to look for):
 {', '.join(config.keywords) if config.keywords else 'None specified'}
 
-IMPLIED KEYWORDS (indirect signals - problems, situations):
+IMPLIED KEYWORDS (indirect signals - problems, situations, life changes):
 {', '.join(config.implied_keywords) if config.implied_keywords else 'None specified'}
 
-COMPETITOR BRANDS/ALTERNATIVES (switching intent):
+COMPETITORS TO MONITOR (mentions of alternatives/competitors):
 {', '.join(config.competitors) if config.competitors else 'None specified'}
 
-INTENT SIGNALS (phrases showing interest):
+INTENT SIGNALS (phrases showing readiness/interest):
 {', '.join(config.buying_signals) if config.buying_signals else 'None specified'}
 
-EXCLUDED KEYWORDS (spam/noise - sellers, promoters):
+EXCLUDED KEYWORDS (filter out these - wrong audience type):
 {', '.join(config.excluded_keywords) if config.excluded_keywords else 'None specified'}
 
-Analyze the post and return your assessment. Consider implied intent, not just explicit keywords."""
+Based on the USER'S BUSINESS CONTEXT, determine if this post author is a good match for what they're looking for. Consider both direct and implied signals."""
 
     @staticmethod
     async def analyze_post(

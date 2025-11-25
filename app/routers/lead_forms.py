@@ -23,6 +23,7 @@ from app.domain.requests.leadform_requests import (
     OrganizationSearchFormInput,
 )
 from app.services.LeadFormService import LeadFormService
+from app.services.ConversationalLeadJobService import ConversationalLeadJobService
 
 router = APIRouter()
 
@@ -78,6 +79,60 @@ async def create_conversational_lead_form(
     return UriResponse.get_status_response(
         response=jsonable_encoder(result), status_code=result["responseCode"]
     )
+
+
+@router.post("/conversation-search/fetch-leads")
+async def fetch_conversational_leads(
+    lead_form_id: str,
+    user_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Fetch and analyze leads from social platforms for a conversational lead form.
+    This endpoint triggers the ConversationalLeadJobService which includes intent analysis.
+    """
+    # Get the lead form
+    lead_form_result = await LeadFormRepository.get_by_id(db, lead_form_id)
+
+    if lead_form_result["responseCode"] != 200:
+        return UriResponse.get_status_response(
+            response={"message": "Lead form not found"},
+            status_code=404
+        )
+
+    lead_form = lead_form_result.get("responseData")
+
+    if not lead_form:
+        return UriResponse.get_status_response(
+            response={"message": "Lead form data not found"},
+            status_code=404
+        )
+
+    # Trigger the background job to fetch and analyze leads
+    try:
+        await ConversationalLeadJobService.fetch_leads_from_platforms(
+            db=db,
+            lead_form=lead_form,
+            user_id=user_id
+        )
+
+        return UriResponse.get_status_response(
+            response={
+                "status": True,
+                "responseCode": 200,
+                "responseMessage": "Lead fetching and intent analysis completed successfully",
+                "responseData": {"lead_form_id": lead_form_id}
+            },
+            status_code=200
+        )
+    except Exception as e:
+        print(f"Error in fetch_conversational_leads endpoint: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return UriResponse.get_status_response(
+            response={"message": f"Error fetching leads: {str(e)}", "lead_form_id": lead_form_id},
+            status_code=500
+        )
 
 
 @router.post("/auto-populate")

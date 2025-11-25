@@ -8,9 +8,9 @@ from typing import Dict, List, Optional
 from datetime import datetime
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
-from app.services.TwitterService import TwitterService
-from app.services.FacebookService import FacebookService
-from app.services.TiktokService import TiktokService
+from app.services.OpenAIApifyTwitterService import OpenAIApifyTwitterService
+from app.services.OpenAIApifyFacebookService import OpenAIApifyFacebookService
+from app.services.OpenAIApifyTiktokService import OpenAIApifyTiktokService
 from app.services.IntentAnalysisService import IntentAnalysisService, CategoryConfig
 from app.repository.LeadRepository import LeadRepository
 from app.domain.schemas.lead_schema import LeadCreate
@@ -58,11 +58,11 @@ class ConversationalLeadJobService:
             # Use first keyword for fetching (can be enhanced to use multiple keywords)
             keyword = keywords[0]
 
-            # Collect all enabled platforms
+            # Collect all enabled platforms (normalize to lowercase for comparison)
             enabled_platforms = {
-                config.get("platform"): config
+                config.get("platform").lower(): config
                 for config in platform_configs
-                if config.get("enabled", False)
+                if config.get("enabled", False) and config.get("platform")
             }
 
             if not enabled_platforms:
@@ -108,6 +108,11 @@ class ConversationalLeadJobService:
             #             print(f"Error fetching leads: {str(result)}")
 
             # TEMPORARY: Sequential fetching (replace with concurrent version above later)
+            print(f"📋 Enabled platforms: {list(enabled_platforms.keys())}")
+            print(f"   Checking for Twitter: '{BrowsercloudPlatformEnum.TWITTER.value}'")
+            print(f"   Checking for Facebook: '{BrowsercloudPlatformEnum.FACEBOOK.value}'")
+            print(f"   Checking for TikTok: '{BrowsercloudPlatformEnum.TIKTOK.value}'")
+
             # Fetch Twitter leads
             if BrowsercloudPlatformEnum.TWITTER.value in enabled_platforms:
                 try:
@@ -143,7 +148,7 @@ class ConversationalLeadJobService:
 
             # Analyze leads for intent and filter qualified ones
             if all_leads:
-                print(f"📊 INTENT ANALYSIS: Analyzing {len(all_leads)} posts for buying intent...")
+                print(f"📊 INTENT ANALYSIS: Analyzing {len(all_leads)} posts for lead qualification...")
 
                 # Build category configuration from lead form
                 category_config = ConversationalLeadJobService._build_category_config(lead_form)
@@ -182,10 +187,14 @@ class ConversationalLeadJobService:
         user_id: str,
         lead_form_id: Optional[str] = None
     ) -> List[LeadCreate]:
-        """Fetch leads from Twitter"""
+        """Fetch leads from Twitter using Apify"""
         try:
-            response = await TwitterService.fetch_twitter_search(keyword, limit=10)
-            tweets = response.get("responseData", {}).get("tweets", [])
+            print(f"🐦 Fetching Twitter leads for keyword: '{keyword}'")
+            twitter_service = OpenAIApifyTwitterService()
+            response = await twitter_service.fetch_tweets_with_analysis(keyword, max_tweets=10, analyze_sentiment=False)
+            print(f"   Twitter API response success: {response.get('success')}")
+            tweets = response.get("tweets", [])
+            print(f"   Found {len(tweets)} tweets")
 
             leads = []
             for tweet in tweets:
@@ -226,7 +235,9 @@ class ConversationalLeadJobService:
 
             return leads
         except Exception as e:
-            print(f"Error fetching Twitter leads: {str(e)}")
+            print(f"❌ Error fetching Twitter leads: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return []
 
     @staticmethod
@@ -235,13 +246,14 @@ class ConversationalLeadJobService:
         user_id: str,
         lead_form_id: Optional[str] = None
     ) -> List[LeadCreate]:
-        """Fetch leads from Facebook"""
+        """Fetch leads from Facebook using Apify"""
         try:
-            response = await FacebookService.fetch_posts(keyword, limit=10)
-            posts = (
-                response.get("responseData", {}).get("posts", [])
-                or response.get("responseData", {}).get("data", {}).get("posts", [])
-            )
+            print(f"📘 Fetching Facebook leads for keyword: '{keyword}'")
+            facebook_service = OpenAIApifyFacebookService()
+            response = await facebook_service.fetch_posts_with_analysis(keyword, max_posts=10, analyze_sentiment=False)
+            print(f"   Facebook API response success: {response.get('success')}")
+            posts = response.get("posts", [])
+            print(f"   Found {len(posts)} posts")
 
             leads = []
             for post in posts:
@@ -287,7 +299,9 @@ class ConversationalLeadJobService:
 
             return leads
         except Exception as e:
-            print(f"Error fetching Facebook leads: {str(e)}")
+            print(f"❌ Error fetching Facebook leads: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return []
 
     @staticmethod
@@ -296,13 +310,14 @@ class ConversationalLeadJobService:
         user_id: str,
         lead_form_id: Optional[str] = None
     ) -> List[LeadCreate]:
-        """Fetch leads from TikTok"""
+        """Fetch leads from TikTok using Apify"""
         try:
-            response = await TiktokService.fetch_posts(keyword, limit=10)
-            posts = (
-                response.get("responseData", {}).get("posts", [])
-                or response.get("responseData", {}).get("data", {}).get("posts", [])
-            )
+            print(f"🎵 Fetching TikTok leads for keyword: '{keyword}'")
+            tiktok_service = OpenAIApifyTiktokService()
+            response = await tiktok_service.fetch_posts_with_analysis(keyword, max_posts=10, analyze_sentiment=False)
+            print(f"   TikTok API response success: {response.get('success')}")
+            posts = response.get("posts", [])
+            print(f"   Found {len(posts)} posts")
 
             leads = []
             for post in posts:
@@ -351,7 +366,9 @@ class ConversationalLeadJobService:
 
             return leads
         except Exception as e:
-            print(f"Error fetching TikTok leads: {str(e)}")
+            print(f"❌ Error fetching TikTok leads: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return []
 
     @staticmethod
@@ -362,7 +379,7 @@ class ConversationalLeadJobService:
         """Save multiple leads to database"""
         try:
             for lead in leads:
-                await LeadRepository.create(db, lead)
+                await LeadRepository.create_lead(db, lead)
         except Exception as e:
             print(f"Error saving leads batch: {str(e)}")
             raise

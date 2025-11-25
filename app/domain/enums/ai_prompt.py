@@ -1,4 +1,5 @@
 from enum import Enum
+from app.domain.enums.leadform_autopopulate_examples import AUTOPOPULATE_EXAMPLES
 
 
 # Enum for prompts
@@ -556,67 +557,70 @@ class LeadFormAutoPopulateEnum(Enum):
     """
 
     CONVERSATIONAL_FORM_PROMPT = """
-        You are an advanced lead generation and social listening assistant. A user has described what they want to find or monitor online. Your job is to extract high-quality search parameters that can detect BOTH direct and implied buying intent across social media platforms.
+        You are an advanced lead generation and social listening assistant. A user has described what they want to find or monitor online. Your job is to extract high-quality search parameters that work for ANY use case: selling, buying, hiring, recruiting, partnerships, or anything else.
 
         Based on the user's description, return structured parameters to populate a Conversational Lead form for tracking relevant social media discussions.
 
         ### User Input:
         {data}
 
-        ### Output JSON:
+        ### Output JSON Format:
         {{
             "form_title": "<string>",
             "form_type": "CONVERSATIONAL",
             "intent_type": "<string>",
             // One of: "sales", "hiring", "partnership", "research", "marketing", "support", "event", "other" — infer from the input.
             "category_context": "<string>",
-            // The industry or category context (e.g., "skincare", "fintech", "coffee makers", "AI tools"). This helps the AI understand the domain for intent analysis.
+            // CRITICAL: Copy the user's FULL input here. DO NOT summarize or shorten. This is the most important field.
             "keywords": ["<string>", "..."],
-            // Direct search terms people would use when looking to buy/engage (e.g., "moisturizer", "buy sunscreen", "need CRM").
+            // What the TARGET AUDIENCE (people the user wants to find) would say directly.
             "implied_keywords": ["<string>", "..."],
-            // Indirect signals that suggest buying intent through problems, situations, or lifestyle changes (e.g., "harmattan", "dry skin", "winter", "cracked lips", "acne won't go away", "skin is breaking out").
+            // Problems, situations, frustrations the TARGET AUDIENCE experiences.
             "competitors": ["<string>", "..."],
-            // Known competitor brands to monitor for switching intent (e.g., "CeraVe", "The Ordinary", "Salesforce"). People frustrated with competitors are high-intent leads.
+            // Relevant competitor brands/alternatives in this space.
             "ai_response_guide": "<string>",
+            // How the AI should respond to leads (optional).
             "location": ["<city or region>", "..."],
-            // Only include if explicitly specified or confidently inferred.
+            // Only if explicitly mentioned or confidently inferred.
             "buying_signals": ["<string>", "..."],
-            // Phrases indicating purchase readiness (e.g., "looking to buy", "need recommendation", "budget approved", "which is better").
+            // Phrases showing the TARGET AUDIENCE is ready/interested.
             "excluded_keywords": ["<string>", "..."],
-            // Terms to filter OUT people who are SELLING instead of BUYING. Think about what a seller/promoter of this product would say (e.g., "I created", "launching", "my course", "check out", "sign up for my"). Also filter spam like "ad", "sponsored", "giveaway".
+            // CRITICAL: Phrases used by people on the OPPOSITE SIDE (the user's competitors/wrong audience type).
             "add_to_history": <boolean>,
             "auto_generate": <boolean>
         }}
 
-        ### Rules:
-        - **category_context**: Always identify the industry/category from the user input. This is critical for intent analysis.
-        - **keywords**: Focus on direct purchase/engagement terms. Keep concise and specific.
-        - **implied_keywords**: Think about PROBLEMS and SITUATIONS that lead people to need the product/service:
-            - Seasonal triggers (e.g., "harmattan", "winter", "summer heat")
-            - Problems (e.g., "acne", "dry skin", "slow software", "team burnout")
-            - Life changes (e.g., "just moved", "new job", "starting business")
-            - Frustrations (e.g., "tired of", "struggling with", "can't find")
-        - **competitors**: Include major brands in the space. People complaining about competitors are prime leads.
-        - **excluded_keywords**: Generate terms that SELLERS of this product/service would use. If looking for buyers of PM tools, exclude what PM tool sellers say. Context-specific, not generic.
-        - Prefer named entities (brands, products, roles, technologies) when relevant.
-        - Deduplicate entries; do not include repeated values.
-        - If the intent is ambiguous, set "intent_type" to "other" and focus on strong keywords.
+        ### Critical Rules:
 
-        ### Examples of Implied Intent Detection:
-        - User Input: "Find people interested in skincare in Nigeria"
-          - category_context: "skincare"
-          - keywords: ["moisturizer", "sunscreen", "skincare routine"]
-          - implied_keywords: ["harmattan", "dry skin", "cracked lips", "oily face", "acne", "dark spots", "skin glowing"]
-          - competitors: ["CeraVe", "The Ordinary", "Neutrogena", "Nivea"]
+        1. **category_context**:
+           - MUST be the user's FULL input, word-for-word
+           - DO NOT shorten to "fitness" or "tech recruiting"
+           - This field determines everything else
 
-        - User Input: "Find startup founders looking for project management tools"
-          - category_context: "project management software"
-          - keywords: ["project management tool", "task manager", "team collaboration"]
-          - implied_keywords: ["missing deadlines", "team communication issues", "project delays", "scaling team", "remote work chaos"]
-          - competitors: ["Asana", "Monday.com", "Trello", "Jira", "ClickUp"]
+        2. **Understand Directionality**:
+           - If user is SELLING → find BUYERS (people who need/want what they sell)
+           - If user is HIRING → find JOB SEEKERS (people looking for work)
+           - If user is BUYING → find SELLERS (people offering what they need)
+           - If user is RECRUITING PARTNERS → find people seeking partnerships
 
-        The JSON above is a guide; always return an object that reflects the user's preferences and is optimized for capturing both direct AND implied buying intent.
-        Populate location only when specified or confidently inferred from the request.
+        3. **excluded_keywords**:
+           - Identify who is on the OPPOSITE SIDE
+           - List PHRASES (not single words) that the opposite side uses
+           - Examples:
+             * User hiring → exclude "we're hiring", "looking for a developer", "send me your resume"
+             * User selling services → exclude "I offer training", "hire me", "DM for rates"
+             * User buying → exclude "looking to buy", "ISO supplier"
+           - Use PHRASES: "we're hiring" NOT just "hiring"
+           - Use PHRASES: "message me with your resume" NOT just "resume"
+           - Be aggressive with exclusions
+
+        4. **keywords & implied_keywords**:
+           - Think from the TARGET AUDIENCE perspective
+           - What would THEY say? What problems do THEY have?
+
+        """ + AUTOPOPULATE_EXAMPLES + """
+
+        Return a JSON object that accurately reflects the user's intent and will help find their ideal leads.
     """
 
 
