@@ -169,7 +169,6 @@ class ConversationalLeadJobService:
 
             # Analyze leads for intent and filter qualified ones
             if all_leads:
-                print(f"📊 INTENT ANALYSIS: Analyzing {len(all_leads)} posts for lead qualification...")
 
                 # Build category configuration from lead form
                 category_config = ConversationalLeadJobService._build_category_config(lead_form)
@@ -469,6 +468,84 @@ class ConversationalLeadJobService:
         )
 
     @staticmethod
+    async def _analyze_single_lead(
+        lead: LeadCreate,
+        category_config: CategoryConfig,
+        intent_min: float,
+        relevance_min: float,
+        final_min: float
+    ) -> tuple[LeadCreate | None, str]:
+        """
+        Analyze a single lead for buying intent
+
+        Returns:
+            Tuple of (lead if qualified else None, status message)
+        """
+        try:
+            # Get post text from mention field
+            post_text = lead.mention or lead.lead_reason or ""
+            if not post_text.strip():
+                return None, f"Skipping {lead.username}: no text content"
+
+            # Run intent analysis
+            intent_result = await IntentAnalysisService.analyze_post(
+                text=post_text,
+                config=category_config,
+                model="gpt-4o-mini"
+            )
+
+            # Calculate final score
+            final_score = IntentAnalysisService.calculate_final_score(
+                intent_result.intent_score,
+                intent_result.relevance_score,
+                intent_result.urgency_flag
+            )
+
+            # Map intent category enum
+            intent_category_map = {
+                "direct": IntentCategoryEnum.DIRECT,
+                "implied": IntentCategoryEnum.IMPLIED,
+                "problem": IntentCategoryEnum.PROBLEM,
+                "comparison": IntentCategoryEnum.COMPARISON,
+                "competitor_negative": IntentCategoryEnum.COMPETITOR_NEGATIVE,
+                "unknown": IntentCategoryEnum.UNKNOWN
+            }
+
+            # Map sentiment enum
+            sentiment_map = {
+                "positive": SentimentTypeEnum.POSITIVE,
+                "negative": SentimentTypeEnum.NEGATIVE,
+                "neutral": SentimentTypeEnum.NEUTRAL
+            }
+
+            # Populate intent fields in lead
+            lead.intent_score = intent_result.intent_score
+            lead.relevance_score = intent_result.relevance_score
+            lead.urgency_flag = intent_result.urgency_flag
+            lead.sentiment = sentiment_map.get(intent_result.sentiment.value, SentimentTypeEnum.NEUTRAL)
+            lead.intent_category = intent_category_map.get(intent_result.intent_category.value, IntentCategoryEnum.UNKNOWN)
+            lead.final_score = final_score
+            lead.intent_reasoning = intent_result.reasoning
+
+            # Check if meets qualification thresholds
+            is_qualified = (
+                intent_result.intent_score >= intent_min and
+                intent_result.relevance_score >= relevance_min and
+                final_score >= final_min
+            )
+
+            if is_qualified:
+                status = f"✅ QUALIFIED: {lead.username} | Intent:{intent_result.intent_score:.2f} Relevance:{intent_result.relevance_score:.2f} Final:{final_score:.2f}\n   POST: {post_text[:200]}\n   REASONING: {intent_result.reasoning}"
+                return lead, status
+            else:
+                status = f"❌ FILTERED: {lead.username} | Intent:{intent_result.intent_score:.2f} Relevance:{intent_result.relevance_score:.2f} Final:{final_score:.2f}\n   POST: {post_text[:200]}\n   REASONING: {intent_result.reasoning}"
+                return None, status
+
+        except Exception as e:
+            error_msg = f"Error analyzing lead {lead.username}: {str(e)}"
+            return None, error_msg
+
+    @staticmethod
     async def _analyze_and_filter_leads(
         leads: List[LeadCreate],
         category_config: CategoryConfig,
@@ -477,7 +554,7 @@ class ConversationalLeadJobService:
         final_min: float = 0.60
     ) -> List[LeadCreate]:
         """
-        Analyze all leads for buying intent and filter to qualified leads only
+        Analyze all leads for buying intent in parallel and filter to qualified leads only
 
         Args:
             leads: List of LeadCreate objects
@@ -490,76 +567,29 @@ class ConversationalLeadJobService:
         if not leads:
             return []
 
+        print(f"📊 INTENT ANALYSIS: Analyzing {len(leads)} posts in parallel for lead qualification...")
+
+        # Process all leads in parallel using asyncio.gather
+        tasks = [
+            ConversationalLeadJobService._analyze_single_lead(
+                lead, category_config, intent_min, relevance_min, final_min
+            )
+            for lead in leads
+        ]
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Collect qualified leads and print results
         qualified_leads = []
-
-        # Analyze each lead for intent
-        for lead in leads:
-            try:
-                # Get post text from mention field
-                post_text = lead.mention or lead.lead_reason or ""
-                if not post_text.strip():
-                    print(f"Skipping lead with no text content")
-                    continue
-
-                # Run intent analysis
-                intent_result = await IntentAnalysisService.analyze_post(
-                    text=post_text,
-                    config=category_config,
-                    model="gpt-4o-mini"
-                )
-
-                # Calculate final score
-                final_score = IntentAnalysisService.calculate_final_score(
-                    intent_result.intent_score,
-                    intent_result.relevance_score,
-                    intent_result.urgency_flag
-                )
-
-                # Map intent category enum
-                intent_category_map = {
-                    "direct": IntentCategoryEnum.DIRECT,
-                    "implied": IntentCategoryEnum.IMPLIED,
-                    "problem": IntentCategoryEnum.PROBLEM,
-                    "comparison": IntentCategoryEnum.COMPARISON,
-                    "competitor_negative": IntentCategoryEnum.COMPETITOR_NEGATIVE,
-                    "unknown": IntentCategoryEnum.UNKNOWN
-                }
-
-                # Map sentiment enum
-                sentiment_map = {
-                    "positive": SentimentTypeEnum.POSITIVE,
-                    "negative": SentimentTypeEnum.NEGATIVE,
-                    "neutral": SentimentTypeEnum.NEUTRAL
-                }
-
-                # Populate intent fields in lead
-                lead.intent_score = intent_result.intent_score
-                lead.relevance_score = intent_result.relevance_score
-                lead.urgency_flag = intent_result.urgency_flag
-                lead.sentiment = sentiment_map.get(intent_result.sentiment.value, SentimentTypeEnum.NEUTRAL)
-                lead.intent_category = intent_category_map.get(intent_result.intent_category.value, IntentCategoryEnum.UNKNOWN)
-                lead.final_score = final_score
-                lead.intent_reasoning = intent_result.reasoning
-
-                # Check if meets qualification thresholds
-                if (
-                    intent_result.intent_score >= intent_min and
-                    intent_result.relevance_score >= relevance_min and
-                    final_score >= final_min
-                ):
-                    qualified_leads.append(lead)
-                    print(f"✅ QUALIFIED: {lead.username} | Intent:{intent_result.intent_score:.2f} Relevance:{intent_result.relevance_score:.2f} Final:{final_score:.2f}")
-                    print(f"   POST: {post_text[:200]}")
-                    print(f"   REASONING: {intent_result.reasoning}")
-                else:
-                    print(f"❌ FILTERED: {lead.username} | Intent:{intent_result.intent_score:.2f} Relevance:{intent_result.relevance_score:.2f} Final:{final_score:.2f}")
-                    print(f"   POST: {post_text[:200]}")
-                    print(f"   REASONING: {intent_result.reasoning}")
-
-            except Exception as e:
-                print(f"Error analyzing lead {lead.username}: {str(e)}")
-                # Skip leads that fail analysis
+        for result in results:
+            if isinstance(result, Exception):
+                print(f"Exception during analysis: {str(result)}")
                 continue
+
+            lead, status = result
+            print(status)
+            if lead is not None:
+                qualified_leads.append(lead)
 
         return qualified_leads
 
