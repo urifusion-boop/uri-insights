@@ -111,7 +111,7 @@ Be generous with implied intent detection - the goal is to capture leads that ke
     @staticmethod
     def _build_analysis_prompt(text: str, config: CategoryConfig) -> str:
         """Build the analysis prompt with category context"""
-        return f"""Analyze this social media post for buying intent in the "{config.category_context}" category.
+        return f"""Analyze this social media post for interest/intent in the "{config.category_context}" category.
 
 POST: "{text}"
 
@@ -123,13 +123,13 @@ KEYWORDS TO LOOK FOR (direct signals):
 IMPLIED KEYWORDS (indirect signals - problems, situations):
 {', '.join(config.implied_keywords) if config.implied_keywords else 'None specified'}
 
-COMPETITOR BRANDS (switching intent):
+COMPETITOR BRANDS/ALTERNATIVES (switching intent):
 {', '.join(config.competitors) if config.competitors else 'None specified'}
 
-BUYING SIGNALS:
+INTENT SIGNALS (phrases showing interest):
 {', '.join(config.buying_signals) if config.buying_signals else 'None specified'}
 
-EXCLUDED KEYWORDS (spam/noise):
+EXCLUDED KEYWORDS (spam/noise - sellers, promoters):
 {', '.join(config.excluded_keywords) if config.excluded_keywords else 'None specified'}
 
 Analyze the post and return your assessment. Consider implied intent, not just explicit keywords."""

@@ -11,9 +11,10 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.services.TwitterService import TwitterService
 from app.services.FacebookService import FacebookService
 from app.services.TiktokService import TiktokService
+from app.services.IntentAnalysisService import IntentAnalysisService, CategoryConfig
 from app.repository.LeadRepository import LeadRepository
 from app.domain.schemas.lead_schema import LeadCreate
-from app.domain.enums.lead_enum import LeadSourceEnum, LeadStatusEnum, LeadOpportunityTypeEnum
+from app.domain.enums.lead_enum import LeadSourceEnum, LeadStatusEnum, LeadOpportunityTypeEnum, IntentCategoryEnum, SentimentTypeEnum
 from app.domain.enums.leadform_enum import LeadFormTypeEnum
 from app.domain.schemas.browsercloud_schema import BrowsercloudPlatformEnum
 
@@ -140,10 +141,32 @@ class ConversationalLeadJobService:
                 except Exception as e:
                     print(f"Error fetching TikTok leads: {str(e)}")
 
-            # Save all leads to database
+            # Analyze leads for intent and filter qualified ones
             if all_leads:
-                await ConversationalLeadJobService._save_leads_batch(db, all_leads)
-                print(f"Successfully saved {len(all_leads)} leads from {len(enabled_platforms)} platform(s)")
+                print(f"📊 INTENT ANALYSIS: Analyzing {len(all_leads)} posts for buying intent...")
+
+                # Build category configuration from lead form
+                category_config = ConversationalLeadJobService._build_category_config(lead_form)
+
+                # Get custom scoring thresholds if specified
+                scoring_thresholds = lead_form.get("scoring_thresholds", {})
+                intent_min = scoring_thresholds.get("intent_score_min", 0.55)
+                relevance_min = scoring_thresholds.get("relevance_score_min", 0.50)
+                final_min = scoring_thresholds.get("final_score_min", 0.60)
+
+                # Analyze all leads with intent scoring
+                qualified_leads = await ConversationalLeadJobService._analyze_and_filter_leads(
+                    all_leads, category_config, intent_min, relevance_min, final_min
+                )
+
+                print(f"✅ INTENT ANALYSIS COMPLETE: {len(qualified_leads)}/{len(all_leads)} leads qualified")
+
+                # Save only qualified leads to database
+                if qualified_leads:
+                    await ConversationalLeadJobService._save_leads_batch(db, qualified_leads)
+                    print(f"Successfully saved {len(qualified_leads)} qualified leads from {len(enabled_platforms)} platform(s)")
+                else:
+                    print(f"No qualified leads found after intent analysis")
             else:
                 print(f"No leads found for keyword '{keyword}' across enabled platforms")
 
@@ -343,6 +366,119 @@ class ConversationalLeadJobService:
         except Exception as e:
             print(f"Error saving leads batch: {str(e)}")
             raise
+
+    @staticmethod
+    def _build_category_config(lead_form: Dict) -> CategoryConfig:
+        """
+        Build CategoryConfig from lead form data for intent analysis
+        """
+        # Extract configuration from lead form
+        category_context = lead_form.get("category_context", "General product/service")
+        keywords = lead_form.get("keywords", [])
+        implied_keywords = lead_form.get("implied_keywords", [])
+        competitors = lead_form.get("competitors", [])
+        buying_signals = lead_form.get("buying_signals", [])
+        excluded_keywords = lead_form.get("excluded_keywords", [])
+
+        return CategoryConfig(
+            category_context=category_context,
+            keywords=keywords,
+            implied_keywords=implied_keywords,
+            competitors=competitors,
+            buying_signals=buying_signals,
+            excluded_keywords=excluded_keywords
+        )
+
+    @staticmethod
+    async def _analyze_and_filter_leads(
+        leads: List[LeadCreate],
+        category_config: CategoryConfig,
+        intent_min: float = 0.55,
+        relevance_min: float = 0.50,
+        final_min: float = 0.60
+    ) -> List[LeadCreate]:
+        """
+        Analyze all leads for buying intent and filter to qualified leads only
+
+        Args:
+            leads: List of LeadCreate objects
+            category_config: Category configuration for intent analysis
+            intent_min, relevance_min, final_min: Qualification thresholds
+
+        Returns:
+            List of qualified LeadCreate objects with intent scores populated
+        """
+        if not leads:
+            return []
+
+        qualified_leads = []
+
+        # Analyze each lead for intent
+        for lead in leads:
+            try:
+                # Get post text from mention field
+                post_text = lead.mention or lead.lead_reason or ""
+                if not post_text.strip():
+                    print(f"Skipping lead with no text content")
+                    continue
+
+                # Run intent analysis
+                intent_result = await IntentAnalysisService.analyze_post(
+                    text=post_text,
+                    config=category_config,
+                    model="gpt-4o-mini"
+                )
+
+                # Calculate final score
+                final_score = IntentAnalysisService.calculate_final_score(
+                    intent_result.intent_score,
+                    intent_result.relevance_score,
+                    intent_result.urgency_flag
+                )
+
+                # Map intent category enum
+                intent_category_map = {
+                    "direct": IntentCategoryEnum.DIRECT,
+                    "implied": IntentCategoryEnum.IMPLIED,
+                    "problem": IntentCategoryEnum.PROBLEM,
+                    "comparison": IntentCategoryEnum.COMPARISON,
+                    "competitor_negative": IntentCategoryEnum.COMPETITOR_NEGATIVE,
+                    "unknown": IntentCategoryEnum.UNKNOWN
+                }
+
+                # Map sentiment enum
+                sentiment_map = {
+                    "positive": SentimentTypeEnum.POSITIVE,
+                    "negative": SentimentTypeEnum.NEGATIVE,
+                    "neutral": SentimentTypeEnum.NEUTRAL
+                }
+
+                # Populate intent fields in lead
+                lead.intent_score = intent_result.intent_score
+                lead.relevance_score = intent_result.relevance_score
+                lead.urgency_flag = intent_result.urgency_flag
+                lead.sentiment = sentiment_map.get(intent_result.sentiment.value, SentimentTypeEnum.NEUTRAL)
+                lead.intent_category = intent_category_map.get(intent_result.intent_category.value, IntentCategoryEnum.UNKNOWN)
+                lead.final_score = final_score
+                lead.intent_reasoning = intent_result.reasoning
+
+                # Check if meets qualification thresholds
+                if (
+                    intent_result.intent_score >= intent_min and
+                    intent_result.relevance_score >= relevance_min and
+                    final_score >= final_min
+                ):
+                    qualified_leads.append(lead)
+                    print(f"✅ QUALIFIED: {lead.username} | Intent:{intent_result.intent_score:.2f} Relevance:{intent_result.relevance_score:.2f} Final:{final_score:.2f}")
+                else:
+                    print(f"❌ FILTERED: {lead.username} | Intent:{intent_result.intent_score:.2f} Relevance:{intent_result.relevance_score:.2f} Final:{final_score:.2f}")
+
+            except Exception as e:
+                print(f"Error analyzing lead {lead.username}: {str(e)}")
+                # Skip leads that fail analysis
+                continue
+
+        return qualified_leads
 
     @staticmethod
     def _convert_twitter_date(twitter_date: str) -> datetime:
