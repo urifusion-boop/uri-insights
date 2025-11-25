@@ -228,7 +228,7 @@ class ConversationalLeadJobService:
                 lead_form_id=lead_form.get("lead_form_id", ""),
                 lead_form_name=lead_form.get("form_title", ""),
                 keyword=keywords[0] if keywords else "",
-                platforms=enabled_platforms,
+                platforms=list(enabled_platforms.keys()),  # Convert dict keys to list
                 results=SearchResultStats(**stats),
                 duration_seconds=round(duration, 2),
                 success=search_success,
@@ -549,8 +549,12 @@ class ConversationalLeadJobService:
                 ):
                     qualified_leads.append(lead)
                     print(f"✅ QUALIFIED: {lead.username} | Intent:{intent_result.intent_score:.2f} Relevance:{intent_result.relevance_score:.2f} Final:{final_score:.2f}")
+                    print(f"   POST: {post_text[:200]}")
+                    print(f"   REASONING: {intent_result.reasoning}")
                 else:
                     print(f"❌ FILTERED: {lead.username} | Intent:{intent_result.intent_score:.2f} Relevance:{intent_result.relevance_score:.2f} Final:{final_score:.2f}")
+                    print(f"   POST: {post_text[:200]}")
+                    print(f"   REASONING: {intent_result.reasoning}")
 
             except Exception as e:
                 print(f"Error analyzing lead {lead.username}: {str(e)}")
