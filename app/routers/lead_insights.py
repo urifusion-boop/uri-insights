@@ -32,6 +32,7 @@ from app.domain.requests.lead_requests import (
     LeadEnrichmentRequest,
 )
 from app.domain.enums.leadform_enum import LeadFormTypeEnum
+from app.repository.LeadFormRepository import LeadFormRepository
 
 
 router = APIRouter()
@@ -49,11 +50,36 @@ async def create_lead(
     )
 
 
-# Create multiple leads
+# Create multiple leads with optional intent analysis
 @router.post("/multipleCreate")
 async def create_leads(
-    leads: List[LeadCreate], db: AsyncIOMotorDatabase = Depends(get_db_dependency)
+    leads: List[LeadCreate],
+    lead_form_id: Optional[str] = None,
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency)
 ):
+    # If lead_form_id provided, run intent analysis to filter leads
+    if lead_form_id:
+        lead_form_response = await LeadFormRepository.get_by_id(db, lead_form_id)
+        lead_form = lead_form_response.get("responseData", {})
+
+        if lead_form:
+            # Run intent analysis and filter leads
+            original_count = len(leads)
+            leads = await LeadService.analyze_and_filter_leads(
+                leads=leads,
+                lead_form=lead_form,
+                enable_intent_analysis=True
+            )
+            filtered_count = len(leads)
+            print(f"Intent analysis: {original_count} leads -> {filtered_count} qualified")
+
+            if not leads:
+                return UriResponse.custom_response(
+                    f"No leads passed intent analysis thresholds (0 of {original_count} qualified)",
+                    200,
+                    True
+                )
+
     data = await LeadRepository.multiple_create_leads(db, leads)
     response = jsonable_encoder(data)
     return UriResponse.get_status_response(
@@ -223,7 +249,7 @@ async def search_leads(
 
 @router.get("/analytics", response_model=dict)
 async def get_lead_analytics(
-    request: LeadAnalyticsRequest = Query(None),
+    request: LeadAnalyticsRequest = Depends(),
     db: AsyncIOMotorDatabase = Depends(get_db_dependency),
 ):
     """

@@ -1,3 +1,4 @@
+from app.core.helpers.date_helper import DateHelper
 from datetime import datetime
 from typing import Any, Optional, Dict
 import httpx
@@ -54,7 +55,7 @@ class AiThreadRepository:
             "messages": payload["messages"],
             "metadata": payload.get("metadata"),
             "tool_resources": payload.get("tool_resources"),
-            "created_at": datetime.utcnow().isoformat(),
+            "created_at": DateHelper.utc_now_iso(),
         }
 
         await db["threads"].insert_one(thread_data)
@@ -145,7 +146,7 @@ class AiThreadRepository:
 
         updates = request_data.dict(exclude_none=True)
         updates["run_id"] = run_id
-        updates["updated_at"] = datetime.utcnow().isoformat()
+        updates["updated_at"] = DateHelper.utc_now_iso()
 
         result = await db["threads"].update_one(
             {"thread_id": thread_id}, {"$set": updates}

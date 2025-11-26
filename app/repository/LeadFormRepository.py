@@ -5,6 +5,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from bson import ObjectId
 
 from app.core.config import settings
+from app.core.helpers.date_helper import DateHelper
 from app.domain.enums.lead_enum import LeadsProcessedStatus
 from app.domain.enums.leadform_enum import LeadFormTypeEnum
 from app.domain.responses.uri_response import UriResponse
@@ -92,7 +93,7 @@ class LeadFormRepository:
         db: AsyncIOMotorDatabase, data: LeadFormUpdateBase, lead_form_id: str
     ):
         lead_form = data.model_dump(exclude_unset=True)
-        lead_form["last_updated"] = datetime.now().isoformat()
+        lead_form["last_updated"] = DateHelper.utc_now_iso()
 
         existing_form = (await LeadFormRepository.get_by_id(db, lead_form_id)).get(
             "responseData"

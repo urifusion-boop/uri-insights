@@ -23,6 +23,7 @@ from app.domain.requests.leadform_requests import (
     OrganizationSearchFormInput,
 )
 from app.services.LeadFormService import LeadFormService
+from app.services.ConversationalLeadJobService import ConversationalLeadJobService
 
 router = APIRouter()
 
@@ -69,14 +70,85 @@ async def create_business_lead_form(
 @router.post("/conversation-search/create")
 async def create_conversational_lead_form(
     data: ConversationalSearchFormInput,
+    background_tasks: BackgroundTasks,
     db: AsyncIOMotorDatabase = Depends(get_db_dependency),
 ):
     payload = LeadFormCreate(**data.model_dump())
-    result = await LeadFormService.create(db, payload)
+    result = await LeadFormService.create(db, payload, background_tasks)
 
     return UriResponse.get_status_response(
         response=jsonable_encoder(result), status_code=result["responseCode"]
     )
+
+
+@router.post("/conversation-search/fetch-leads")
+async def fetch_conversational_leads(
+    lead_form_id: str,
+    user_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Fetch and analyze leads from social platforms for a conversational lead form.
+    This endpoint triggers the ConversationalLeadJobService which includes intent analysis.
+    """
+    # Get the lead form
+    lead_form_result = await LeadFormRepository.get_by_id(db, lead_form_id)
+
+    if lead_form_result["responseCode"] != 200:
+        return UriResponse.get_status_response(
+            response={"message": "Lead form not found"},
+            status_code=404
+        )
+
+    lead_form = lead_form_result.get("responseData")
+
+    if not lead_form:
+        return UriResponse.get_status_response(
+            response={"message": "Lead form data not found"},
+            status_code=404
+        )
+
+    # Trigger the background job to fetch and analyze leads
+    try:
+        stats = await ConversationalLeadJobService.fetch_leads_from_platforms(
+            db=db,
+            lead_form=lead_form,
+            user_id=user_id
+        )
+
+        # Build a professional message based on the results
+        message = "Lead fetching and intent analysis completed successfully"
+        if stats["new_leads_saved"] > 0 and stats["duplicates_skipped"] > 0:
+            message = f"Found {stats['new_leads_saved']} new leads. {stats['duplicates_skipped']} duplicates were already in your database."
+        elif stats["new_leads_saved"] > 0:
+            message = f"Successfully found {stats['new_leads_saved']} new leads!"
+        elif stats["duplicates_skipped"] > 0:
+            message = f"No new leads found. All {stats['duplicates_skipped']} qualified leads were already in your database."
+        elif stats["total_qualified"] == 0 and stats["total_fetched"] > 0:
+            message = f"Analyzed {stats['total_fetched']} posts but none matched your criteria."
+        elif stats["total_fetched"] == 0:
+            message = "No posts found matching your keywords."
+
+        return UriResponse.get_status_response(
+            response={
+                "status": True,
+                "responseCode": 200,
+                "responseMessage": message,
+                "responseData": {
+                    "lead_form_id": lead_form_id,
+                    "stats": stats
+                }
+            },
+            status_code=200
+        )
+    except Exception as e:
+        print(f"Error in fetch_conversational_leads endpoint: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return UriResponse.get_status_response(
+            response={"message": f"Error fetching leads: {str(e)}", "lead_form_id": lead_form_id},
+            status_code=500
+        )
 
 
 @router.post("/auto-populate")

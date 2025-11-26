@@ -8,6 +8,8 @@ from app.domain.enums.lead_enum import (
     LeadInterestLevelEnum,
     LeadOpportunityTypeEnum,
     LeadIndustryTypeEnum,
+    IntentCategoryEnum,
+    SentimentTypeEnum,
 )
 from app.domain.enums.leadform_enum import LeadFormTypeEnum
 
@@ -83,8 +85,17 @@ class LeadBase(BaseModel):
     last_updated: datetime = Field(default_factory=datetime.utcnow)
     is_pre_stored: bool = False
 
+    # CLG Upgrade - Intent Analysis Fields
+    intent_score: Optional[float] = None  # How strong is the buying intent (0-1)
+    relevance_score: Optional[float] = None  # How relevant to the product/service (0-1)
+    urgency_flag: Optional[bool] = None  # Is there urgency in the post?
+    sentiment: Optional[SentimentTypeEnum] = None  # Overall sentiment (positive/negative/neutral)
+    intent_category: Optional[IntentCategoryEnum] = None  # Type of intent detected
+    final_score: Optional[float] = None  # Combined qualification score (0-1)
+    intent_reasoning: Optional[str] = None  # Brief explanation of intent analysis
+
     class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}
+        json_encoders = {datetime: lambda v: v.isoformat() + "Z" if v else None}
 
 
 # Models for CRUD Operations
@@ -145,10 +156,19 @@ class LeadUpdate(BaseModel):
     is_pre_stored: Optional[bool] = None
     lead_type: Optional[LeadFormTypeEnum] = None
 
+    # CLG Upgrade - Intent Analysis Fields (for updates)
+    intent_score: Optional[float] = None
+    relevance_score: Optional[float] = None
+    urgency_flag: Optional[bool] = None
+    sentiment: Optional[SentimentTypeEnum] = None
+    intent_category: Optional[IntentCategoryEnum] = None
+    final_score: Optional[float] = None
+    intent_reasoning: Optional[str] = None
+
     last_updated: datetime = Field(default_factory=datetime.utcnow)
 
     class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}
+        json_encoders = {datetime: lambda v: v.isoformat() + "Z" if v else None}
 
 
 class Lead(LeadBase):
@@ -159,4 +179,4 @@ class Lead(LeadBase):
     id: str = Field(default_factory=lambda: str(ObjectId()))  # MongoDB ObjectId
 
     class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}
+        json_encoders = {datetime: lambda v: v.isoformat() + "Z" if v else None}

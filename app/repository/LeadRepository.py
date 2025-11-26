@@ -73,6 +73,18 @@ class LeadRepository:
                 unique=True,
                 sparse=True,
             )
+
+            # Duplicate detection index for conversational leads
+            # Prevents same post URL from being saved multiple times for the same user
+            await db["leads"].create_index(
+                [
+                    ("lead_link", 1),
+                    ("assigned_to", 1),
+                ],
+                name="lead_link_user_duplicate_check",
+                sparse=True,
+            )
+
             print("✅ Indexes created successfully.")
         except Exception as e:
             print("❌ Failed to set up indexes: ", e)
@@ -100,17 +112,19 @@ class LeadRepository:
     async def create_lead(db: AsyncIOMotorDatabase, lead: LeadCreate) -> Dict[str, Any]:
         lead_data = lead.dict()
         lead_data["lead_id"] = str(ObjectId())
-        lead_data["created_date"] = datetime.utcnow().isoformat()
-        lead_data["last_updated"] = datetime.utcnow().isoformat()
+        lead_data["created_date"] = DateHelper.utc_now_iso()
+        lead_data["last_updated"] = DateHelper.utc_now_iso()
         lead_data["username"] = LeadHelper.cleanup_lead_username(lead.username)
 
-        existing_lead = await db["leads"].find_one(lead.dict())
-        if (
-            existing_lead
-            and existing_lead.get("lead_link") == lead.lead_link
-            and existing_lead.get("username") == lead.username
-        ):
-            return UriResponse.conflict_response("lead", "Lead already exists")
+        # Check for duplicates by lead_link (post URL) and assigned_to (user_id)
+        # This prevents same post from being saved multiple times for same user
+        if lead.lead_link and lead.assigned_to:
+            existing_lead = await db["leads"].find_one({
+                "lead_link": lead.lead_link,
+                "assigned_to": lead.assigned_to
+            })
+            if existing_lead:
+                return UriResponse.conflict_response("lead", "Lead already exists")
 
         await db["leads"].insert_one(lead_data)
         return UriResponse.create_response("lead", Lead(**lead_data).dict())
@@ -120,7 +134,7 @@ class LeadRepository:
         db: AsyncIOMotorDatabase, lead_id: str, updates: LeadUpdate
     ) -> Dict[str, Any]:
         updates_data = updates.dict(exclude_unset=True)
-        updates_data["last_updated"] = datetime.utcnow().isoformat()
+        updates_data["last_updated"] = DateHelper.utc_now_iso()
 
         result = await db["leads"].update_one(
             {"lead_id": lead_id}, {"$set": updates_data}
@@ -137,7 +151,7 @@ class LeadRepository:
         db: AsyncIOMotorDatabase, lead_ids: List[str], updates: LeadUpdate
     ) -> dict[str, Any]:
         updates_data = updates.dict(exclude_unset=True)
-        updates_data["last_updated"] = datetime.utcnow().isoformat()
+        updates_data["last_updated"] = DateHelper.utc_now_iso()
 
         # Perform bulk update
         result = await db["leads"].update_many(
@@ -254,14 +268,40 @@ class LeadRepository:
     ) -> Dict[str, Any]:
         lead_data_list = []
         id_to_lead_map = {}
+        skipped_count = 0
+
+        # Build list of existing lead_link + assigned_to combinations for this user
+        user_lead_links = {}
+        for lead in leads:
+            if lead.lead_link and lead.assigned_to:
+                if lead.assigned_to not in user_lead_links:
+                    user_lead_links[lead.assigned_to] = []
+                user_lead_links[lead.assigned_to].append(lead.lead_link)
+
+        # Fetch all existing leads for these users with these links in one query
+        existing_leads_by_user = {}
+        for user_id, links in user_lead_links.items():
+            existing = await db["leads"].find({
+                "assigned_to": user_id,
+                "lead_link": {"$in": links}
+            }).to_list(length=None)
+            existing_leads_by_user[user_id] = {lead["lead_link"] for lead in existing}
 
         for lead in leads:
             lead_data = lead.dict()
+
+            # Check if this lead already exists for this user
+            if lead.lead_link and lead.assigned_to:
+                if lead.lead_link in existing_leads_by_user.get(lead.assigned_to, set()):
+                    skipped_count += 1
+                    print(f"Skipping duplicate lead: {lead.lead_link} for user {lead.assigned_to}")
+                    continue
+
             # Generate lead_id if not present
             if not lead_data.get("lead_id"):
                 lead_data["lead_id"] = str(ObjectId())
-            lead_data["created_date"] = datetime.utcnow().isoformat()
-            lead_data["last_updated"] = datetime.utcnow().isoformat()
+            lead_data["created_date"] = DateHelper.utc_now_iso()
+            lead_data["last_updated"] = DateHelper.utc_now_iso()
             lead_data["username"] = LeadHelper.cleanup_lead_username(lead.username)
 
             lead_data_list.append(lead_data)
@@ -270,16 +310,18 @@ class LeadRepository:
         inserted_ids = []
         failed_ids = []
 
-        try:
-            result = await db["leads"].insert_many(lead_data_list, ordered=False)
-            inserted_ids = [str(_id) for _id in result.inserted_ids]
-        except pymongo.errors.BulkWriteError as e:
-            print("Error in bulk lead creation: ", e)
-            write_errors = e.details.get("writeErrors", [])
-            failed_ids = [str(err["op"].get("lead_id")) for err in write_errors]
-            # Determine which were successfully inserted
-            attempted_ids = [str(lead["lead_id"]) for lead in lead_data_list]
-            inserted_ids = list(set(attempted_ids) - set(failed_ids))
+        # Only attempt insert if we have non-duplicate leads
+        if lead_data_list:
+            try:
+                result = await db["leads"].insert_many(lead_data_list, ordered=False)
+                inserted_ids = [str(_id) for _id in result.inserted_ids]
+            except pymongo.errors.BulkWriteError as e:
+                print("Error in bulk lead creation: ", e)
+                write_errors = e.details.get("writeErrors", [])
+                failed_ids = [str(err["op"].get("lead_id")) for err in write_errors]
+                # Determine which were successfully inserted
+                attempted_ids = [str(lead["lead_id"]) for lead in lead_data_list]
+                inserted_ids = list(set(attempted_ids) - set(failed_ids))
 
         successful_leads = [
             Lead(**id_to_lead_map.get(_id, {})).dict()
@@ -290,16 +332,21 @@ class LeadRepository:
         response_payload = {
             "total_requested": len(leads),
             "successful_count": len(successful_leads),
-            "failed_count": len(leads) - len(successful_leads),
+            "skipped_duplicates": skipped_count,
+            "failed_count": len(failed_ids),
             "leads": successful_leads,
         }
 
+        message = "All leads created successfully"
+        if skipped_count > 0 and failed_ids:
+            message = f"Leads processed: {len(successful_leads)} created, {skipped_count} duplicates skipped, {len(failed_ids)} failed"
+        elif skipped_count > 0:
+            message = f"{len(successful_leads)} leads created, {skipped_count} duplicates skipped"
+        elif failed_ids:
+            message = "Leads processed with partial success"
+
         return UriResponse.custom_response(
-            message=(
-                "Leads processed with partial success"
-                if failed_ids
-                else "All leads created successfully"
-            ),
+            message=message,
             data=response_payload,
             error_code=207 if failed_ids else 201,
             success=True,
@@ -312,7 +359,7 @@ class LeadRepository:
             {
                 "$set": {
                     "emailed": status,
-                    "last_updated": datetime.utcnow().isoformat(),
+                    "last_updated": DateHelper.utc_now_iso(),
                 }
             },
         )
@@ -329,7 +376,7 @@ class LeadRepository:
             {
                 "$set": {
                     "called": status,
-                    "last_updated": datetime.utcnow().isoformat(),
+                    "last_updated": DateHelper.utc_now_iso(),
                 }
             },
         )
@@ -348,7 +395,7 @@ class LeadRepository:
             {
                 "$set": {
                     "lead_status": status,
-                    "last_updated": datetime.utcnow().isoformat(),
+                    "last_updated": DateHelper.utc_now_iso(),
                 }
             },
         )

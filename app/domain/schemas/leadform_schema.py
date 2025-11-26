@@ -16,10 +16,32 @@ from app.core.helpers.date_helper import DateHelper
 from app.domain.enums.lead_enum import LeadsProcessedStatus
 
 
+class PlatformConfig(BaseModel):
+    platform: str
+    enabled: bool
+    min_followers: Optional[int] = None
+    exclude_retweets: Optional[bool] = None
+    verified_only: Optional[bool] = None
+    content_types: Optional[List[str]] = None
+
+    class Config:
+        extra = "forbid"
+
+
 class LeadSourceSettings(BaseModel):
     max_search_iteration_count: int = 5
     last_scraped_date: Optional[datetime] = None
     last_scraped_status: Optional[LeadsProcessedStatus] = None
+
+
+class ScoringThresholds(BaseModel):
+    """Thresholds for lead qualification scoring"""
+    intent_score_min: float = 0.55
+    relevance_score_min: float = 0.50
+    final_score_min: float = 0.60
+
+    class Config:
+        extra = "forbid"
 
 
 class LeadFormBase(BaseModel):
@@ -76,6 +98,16 @@ class LeadFormBase(BaseModel):
     location: Optional[List[str]] = None
     intent_type: Optional[str] = None
 
+    # CLG Upgrade fields - Intent Analysis
+    category_context: Optional[str] = None  # Industry/category context (e.g., "skincare", "fintech")
+    implied_keywords: Optional[List[str]] = None  # Indirect signals (e.g., "harmattan", "dry skin", "winter")
+    scoring_thresholds: Optional[ScoringThresholds] = None  # Custom qualification thresholds
+
+    # V2 Real-time Monitoring fields (for conversational forms)
+    enable_realtime: Optional[bool] = False
+    monitoring_platforms: Optional[List[str]] = None
+    platform_configs: Optional[List[PlatformConfig]] = None
+
     # Pagination
     page: Optional[int] = 1
     per_page: Optional[int] = 10
@@ -86,7 +118,7 @@ class LeadFormBase(BaseModel):
 
     class Config:
         use_enum_values = True
-        json_encoders = {datetime: lambda v: v.isoformat()}
+        json_encoders = {datetime: lambda v: v.isoformat() + "Z" if v else None}
 
 
 class LeadFormCreate(LeadFormBase):
@@ -153,7 +185,7 @@ class BusinessLeadFormUpdate(BizConvLeadFormUpdateBase):
     settings: Optional[LeadSourceSettings] = None
 
     class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}
+        json_encoders = {datetime: lambda v: v.isoformat() + "Z" if v else None}
 
 
 class ConversationalLeadFormUpdate(BizConvLeadFormUpdateBase):
@@ -163,9 +195,19 @@ class ConversationalLeadFormUpdate(BizConvLeadFormUpdateBase):
     location: Optional[List[str]] = None
     intent_type: Optional[str] = None
 
+    # CLG Upgrade fields - Intent Analysis
+    category_context: Optional[str] = None  # Industry/category context (e.g., "skincare", "fintech")
+    implied_keywords: Optional[List[str]] = None  # Indirect signals (e.g., "harmattan", "dry skin", "winter")
+    scoring_thresholds: Optional[ScoringThresholds] = None  # Custom qualification thresholds
+
+    # V2 Real-time Monitoring fields
+    enable_realtime: Optional[bool] = None
+    monitoring_platforms: Optional[List[str]] = None
+    platform_configs: Optional[List[PlatformConfig]] = None
+
 
 class LeadForm(LeadFormBase):
     id: str = Field(default_factory=lambda: str(ObjectId()))
 
     class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}
+        json_encoders = {datetime: lambda v: v.isoformat() + "Z" if v else None}

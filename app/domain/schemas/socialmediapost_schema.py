@@ -67,7 +67,7 @@ class SocialMediaPostBase(BaseModel):
     class Config:
         use_enum_values = True
         json_encoders = {
-            datetime: lambda v: v.isoformat(),
+            datetime: lambda v: v.isoformat() + "Z" if v else None,
             date: lambda v: v.isoformat(),
             time: lambda v: v.isoformat(),
         }
@@ -190,7 +190,7 @@ class SocialMediaPostUpdate(BaseModel):
         )
 
     class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}
+        json_encoders = {datetime: lambda v: v.isoformat() + "Z" if v else None}
 
 
 # Full Schema Model
@@ -204,4 +204,4 @@ class SocialMediaPost(SocialMediaPostBase):
     )
 
     class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}
+        json_encoders = {datetime: lambda v: v.isoformat() + "Z" if v else None}

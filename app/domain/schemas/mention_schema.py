@@ -28,7 +28,7 @@ class MentionBase(BaseModel):
     updated_at: datetime = Field(default_factory=datetime.utcnow)  # Update timestamp
 
     class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}
+        json_encoders = {datetime: lambda v: v.isoformat() + "Z" if v else None}
         use_enum_values = True
 
 
@@ -59,7 +59,7 @@ class MentionUpdate(BaseModel):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
     class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}
+        json_encoders = {datetime: lambda v: v.isoformat() + "Z" if v else None}
 
 
 class Mention(MentionBase):
@@ -70,4 +70,4 @@ class Mention(MentionBase):
     id: str = Field(default_factory=lambda: str(ObjectId()))  # MongoDB ObjectId
 
     class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}
+        json_encoders = {datetime: lambda v: v.isoformat() + "Z" if v else None}

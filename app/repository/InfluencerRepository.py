@@ -1,3 +1,4 @@
+from app.core.helpers.date_helper import DateHelper
 from typing import Dict, Any, Optional, List, Union
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from bson import ObjectId
@@ -36,8 +37,8 @@ class InfluencerRepository:
             db_influencer = influencer
             db_influencer["influencer_id"] = str(ObjectId())
             db_influencer["connected"] = False
-            db_influencer["createdAt"] = datetime.now().isoformat()
-            db_influencer["updatedAt"] = datetime.now().isoformat()
+            db_influencer["createdAt"] = DateHelper.utc_now_iso()
+            db_influencer["updatedAt"] = DateHelper.utc_now_iso()
             db_influencers.append(db_influencer)
 
         await db["influencers"].insert_many(db_influencers)
@@ -231,7 +232,7 @@ class InfluencerRepository:
         db: AsyncIOMotorDatabase, influencer: influencer_schema.InfluencerUpdate
     ) -> Any:
         db_influencer = influencer.dict(exclude_unset=True)
-        db_influencer["updatedAt"] = datetime.now().isoformat()
+        db_influencer["updatedAt"] = DateHelper.utc_now_iso()
 
         result = await db["influencers"].update_one(
             {"influencer_id": influencer.influencer_id}, {"$set": db_influencer}
@@ -277,7 +278,7 @@ class InfluencerRepository:
         }
 
         influencer_data = influencer.model_dump()  # Convert to dict
-        influencer_data["updatedAt"] = datetime.now().isoformat()
+        influencer_data["updatedAt"] = DateHelper.utc_now_iso()
 
         existing_influencer = await db["influencers"].find_one(filter_criteria)
 
@@ -298,7 +299,7 @@ class InfluencerRepository:
             }
         else:
             influencer_data["influencer_id"] = str(ObjectId())
-            influencer_data["createdAt"] = datetime.now().isoformat()
+            influencer_data["createdAt"] = DateHelper.utc_now_iso()
             await db["influencers"].insert_one(influencer_data)
             return {"success": True, "data": influencer_data}
 

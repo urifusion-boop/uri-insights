@@ -77,19 +77,190 @@ from app.services.azure.producers.ExceptionLogProducer import (
 from app.services.uri_microservices.UriTaskManagerService import UriTaskManagerService
 from app.services.OpenAIApifyTwitterService import OpenAIApifyTwitterService
 from app.services.OpenAIApifyTiktokService import OpenAIApifyTiktokService
+from app.services.OpenAIApifyFacebookService import OpenAIApifyFacebookService
 
 
 from app.services.BrowsercloudService import BrowsercloudService
 from app.services.RealtimeLeadProcessor import RealtimeLeadProcessor
+from app.services.IntentAnalysisService import (
+    IntentAnalysisService,
+    CategoryConfig,
+    IntentAnalysisResult,
+)
+from app.domain.enums.lead_enum import IntentCategoryEnum, SentimentTypeEnum
 
 class LeadService:
     PLATFORM_SCRAPERS: dict[str, LeadDataScraper] = {
         "google": GoogleLeadDataScraper(),
         "twitter": TwitterLeadDataScraper(),
     }
-    
+
     browsercloud_service = BrowsercloudService()
     realtime_processor = RealtimeLeadProcessor()
+
+    # ================== CLG Upgrade - Intent Analysis Methods ==================
+
+    @staticmethod
+    def _build_category_config_from_lead_form(lead_form: dict) -> CategoryConfig:
+        """
+        Build CategoryConfig from lead form for intent analysis.
+        Uses new CLG fields: category_context, implied_keywords, etc.
+        """
+        return CategoryConfig(
+            category_context=lead_form.get("category_context", "general"),
+            keywords=lead_form.get("keywords", []),
+            implied_keywords=lead_form.get("implied_keywords", []),
+            competitors=lead_form.get("competitors", []),
+            buying_signals=lead_form.get("buying_signals", []),
+            excluded_keywords=lead_form.get("excluded_keywords", []),
+        )
+
+    @staticmethod
+    def _get_scoring_thresholds(lead_form: dict) -> tuple[float, float, float]:
+        """
+        Get scoring thresholds from lead form, with defaults.
+        Returns: (intent_min, relevance_min, final_min)
+        """
+        thresholds = lead_form.get("scoring_thresholds", {})
+        if isinstance(thresholds, dict):
+            return (
+                thresholds.get("intent_score_min", 0.55),
+                thresholds.get("relevance_score_min", 0.50),
+                thresholds.get("final_score_min", 0.60),
+            )
+        return (0.55, 0.50, 0.60)
+
+    @staticmethod
+    async def analyze_and_enrich_lead(
+        lead: LeadCreate,
+        lead_form: dict,
+        skip_if_below_threshold: bool = True
+    ) -> Optional[LeadCreate]:
+        """
+        Analyze a lead's mention text for buying intent and enrich with scores.
+
+        Args:
+            lead: The lead to analyze
+            lead_form: The lead form configuration
+            skip_if_below_threshold: If True, returns None for leads below thresholds
+
+        Returns:
+            Enriched lead with intent scores, or None if below threshold
+        """
+        mention_text = lead.mention or lead.lead_reason or ""
+        if not mention_text:
+            return lead if not skip_if_below_threshold else None
+
+        try:
+            # Build config from lead form
+            config = LeadService._build_category_config_from_lead_form(lead_form)
+
+            # Analyze intent
+            result = await IntentAnalysisService.analyze_post(
+                text=mention_text,
+                config=config,
+                model="gpt-4o-mini"  # Use cheapest model for bulk analysis
+            )
+
+            # Calculate final score
+            final_score = IntentAnalysisService.calculate_final_score(
+                result.intent_score,
+                result.relevance_score,
+                result.urgency_flag
+            )
+
+            # Check thresholds
+            intent_min, relevance_min, final_min = LeadService._get_scoring_thresholds(lead_form)
+
+            meets_threshold = (
+                result.intent_score >= intent_min and
+                result.relevance_score >= relevance_min and
+                final_score >= final_min
+            )
+
+            # Debug logging
+            print(f"Lead analysis: intent={result.intent_score:.2f}, relevance={result.relevance_score:.2f}, final={final_score:.2f}, meets={meets_threshold}")
+            print(f"  Thresholds: intent>={intent_min}, relevance>={relevance_min}, final>={final_min}")
+            print(f"  Category: {result.intent_category.value}, Reasoning: {result.reasoning[:100]}...")
+
+            if skip_if_below_threshold and not meets_threshold:
+                return None
+
+            # Enrich lead with intent data
+            lead.intent_score = result.intent_score
+            lead.relevance_score = result.relevance_score
+            lead.urgency_flag = result.urgency_flag
+            lead.sentiment = SentimentTypeEnum(result.sentiment.value)
+            lead.intent_category = IntentCategoryEnum(result.intent_category.value)
+            lead.final_score = final_score
+            lead.intent_reasoning = result.reasoning
+
+            # Set interest level based on final score
+            if final_score >= 0.75:
+                lead.interest_level = LeadInterestLevelEnum.HIGH
+            elif final_score >= 0.60:
+                lead.interest_level = LeadInterestLevelEnum.MEDIUM
+            else:
+                lead.interest_level = LeadInterestLevelEnum.LOW
+
+            return lead
+
+        except Exception as e:
+            print(f"Intent analysis failed for lead: {e}")
+            # Return lead without enrichment on error
+            return lead if not skip_if_below_threshold else None
+
+    @staticmethod
+    async def analyze_and_filter_leads(
+        leads: List[LeadCreate],
+        lead_form: dict,
+        enable_intent_analysis: bool = True
+    ) -> List[LeadCreate]:
+        """
+        Analyze multiple leads for intent and filter out low-quality ones.
+
+        Args:
+            leads: List of leads to analyze
+            lead_form: The lead form configuration
+            enable_intent_analysis: If False, returns all leads without analysis
+
+        Returns:
+            List of qualified leads with intent scores
+        """
+        if not enable_intent_analysis:
+            return leads
+
+        # Check if lead form has CLG fields configured
+        has_clg_config = bool(
+            lead_form.get("category_context") or
+            lead_form.get("implied_keywords")
+        )
+
+        if not has_clg_config:
+            # No CLG config, skip analysis
+            return leads
+
+        # Analyze leads concurrently
+        tasks = [
+            LeadService.analyze_and_enrich_lead(lead, lead_form, skip_if_below_threshold=True)
+            for lead in leads
+        ]
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Filter out None results and exceptions
+        qualified_leads = []
+        for result in results:
+            if isinstance(result, Exception):
+                print(f"Lead analysis error: {result}")
+                continue
+            if result is not None:
+                qualified_leads.append(result)
+
+        print(f"Intent analysis: {len(leads)} leads -> {len(qualified_leads)} qualified")
+        return qualified_leads
+
+    # ================== End CLG Upgrade Methods ==================
 
     @staticmethod
     async def delete_lead(db: AsyncIOMotorDatabase, lead_id: str):
@@ -182,24 +353,24 @@ class LeadService:
         )
 
         if not feature_limit_response or not feature_limit_response.get("status"):
-            # Task Manager is required - skip if unavailable
             return
 
-        fl_data = feature_limit_response.get("responseData", {}).get("data", {})
-        plan = (
-            fl_data.get("subscriptionPlan")
-            or feature_limit_response.get("responseData", {}).get("subscriptionPlan")
-            or "STANDARD"
-        )
-        plan_upper = str(plan).upper()
-
-        # Set intervals based on subscription plan
-        if plan_upper == "BUSINESS" or plan_upper == "LEAD_ONLY":
-            max_tweets, interval_hours = 40, 1
-        elif plan_upper == "PROFESSIONAL":
-            max_tweets, interval_hours = 30, 3
         else:
-            max_tweets, interval_hours = 20, 7
+            fl_data = feature_limit_response.get("responseData", {}).get("data", {})
+            plan = (
+                fl_data.get("subscriptionPlan")
+                or feature_limit_response.get("responseData", {}).get("subscriptionPlan")
+                or "STANDARD"
+            )
+            plan_upper = str(plan).upper()
+
+            # Set intervals based on subscription plan, with uniform max tweets/posts
+            if plan_upper == "BUSINESS" or plan_upper == "LEAD_ONLY":
+                max_tweets, interval_hours = 2, 1
+            elif plan_upper == "PROFESSIONAL":
+                max_tweets, interval_hours = 2, 3
+            else:
+                max_tweets, interval_hours = 2, 7
 
         settings_obj = lead_form.get("settings", {})
         tw_settings = settings_obj.get("conversational_twitter_fetch", {})
@@ -237,9 +408,9 @@ class LeadService:
                     created_iso = created_dt.isoformat()
                 except Exception:
                     # Fallback to current time if parsing fails
-                    created_iso = datetime.utcnow().isoformat()
+                    created_iso = DateHelper.utc_now_iso()
             else:
-                created_iso = datetime.utcnow().isoformat()
+                created_iso = DateHelper.utc_now_iso()
 
             leads_to_create.append(
                 LeadCreate(
@@ -266,11 +437,23 @@ class LeadService:
             )
 
         if leads_to_create:
-            await LeadRepository.multiple_create_leads(db, leads_to_create)
+            # CLG Upgrade: Analyze leads for intent and filter by thresholds
+            # Only runs if lead_form has category_context or implied_keywords configured
+            original_count = len(leads_to_create)
+            leads_to_create = await LeadService.analyze_and_filter_leads(
+                leads=leads_to_create,
+                lead_form=lead_form,
+                enable_intent_analysis=True
+            )
+            filtered_count = len(leads_to_create)
+
+            if leads_to_create:
+                await LeadRepository.multiple_create_leads(db, leads_to_create)
+                print(f"Twitter leads: {original_count} fetched, {filtered_count} qualified and saved")
 
         update_payload = {
             "settings.conversational_twitter_fetch": {
-                "last_fetched_at": datetime.utcnow().isoformat(),
+                "last_fetched_at": DateHelper.utc_now_iso(),
                 "last_fetch_count": len(tweets),
                 "keyword": keyword,
                 "interval_hours": interval_hours,
@@ -311,20 +494,21 @@ class LeadService:
         if not feature_limit_response or not feature_limit_response.get("status"):
             return
 
-        fl_data = feature_limit_response.get("responseData", {}).get("data", {})
-        plan = (
-            fl_data.get("subscriptionPlan")
-            or feature_limit_response.get("responseData", {}).get("subscriptionPlan")
-            or "STANDARD"
-        )
-        plan_upper = str(plan).upper()
-
-        if plan_upper == "BUSINESS" or plan_upper == "LEAD_ONLY":
-            max_posts, interval_hours = 40, 1
-        elif plan_upper == "PROFESSIONAL":
-            max_posts, interval_hours = 30, 3
         else:
-            max_posts, interval_hours = 20, 7
+            fl_data = feature_limit_response.get("responseData", {}).get("data", {})
+            plan = (
+                fl_data.get("subscriptionPlan")
+                or feature_limit_response.get("responseData", {}).get("subscriptionPlan")
+                or "STANDARD"
+            )
+            plan_upper = str(plan).upper()
+
+            if plan_upper == "BUSINESS" or plan_upper == "LEAD_ONLY":
+                max_posts, interval_hours = 2, 1
+            elif plan_upper == "PROFESSIONAL":
+                max_posts, interval_hours = 2, 3
+            else:
+                max_posts, interval_hours = 2, 7
 
         settings_obj = lead_form.get("settings", {})
         tk_settings = settings_obj.get("conversational_tiktok_fetch", {})
@@ -353,7 +537,7 @@ class LeadService:
         posts = result.get("posts", [])
         leads_to_create: List[LeadCreate] = []
         for p in posts:
-            created_iso = datetime.utcnow().isoformat()
+            created_iso = DateHelper.utc_now_iso()
             ts = p.get("created_at") or p.get("createTime")
             if ts:
                 try:
@@ -362,7 +546,7 @@ class LeadService:
                     else:
                         created_iso = datetime.utcfromtimestamp(int(ts)).isoformat()
                 except Exception:
-                    created_iso = datetime.utcnow().isoformat()
+                    created_iso = DateHelper.utc_now_iso()
 
             url = p.get("url") or p.get("webVideoUrl") or p.get("video_url")
             author = p.get("author") or p.get("username") or "TikTok User"
@@ -392,11 +576,146 @@ class LeadService:
             )
 
         if leads_to_create:
-            await LeadRepository.multiple_create_leads(db, leads_to_create)
+            # CLG Upgrade: Analyze leads for intent and filter by thresholds
+            # Only runs if lead_form has category_context or implied_keywords configured
+            original_count = len(leads_to_create)
+            leads_to_create = await LeadService.analyze_and_filter_leads(
+                leads=leads_to_create,
+                lead_form=lead_form,
+                enable_intent_analysis=True
+            )
+            filtered_count = len(leads_to_create)
+
+            if leads_to_create:
+                await LeadRepository.multiple_create_leads(db, leads_to_create)
+                print(f"TikTok leads: {original_count} fetched, {filtered_count} qualified and saved")
 
         update_payload = {
             "settings.conversational_tiktok_fetch": {
-                "last_fetched_at": datetime.utcnow().isoformat(),
+                "last_fetched_at": DateHelper.utc_now_iso(),
+                "last_fetch_count": len(posts),
+                "keyword": keyword,
+                "interval_hours": interval_hours,
+                "max_posts": max_posts,
+                "plan": plan_upper,
+            }
+        }
+        await db[LeadFormRepository.COLLECTION_NAME].update_one(
+            {
+                "lead_form_id": lead_form.get("lead_form_id"),
+            },
+            {"$set": update_payload},
+        )
+
+    @staticmethod
+    async def fetch_and_save_conversational_facebook_leads(db: AsyncIOMotorDatabase):
+        async for batch in LeadFormRepository.fetch_lead_forms_in_batches(
+            db=db, filter={"form_type": LeadFormTypeEnum.CONVERSATIONAL.value}
+        ):
+            tasks = [
+                LeadService._process_conversational_facebook_fetch(db, lead_form)
+                for lead_form in batch
+            ]
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    @staticmethod
+    async def _process_conversational_facebook_fetch(
+        db: AsyncIOMotorDatabase, lead_form: dict
+    ):
+        user_id = lead_form.get("user_id", "")
+        keywords = lead_form.get("keywords", [])
+        if not user_id or not keywords:
+            return
+
+        feature_limit_response = await UriTaskManagerService.get_user_feature_limit(
+            user_id
+        )
+        if not feature_limit_response or not feature_limit_response.get("status"):
+            return
+
+        fl_data = feature_limit_response.get("responseData", {}).get("data", {})
+        plan = (
+            fl_data.get("subscriptionPlan")
+            or feature_limit_response.get("responseData", {}).get("subscriptionPlan")
+            or "STANDARD"
+        )
+        plan_upper = str(plan).upper()
+
+        if plan_upper == "BUSINESS" or plan_upper == "LEAD_ONLY":
+            max_posts, interval_hours = 2, 1
+        elif plan_upper == "PROFESSIONAL":
+            max_posts, interval_hours = 2, 3
+        else:
+            max_posts, interval_hours = 2, 7
+
+        settings_obj = lead_form.get("settings", {})
+        fb_settings = settings_obj.get("conversational_facebook_fetch", {})
+        last_fetched_at = fb_settings.get("last_fetched_at")
+        should_fetch = True
+        if last_fetched_at:
+            try:
+                last_dt = datetime.fromisoformat(last_fetched_at)
+                should_fetch = datetime.utcnow() - last_dt >= timedelta(
+                    hours=interval_hours
+                )
+            except Exception:
+                should_fetch = True
+
+        if not should_fetch:
+            return
+
+        service = OpenAIApifyFacebookService()
+        keyword = keywords[0]
+        result = await service.fetch_posts_with_analysis(
+            keyword=keyword, max_posts=max_posts, analyze_sentiment=False
+        )
+        if not result or not result.get("success"):
+            return
+
+        posts = result.get("posts", [])
+        leads_to_create: List[LeadCreate] = []
+        for p in posts:
+            created_iso = DateHelper.utc_now_iso()
+            ts = p.get("created_at") or p.get("created_time")
+            if ts:
+                try:
+                    created_iso = datetime.fromisoformat(str(ts)).isoformat()
+                except Exception:
+                    created_iso = DateHelper.utc_now_iso()
+
+            url = p.get("url")
+            author = p.get("author") or "Facebook User"
+            text = p.get("text") or ""
+
+            leads_to_create.append(
+                LeadCreate(
+                    first_name=author,
+                    last_name=None,
+                    username=author,
+                    mention=text,
+                    lead_reason=text,
+                    lead_status=LeadStatusEnum.NEW,
+                    opportunity_type=LeadOpportunityTypeEnum.OTHER,
+                    tags=[],
+                    lead_link=url or None,
+                    social_profile_link=url or None,
+                    picture_url=None,
+                    created_date=created_iso,
+                    last_updated=created_iso,
+                    lead_type=LeadFormTypeEnum.CONVERSATIONAL,
+                    website_url=url or None,
+                    lead_source=LeadSourceEnum.FACEBOOK,
+                    assigned_to=user_id,
+                    starred=False,
+                )
+            )
+
+        if leads_to_create:
+            await LeadRepository.multiple_create_leads(db, leads_to_create)
+
+        update_payload = {
+            "settings.conversational_facebook_fetch": {
+                "last_fetched_at": DateHelper.utc_now_iso(),
                 "last_fetch_count": len(posts),
                 "keyword": keyword,
                 "interval_hours": interval_hours,
@@ -594,9 +913,9 @@ class LeadService:
                 db, lead=LeadCreate(**lead_dict, lead_type=LeadFormTypeEnum.BUSINESS)
             )
             # Send lead email
-            await LeadService.send_lead_email(
-                db, created_lead.get("responseData"), cache_key
-            )
+            lead_data = created_lead.get("responseData")
+            if lead_data:
+                await LeadService.send_lead_email(db, lead_data, cache_key)
             print("New lead created successfully: ", created_lead)
         except Exception as e:
             print("Exception occurred in creating lead: ", e)
@@ -776,7 +1095,7 @@ class LeadService:
 
         lead_form_type = lead_form.get("form_type")
 
-        leads_to_create: Optional[List[Lead]] = []
+        leads_to_create: Optional[List[LeadCreate]] = []
 
         if not lead_form_type:
             raise ValueError("Empty lead form type.")
@@ -928,7 +1247,7 @@ class LeadService:
                     user_id = lead_form.get("user_id", "")
                     log_data = {
                         "userId": user_id,
-                        "exceptionDate": datetime.utcnow().isoformat(),
+                        "exceptionDate": DateHelper.utc_now_iso(),
                         "method": "POST",
                         "status": 500,
                         "exception": "".join(
@@ -1119,7 +1438,7 @@ class LeadService:
 
         ready_leads = []
         for lead, follow_up in zip(leads, follow_up_results):
-            if not isinstance(follow_up, Exception):
+            if isinstance(follow_up, str):
                 lead_to_create = LeadCreate(**lead)
                 lead_to_create.follow_up_message = follow_up
                 ready_leads.append(lead_to_create)

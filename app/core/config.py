@@ -80,6 +80,9 @@ class Settings(BaseSettings):
     # Apify Configuration
     APIFY_API_TOKEN: str = ""
 
+    # Gemini Configuration (for LLM fallback)
+    GEMINI_API_KEY: Optional[str] = None
+
     class Config:
         env_file = ".env"
         extra = "ignore"  # Allow extra fields to be ignored

@@ -1,4 +1,5 @@
 from enum import Enum
+from app.domain.enums.leadform_autopopulate_examples import AUTOPOPULATE_EXAMPLES
 
 
 # Enum for prompts
@@ -556,41 +557,70 @@ class LeadFormAutoPopulateEnum(Enum):
     """
 
     CONVERSATIONAL_FORM_PROMPT = """
-        You are a search term generation and social listening assistant. A user has described what they want to find or monitor online. Your job is to extract intent-agnostic, high-quality search parameters that can be used across any use case (e.g., sales, hiring, partnership, research, marketing, events).
+        You are an advanced lead generation and social listening assistant. A user has described what they want to find or monitor online. Your job is to extract high-quality search parameters that work for ANY use case: selling, buying, hiring, recruiting, partnerships, or anything else.
 
         Based on the user's description, return structured parameters to populate a Conversational Lead form for tracking relevant social media discussions.
 
         ### User Input:
         {data}
 
-        ### Output JSON (intent-agnostic):
+        ### Output JSON Format:
         {{
             "form_title": "<string>",
             "form_type": "CONVERSATIONAL",
-            "intent_type": "<string>",  
+            "intent_type": "<string>",
             // One of: "sales", "hiring", "partnership", "research", "marketing", "support", "event", "other" — infer from the input.
+            "category_context": "<string>",
+            // CRITICAL: Copy the user's FULL input here. DO NOT summarize or shorten. This is the most important field.
             "keywords": ["<string>", "..."],
+            // What the TARGET AUDIENCE (people the user wants to find) would say directly.
+            "implied_keywords": ["<string>", "..."],
+            // Problems, situations, frustrations the TARGET AUDIENCE experiences.
             "competitors": ["<string>", "..."],
+            // Relevant competitor brands/alternatives in this space.
             "ai_response_guide": "<string>",
-            "location": ["<city or region>", "..."],  
-            // Only include if explicitly specified or confidently inferred.
-            "buying_signals": ["<string>", "..."],  
-            // Optional; use when the user implies interest or intent cues relevant to their goal.
-            "excluded_keywords": ["<string>", "..."] ,
+            // How the AI should respond to leads (optional).
+            "location": ["<city or region>", "..."],
+            // Only if explicitly mentioned or confidently inferred.
+            "buying_signals": ["<string>", "..."],
+            // Phrases showing the TARGET AUDIENCE is ready/interested.
+            "excluded_keywords": ["<string>", "..."],
+            // CRITICAL: Phrases used by people on the OPPOSITE SIDE (the user's competitors/wrong audience type).
             "add_to_history": <boolean>,
             "auto_generate": <boolean>
         }}
 
-        ### Rules:
-        - Keep keywords concise and specific; avoid overly generic terms (e.g., "news", "content").
-        - Include obvious synonyms or related phrases if they improve coverage.
-        - Prefer named entities (brands, products, roles, technologies) when relevant.
-        - Deduplicate entries; do not include repeated values.
-        - Do not bias toward any single scenario (e.g., hiring or sales) unless the user clearly indicates it.
-        - If the intent is ambiguous, set "intent_type" to "other" and focus on strong keywords.
+        ### Critical Rules:
 
-        The JSON above is a guide; always return an object that reflects the user's preferences and is optimized for effective conversation tracking.
-        Populate location only when specified or confidently inferred from the request.
+        1. **category_context**:
+           - MUST be the user's FULL input, word-for-word
+           - DO NOT shorten to "fitness" or "tech recruiting"
+           - This field determines everything else
+
+        2. **Understand Directionality**:
+           - If user is SELLING → find BUYERS (people who need/want what they sell)
+           - If user is HIRING → find JOB SEEKERS (people looking for work)
+           - If user is BUYING → find SELLERS (people offering what they need)
+           - If user is RECRUITING PARTNERS → find people seeking partnerships
+
+        3. **excluded_keywords**:
+           - Identify who is on the OPPOSITE SIDE
+           - List PHRASES (not single words) that the opposite side uses
+           - Examples:
+             * User hiring → exclude "we're hiring", "looking for a developer", "send me your resume"
+             * User selling services → exclude "I offer training", "hire me", "DM for rates"
+             * User buying → exclude "looking to buy", "ISO supplier"
+           - Use PHRASES: "we're hiring" NOT just "hiring"
+           - Use PHRASES: "message me with your resume" NOT just "resume"
+           - Be aggressive with exclusions
+
+        4. **keywords & implied_keywords**:
+           - Think from the TARGET AUDIENCE perspective
+           - What would THEY say? What problems do THEY have?
+
+        """ + AUTOPOPULATE_EXAMPLES + """
+
+        Return a JSON object that accurately reflects the user's intent and will help find their ideal leads.
     """
 
 

@@ -53,3 +53,21 @@ class LeadsProcessedStatus(str, Enum):
     PENDING = "Pending"
     COMPLETED = "Completed"
     FAILED = "Failed"
+
+
+# CLG Upgrade - Intent Analysis Enums
+class IntentCategoryEnum(str, Enum):
+    """Categories of buying intent detected in social media posts"""
+    DIRECT = "direct"                      # "Where can I buy sunscreen?"
+    IMPLIED = "implied"                    # "Harmattan is making my skin dry"
+    PROBLEM = "problem"                    # "My acne won't go away"
+    COMPARISON = "comparison"              # "CeraVe vs La Roche Posay?"
+    COMPETITOR_NEGATIVE = "competitor_negative"  # "The Ordinary ruined my skin"
+    UNKNOWN = "unknown"                    # Unable to categorize
+
+
+class SentimentTypeEnum(str, Enum):
+    """Sentiment of the post/mention"""
+    POSITIVE = "positive"
+    NEGATIVE = "negative"
+    NEUTRAL = "neutral"

@@ -24,8 +24,8 @@ class MentionRepository:
     ) -> Dict[str, Any]:
         mention_data = mention.dict()
         mention_data["mention_id"] = str(ObjectId())
-        mention_data["created_at"] = datetime.utcnow().isoformat()
-        mention_data["updated_at"] = datetime.utcnow().isoformat()
+        mention_data["created_at"] = DateHelper.utc_now_iso()
+        mention_data["updated_at"] = DateHelper.utc_now_iso()
 
         sentiment_analysis = await AIService.analyze_sentiment(mention_data["comment"])
         mention_data["sentiment"] = sentiment_analysis.get("sentiment", "neutral")
@@ -43,7 +43,7 @@ class MentionRepository:
         db: AsyncIOMotorDatabase, mention_id: str, updates: MentionUpdate
     ) -> Dict[str, Any]:
         updates_data = updates.dict(exclude_unset=True)
-        updates_data["updated_at"] = datetime.utcnow().isoformat()
+        updates_data["updated_at"] = DateHelper.utc_now_iso()
 
         result = await db["mentions"].update_one(
             {"mention_id": mention_id}, {"$set": updates_data}
@@ -120,7 +120,7 @@ class MentionRepository:
     async def mark_as_read(db: AsyncIOMotorDatabase, mention_id: str) -> Dict[str, Any]:
         result = await db["mentions"].update_one(
             {"mention_id": mention_id},
-            {"$set": {"is_read": True, "updated_at": datetime.utcnow().isoformat()}},
+            {"$set": {"is_read": True, "updated_at": DateHelper.utc_now_iso()}},
         )
         if result.matched_count == 0:
             return UriResponse.get_single_data_response(
@@ -136,7 +136,7 @@ class MentionRepository:
     ) -> Dict[str, Any]:
         result = await db["mentions"].update_one(
             {"mention_id": mention_id},
-            {"$set": {"starred": starred, "updated_at": datetime.utcnow().isoformat()}},
+            {"$set": {"starred": starred, "updated_at": DateHelper.utc_now_iso()}},
         )
         if result.matched_count == 0:
             return UriResponse.get_single_data_response(
@@ -152,7 +152,7 @@ class MentionRepository:
     ) -> Dict[str, Any]:
         result = await db["mentions"].update_one(
             {"mention_id": mention_id},
-            {"$set": {"deleted": True, "updated_at": datetime.utcnow().isoformat()}},
+            {"$set": {"deleted": True, "updated_at": DateHelper.utc_now_iso()}},
         )
         if result.matched_count == 0:
             return UriResponse.delete_response("mention", False, "Mention not found.")
@@ -168,8 +168,8 @@ class MentionRepository:
         for mention in mentions:
             mention_data = mention.dict()
             mention_data["mention_id"] = str(ObjectId())
-            mention_data["created_at"] = datetime.utcnow().isoformat()
-            mention_data["updated_at"] = datetime.utcnow().isoformat()
+            mention_data["created_at"] = DateHelper.utc_now_iso()
+            mention_data["updated_at"] = DateHelper.utc_now_iso()
             mention_data_list.append(mention_data)
 
         for i in range(min(MAX_NOTIFICATIONS, len(mention_data_list))):

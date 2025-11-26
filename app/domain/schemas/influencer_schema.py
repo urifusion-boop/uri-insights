@@ -53,7 +53,7 @@ class InfluencerUpdate(BaseModel):
     updatedAt: Optional[datetime] = None
 
     class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}
+        json_encoders = {datetime: lambda v: v.isoformat() + "Z" if v else None}
 
 
 class Influencer(InfluencerBase):

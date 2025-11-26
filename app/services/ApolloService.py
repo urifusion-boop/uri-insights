@@ -16,7 +16,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.domain.models.chat_model import PlainText
 from app.domain.requests.lead_requests import GetLeadsByFiltersRequest
 from app.domain.responses.uri_response import UriResponse
-from app.domain.schemas.lead_schema import Lead, LeadUpdate
+from app.domain.schemas.lead_schema import Lead, LeadCreate, LeadUpdate
 from app.domain.schemas.leadform_schema import (
     LeadFormUpdateBase,
     PersonLeadFormUpdate,
@@ -570,7 +570,7 @@ class ApolloService:
     @staticmethod
     async def handle_people_search_result(
         search_result: dict, user_id: str, db: AsyncIOMotorDatabase
-    ) -> Optional[List[Lead]]:
+    ) -> Optional[List[LeadCreate]]:
         people = search_result.get("people", [])
 
         if not people or not user_id:
@@ -606,7 +606,7 @@ class ApolloService:
     @staticmethod
     async def handle_organization_search_result(
         search_result: dict, user_id: str, db: AsyncIOMotorDatabase
-    ) -> Optional[List[Lead]]:
+    ) -> Optional[List[LeadCreate]]:
         organizations = search_result.get("organizations", [])
         if not organizations or not user_id:
             return None
@@ -677,8 +677,8 @@ class ApolloService:
         """
 
         ai_model = AIService.build_ai_model([AIService.construct_user_prompt(prompt)])
-        ai_enriched_lead: Lead = AIService.extract_ai_result(
-            await AIService.structured_chat_completion(ai_model, Lead)
+        ai_enriched_lead: LeadCreate = AIService.extract_ai_result(
+            await AIService.structured_chat_completion(ai_model, LeadCreate)
         )
         await ApolloHelper.cache_lead_email_and_phone(
             ai_enriched_lead.model_dump(exclude_none=True)

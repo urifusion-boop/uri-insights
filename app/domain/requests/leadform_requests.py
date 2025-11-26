@@ -7,6 +7,7 @@ from app.domain.requests.apollo_requests import (
     OrganizationSearchRequest,
     PersonSearchRequest,
 )
+from app.domain.schemas.leadform_schema import PlatformConfig
 
 
 class BaseBusinessAndConversationalSearchRequest(BaseModel):
@@ -41,6 +42,11 @@ class ConversationalSearchRequest(BaseBusinessAndConversationalSearchRequest):
     excluded_keywords: Optional[List[str]] = None
     intent_type: Optional[str] = None
     location: Optional[str] = None
+
+    # V2 Real-time Monitoring fields
+    enable_realtime: Optional[bool] = False
+    monitoring_platforms: Optional[List[str]] = None
+    platform_configs: Optional[List[PlatformConfig]] = None
 
 
 # --- Base Form Input ---

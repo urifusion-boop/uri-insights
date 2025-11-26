@@ -35,7 +35,7 @@ class RealtimeLead(BaseModel):
     class Config:
         allow_population_by_field_name = True
         json_encoders = {
-            datetime: lambda v: v.isoformat()
+            datetime: lambda v: v.isoformat() + "Z" if v else None
         }
 
 

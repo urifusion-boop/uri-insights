@@ -61,7 +61,7 @@ class LeadNotificationManager:
             
         notification = {
             "type": "new_lead",
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": DateHelper.utc_now_iso(),
             "data": {
                 "lead_id": lead.get("lead_id"),
                 "source": lead.get("source"),
@@ -77,7 +77,7 @@ class LeadNotificationManager:
         """Send a lead update notification."""
         notification = {
             "type": "lead_update",
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": DateHelper.utc_now_iso(),
             "data": {
                 "lead_id": lead_id,
                 "updates": update
@@ -90,7 +90,7 @@ class LeadNotificationManager:
         """Send monitoring status updates."""
         notification = {
             "type": "monitoring_status",
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": DateHelper.utc_now_iso(),
             "data": status
         }
         

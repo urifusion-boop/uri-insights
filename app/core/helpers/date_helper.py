@@ -168,8 +168,8 @@ class DateHelper:
     def get_date_range(filter_option: DateFilterEnum):
         """Returns start and end dates based on predefined date filters."""
         end_date = datetime.utcnow().replace(
-            microsecond=0, second=0, minute=0
-        )  # Ensure consistency
+            microsecond=999999, second=59, minute=59, hour=23
+        )  # End of day
         time_deltas = {
             DateFilterEnum.LAST_24_HOURS: timedelta(days=1),
             DateFilterEnum.LAST_3_DAYS: timedelta(days=3),
@@ -232,3 +232,13 @@ class DateHelper:
             return None
 
         return raw_datetime.strftime("%d %b %y")  # e.g., "Jul 28, 2025"
+
+    @staticmethod
+    def utc_now_iso() -> str:
+        """
+        Returns current UTC time as ISO 8601 string with 'Z' suffix for proper timezone handling.
+
+        Returns:
+            str: ISO 8601 formatted UTC timestamp (e.g., "2025-11-25T12:24:00.123456Z")
+        """
+        return datetime.utcnow().isoformat() + 'Z'

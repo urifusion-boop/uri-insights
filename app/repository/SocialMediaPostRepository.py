@@ -1,3 +1,4 @@
+from app.core.helpers.date_helper import DateHelper
 from typing import Dict, List, Any, Optional
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from bson import ObjectId
@@ -17,8 +18,8 @@ class SocialMediaPostRepository:
     ) -> Dict[str, Any]:
         post_data = post.dict()
         post_data["post_id"] = str(ObjectId())
-        post_data["created_date"] = datetime.now().isoformat()
-        post_data["last_updated"] = datetime.now().isoformat()
+        post_data["created_date"] = DateHelper.utc_now_iso()
+        post_data["last_updated"] = DateHelper.utc_now_iso()
 
         if "start_date" in post_data and isinstance(post_data["start_date"], date):
             post_data["start_date"] = post_data["start_date"].isoformat()
@@ -36,7 +37,7 @@ class SocialMediaPostRepository:
         db: AsyncIOMotorDatabase, model: SocialMediaPostUpdate
     ) -> Dict[str, Any]:
         updates_data = model.dict(exclude_unset=True)
-        updates_data["last_updated"] = datetime.now().isoformat()
+        updates_data["last_updated"] = DateHelper.utc_now_iso()
 
         if "start_date" in updates_data and isinstance(
             updates_data["start_date"], date
@@ -122,8 +123,8 @@ class SocialMediaPostRepository:
         for post in posts:
             post_data = post.dict()
             post_data["post_id"] = str(ObjectId())
-            post_data["created_date"] = datetime.now().isoformat()
-            post_data["last_updated"] = datetime.now().isoformat()
+            post_data["created_date"] = DateHelper.utc_now_iso()
+            post_data["last_updated"] = DateHelper.utc_now_iso()
 
             if "start_date" in post_data and isinstance(post_data["start_date"], date):
                 post_data["start_date"] = post_data["start_date"].isoformat()
@@ -147,7 +148,7 @@ class SocialMediaPostRepository:
     ) -> Dict[str, Any]:
         result = await db["social_media_posts"].update_one(
             {"post_id": post_id},
-            {"$set": {"status": status, "last_updated": datetime.now().isoformat()}},
+            {"$set": {"status": status, "last_updated": DateHelper.utc_now_iso()}},
         )
 
         if result.matched_count == 0:
