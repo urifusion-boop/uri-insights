@@ -28,7 +28,7 @@ class JWTBearer(HTTPBearer):
                     status_code=403, detail="Invalid token or expired token."
                 )
             if self.validate_subscription_flag:
-                self.validate_subscription(payload)
+                await self.validate_subscription(payload)
             # Return the payload so it can be used in routes if necessary
             return payload
         else:
@@ -42,16 +42,56 @@ class JWTBearer(HTTPBearer):
             print(f"Error verifying JWT: {e}")
             return None
 
-    def validate_subscription(self, payload: dict):
+    async def validate_subscription(self, payload: dict):
         # Access the claims from the payload
         claims = payload.get("claims", {})
+        user_id = claims.get("userId")
 
-        # Retrieve subscriptionStatus from claims
+        # Get subscription status and trial status from JWT claims
         subscription_status = claims.get(
             "subscriptionStatus", SubscriptionStatusEnum.INACTIVE
         )
+        trial_status_jwt = claims.get("trialStatus", "not_started")
 
-        if subscription_status != SubscriptionStatusEnum.ACTIVE:
+        print(f"🔐 AUTH CHECK - User: {user_id}")
+        print(f"   JWT trialStatus: {trial_status_jwt}")
+        print(f"   JWT subscriptionStatus: {subscription_status}")
+
+        # If JWT says trial not active, check MongoDB for latest status
+        # (handles case where user activated trial after getting JWT)
+        trial_status = trial_status_jwt
+        if trial_status_jwt != "active" and user_id:
+            try:
+                print(f"   ⚠ Fetching latest trial status from backend...")
+                # Fetch from MongoDB via uri-backend
+                from app.services.uri_microservices.UriBackendService import UriBackendService
+                result = await UriBackendService.get_trial_status(user_id)
+                print(f"   Backend response: {result}")
+
+                if result and result.get("responseData"):
+                    # Backend returns: responseData: { "status": "active", ... }
+                    trial_status = result["responseData"].get("status", "not_started")
+                    print(f"   ✓ Backend trial status: {trial_status}")
+                else:
+                    print(f"   ✗ Backend returned null or no responseData")
+                    trial_status = "not_started"
+            except Exception as e:
+                # On error, trust JWT claim
+                print(f"   ✗ Exception fetching trial status: {e}")
+                import traceback
+                traceback.print_exc()
+                trial_status = trial_status_jwt
+
+        # Allow access if user has active subscription OR active trial
+        has_active_subscription = subscription_status == SubscriptionStatusEnum.ACTIVE
+        has_active_trial = trial_status == "active"
+
+        print(f"   Final trial_status: {trial_status}")
+        print(f"   has_active_subscription: {has_active_subscription}")
+        print(f"   has_active_trial: {has_active_trial}")
+
+        if not (has_active_subscription or has_active_trial):
+            print(f"   ❌ ACCESS DENIED - No active subscription or trial")
             raise HTTPException(
                 status_code=402,
                 detail={
@@ -60,7 +100,10 @@ class JWTBearer(HTTPBearer):
                     "responseMessage": "Payment required for premium access.",
                     "responseData": {
                         "subscriptionStatus": subscription_status
-                        or SubscriptionStatusEnum.INACTIVE
+                        or SubscriptionStatusEnum.INACTIVE,
+                        "trialStatus": trial_status
                     },
                 },
             )
+
+        print(f"   ✅ ACCESS GRANTED")

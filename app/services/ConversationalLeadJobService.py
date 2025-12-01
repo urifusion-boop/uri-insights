@@ -13,9 +13,12 @@ from app.services.OpenAIApifyTwitterService import OpenAIApifyTwitterService
 from app.services.OpenAIApifyFacebookService import OpenAIApifyFacebookService
 from app.services.OpenAIApifyTiktokService import OpenAIApifyTiktokService
 from app.services.IntentAnalysisService import IntentAnalysisService, CategoryConfig
+from app.services.uri_microservices.UriBackendService import UriBackendService
+from app.services.uri_microservices.UriTaskManagerService import UriTaskManagerService
 from app.repository.LeadRepository import LeadRepository
 from app.repository.LeadSearchHistoryRepository import LeadSearchHistoryRepository
 from app.domain.schemas.lead_schema import LeadCreate
+from app.domain.enums.endpoints_enum import EndpointsEnum
 from app.domain.schemas.lead_search_history_schema import LeadSearchHistoryCreate, SearchResultStats
 from app.domain.enums.lead_enum import LeadSourceEnum, LeadStatusEnum, LeadOpportunityTypeEnum, IntentCategoryEnum, SentimentTypeEnum
 from app.domain.enums.leadform_enum import LeadFormTypeEnum
@@ -68,13 +71,16 @@ class ConversationalLeadJobService:
         try:
             platform_configs = lead_form.get("platform_configs", [])
             keywords = lead_form.get("keywords", [])
+            implied_keywords = lead_form.get("implied_keywords", [])
 
-            if not keywords or len(keywords) == 0:
+            # Combine direct and implied keywords for comprehensive search
+            all_search_keywords = keywords + (implied_keywords or [])
+
+            if not all_search_keywords or len(all_search_keywords) == 0:
                 print(f"No keywords provided for lead form {lead_form.get('lead_form_id')}")
                 return stats
 
-            # Use first keyword for fetching (can be enhanced to use multiple keywords)
-            keyword = keywords[0]
+            print(f"🔍 Search keywords: {len(keywords)} direct + {len(implied_keywords or [])} implied = {len(all_search_keywords)} total")
 
             # Collect all enabled platforms (normalize to lowercase for comparison)
             enabled_platforms = {
@@ -131,6 +137,11 @@ class ConversationalLeadJobService:
             print(f"   Checking for Facebook: '{BrowsercloudPlatformEnum.FACEBOOK.value}'")
             print(f"   Checking for TikTok: '{BrowsercloudPlatformEnum.TIKTOK.value}'")
 
+            # Use first keyword for search (proven to work better than OR combinations)
+            keyword = all_search_keywords[0] if all_search_keywords else ""
+            print(f"🔍 Using primary search keyword: '{keyword}'")
+
+            # Fetch leads from each platform
             # Fetch Twitter leads
             if BrowsercloudPlatformEnum.TWITTER.value in enabled_platforms:
                 try:
@@ -204,6 +215,17 @@ class ConversationalLeadJobService:
                         print(f"ℹ️ All {duplicate_count} qualified leads were already in your database")
                     else:
                         print(f"No new leads saved")
+
+                    if new_count > 0:
+                        try:
+                            limit_available, current_count = await UriTaskManagerService.get_elapsed_leads_limit_and_count(user_id)
+                            await UriTaskManagerService.update_user_feature_limit_specific_limit(
+                                user_id=user_id,
+                                url_path=EndpointsEnum.LEAD_GEN.value,
+                                count=new_count + current_count,
+                            )
+                        except Exception as e:
+                            print(f"Failed to update feature limit after conversational leads: {str(e)}")
                 else:
                     print(f"No qualified leads found after intent analysis")
             else:
@@ -226,7 +248,7 @@ class ConversationalLeadJobService:
                 user_id=user_id,
                 lead_form_id=lead_form.get("lead_form_id", ""),
                 lead_form_name=lead_form.get("form_title", ""),
-                keyword=keywords[0] if keywords else "",
+                keyword=", ".join(all_search_keywords[:3]) + ("..." if len(all_search_keywords) > 3 else ""),  # Show first 3 keywords
                 platforms=list(enabled_platforms.keys()),  # Convert dict keys to list
                 results=SearchResultStats(**stats),
                 duration_seconds=round(duration, 2),
@@ -240,19 +262,32 @@ class ConversationalLeadJobService:
             print(f"⚠️ Failed to save search history: {str(history_error)}")
             # Don't fail the entire operation if history save fails
 
+        # Track trial usage if leads were generated
+        if stats['new_leads_saved'] > 0:
+            try:
+                await UriBackendService.increment_trial_usage(
+                    user_id=user_id,
+                    field='trialLeadsGenerated',
+                    amount=stats['new_leads_saved']
+                )
+                print(f"📊 Trial usage tracked: {stats['new_leads_saved']} leads")
+            except Exception as usage_error:
+                print(f"⚠️ Failed to track trial usage: {str(usage_error)}")
+                # Don't fail the entire operation if usage tracking fails
+
         return stats
 
     @staticmethod
     async def _fetch_twitter_leads(
-        keyword: str,
+        search_query: str,
         user_id: str,
         lead_form_id: Optional[str] = None
     ) -> List[LeadCreate]:
-        """Fetch leads from Twitter using Apify"""
+        """Fetch leads from Twitter using Apify with smart search query"""
         try:
-            print(f"🐦 Fetching Twitter leads for keyword: '{keyword}'")
+            print(f"🐦 Fetching Twitter leads with search query: '{search_query}'")
             twitter_service = OpenAIApifyTwitterService()
-            response = await twitter_service.fetch_tweets_with_analysis(keyword, max_tweets=10, analyze_sentiment=False)
+            response = await twitter_service.fetch_tweets_with_analysis(search_query, max_tweets=10, analyze_sentiment=False)
             print(f"   Twitter API response success: {response.get('success')}")
             tweets = response.get("tweets", [])
             print(f"   Found {len(tweets)} tweets")
@@ -303,15 +338,15 @@ class ConversationalLeadJobService:
 
     @staticmethod
     async def _fetch_facebook_leads(
-        keyword: str,
+        search_query: str,
         user_id: str,
         lead_form_id: Optional[str] = None
     ) -> List[LeadCreate]:
-        """Fetch leads from Facebook using Apify"""
+        """Fetch leads from Facebook using Apify with smart search query"""
         try:
-            print(f"📘 Fetching Facebook leads for keyword: '{keyword}'")
+            print(f"📘 Fetching Facebook leads with search query: '{search_query}'")
             facebook_service = OpenAIApifyFacebookService()
-            response = await facebook_service.fetch_posts_with_analysis(keyword, max_posts=10, analyze_sentiment=False)
+            response = await facebook_service.fetch_posts_with_analysis(search_query, max_posts=10, analyze_sentiment=False)
             print(f"   Facebook API response success: {response.get('success')}")
             posts = response.get("posts", [])
             print(f"   Found {len(posts)} posts")
@@ -367,15 +402,15 @@ class ConversationalLeadJobService:
 
     @staticmethod
     async def _fetch_tiktok_leads(
-        keyword: str,
+        search_query: str,
         user_id: str,
         lead_form_id: Optional[str] = None
     ) -> List[LeadCreate]:
-        """Fetch leads from TikTok using Apify"""
+        """Fetch leads from TikTok using Apify with smart search query"""
         try:
-            print(f"🎵 Fetching TikTok leads for keyword: '{keyword}'")
+            print(f"🎵 Fetching TikTok leads with search query: '{search_query}'")
             tiktok_service = OpenAIApifyTiktokService()
-            response = await tiktok_service.fetch_posts_with_analysis(keyword, max_posts=10, analyze_sentiment=False)
+            response = await tiktok_service.fetch_posts_with_analysis(search_query, max_posts=10, analyze_sentiment=False)
             print(f"   TikTok API response success: {response.get('success')}")
             posts = response.get("posts", [])
             print(f"   Found {len(posts)} posts")

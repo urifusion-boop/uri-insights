@@ -43,7 +43,20 @@ class LeadFormRepository:
         )
 
         if existing_instance:
-            return UriResponse.conflict_response("lead form", "already exists")
+            # Check if any leads exist for this form
+            leads_count = await db["leads"].count_documents({
+                "user_id": lead_form_data.get("user_id"),
+                "form_id": existing_instance.get("form_id")
+            })
+
+            if leads_count > 0:
+                # Leads exist - user should update instead
+                return UriResponse.conflict_response("lead form", "already exists with leads")
+            else:
+                # No leads yet - allow replacing the form
+                await db[LeadFormRepository.COLLECTION_NAME].delete_one({
+                    "_id": existing_instance["_id"]
+                })
 
         await db[LeadFormRepository.COLLECTION_NAME].insert_one(lead_form_data)
 

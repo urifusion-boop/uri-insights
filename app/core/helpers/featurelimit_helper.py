@@ -75,30 +75,27 @@ class FeatureLimitHelper:
         if not endpoints or (
             endpoints and EndpointsEnum.SAVE_FACEBOOK_ACCOUNTS.value in endpoints
         ):
-            # Get current usage on facebook accounts connection
             facebook_accounts_connected = (
                 await InfluencerRepository.get_user_influencer_count_by_filters(
-                    db, user_id=user_id, platforms=["FACEBOOK"]
+                    db, user_id=user_id, platforms=["FACEBOOK"], connected=True
                 )
             )
             usage_counts_data["facebookAccounts"] = facebook_accounts_connected or 0
         if not endpoints or (
             endpoints and EndpointsEnum.SAVE_LINKEDIN_ACCOUNTS.value in endpoints
         ):
-            # Get current usage on linkdein accounts connection
             linkedin_accounts_connected = (
                 await InfluencerRepository.get_user_influencer_count_by_filters(
-                    db, user_id=user_id, platforms=["LINKEDIN"]
+                    db, user_id=user_id, platforms=["LINKEDIN"], connected=True
                 )
             )
             usage_counts_data["linkedinAccounts"] = linkedin_accounts_connected or 0
         if not endpoints or (
             endpoints and EndpointsEnum.SAVE_INSTAGRAM_ACCOUNTS.value in endpoints
         ):
-            # Get current usage on instagram accounts connection
             instagram_accounts_connected = (
                 await InfluencerRepository.get_user_influencer_count_by_filters(
-                    db, user_id=user_id, platforms=["INSTAGRAM"]
+                    db, user_id=user_id, platforms=["INSTAGRAM"], connected=True
                 )
             )
             usage_counts_data["instagramAccounts"] = instagram_accounts_connected or 0

@@ -4,6 +4,7 @@ from app.domain.enums.endpoints_enum import EndpointsEnum
 from app.domain.schemas import influencer_schema
 from app.repository.InfluencerRepository import InfluencerRepository
 from app.services.FeatureLimitService import FeatureLimitService
+from app.services.uri_microservices.UriBackendService import UriBackendService
 
 
 class InfluencerService:
@@ -38,6 +39,18 @@ class InfluencerService:
             await FeatureLimitService.sync_specific_feature_limit_for_user(
                 db, influencer.user_id, endpoint, social_platform.value
             )
+
+        # Track trial usage for account tracking (non-blocking)
+        if created_response.get("status"):
+            try:
+                await UriBackendService.increment_trial_usage(
+                    user_id=influencer.user_id,
+                    field="trialAccountsTracked",
+                    amount=1
+                )
+            except Exception as e:
+                print(f"Failed to track trial usage for account: {e}")
+
         return created_response
 
     @staticmethod

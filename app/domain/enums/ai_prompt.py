@@ -579,7 +579,7 @@ class LeadFormAutoPopulateEnum(Enum):
             "competitors": ["<string>", "..."],
             // Relevant competitor brands/alternatives in this space.
             "ai_response_guide": "<string>",
-            // How the AI should respond to leads (optional).
+            // REQUIRED: A persona/tone description for AI responses. Example: "Respond as a friendly copywriter offering free audit", "Reply as a construction materials sales rep", "Act as a fintech partnership manager". Be specific about role and approach.
             "location": ["<city or region>", "..."],
             // Only if explicitly mentioned or confidently inferred.
             "buying_signals": ["<string>", "..."],

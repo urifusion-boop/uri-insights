@@ -239,7 +239,8 @@ class LeadFormService:
         )
         results = []
         if not user_lead_forms:
-            return UriResponse.custom_response("Lead forms not found.", 404)
+            # Return empty list instead of 404 for better UX (new users have no forms yet)
+            return UriResponse.get_list_data_response("Lead form", [])
 
         for lead_form in user_lead_forms:
             lead_form["total_leads"] = await LeadFormService.get_metadata_for_lead_form(
