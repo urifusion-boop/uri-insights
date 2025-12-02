@@ -137,9 +137,21 @@ class ConversationalLeadJobService:
             print(f"   Checking for Facebook: '{BrowsercloudPlatformEnum.FACEBOOK.value}'")
             print(f"   Checking for TikTok: '{BrowsercloudPlatformEnum.TIKTOK.value}'")
 
-            # Use first keyword for search (proven to work better than OR combinations)
-            keyword = all_search_keywords[0] if all_search_keywords else ""
-            print(f"🔍 Using primary search keyword: '{keyword}'")
+            # Prioritize buying signals and implied keywords over generic keywords
+            # Buying signals indicate actual purchase intent (e.g., "need laptop", "looking for")
+            buying_signals = lead_form.get("buying_signals", [])
+            if buying_signals and len(buying_signals) > 0:
+                keyword = buying_signals[0]
+                print(f"🔍 Using buying signal keyword: '{keyword}'")
+            elif implied_keywords and len(implied_keywords) > 0:
+                keyword = implied_keywords[0]
+                print(f"🔍 Using implied keyword: '{keyword}'")
+            elif all_search_keywords:
+                keyword = all_search_keywords[0]
+                print(f"🔍 Using primary search keyword: '{keyword}'")
+            else:
+                keyword = ""
+                print(f"⚠️ No keywords available for search")
 
             # Fetch leads from each platform
             # Fetch Twitter leads
