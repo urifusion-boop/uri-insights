@@ -85,11 +85,12 @@ async def create_conversational_lead_form(
 async def fetch_conversational_leads(
     lead_form_id: str,
     user_id: str,
+    background_tasks: BackgroundTasks,
     db: AsyncIOMotorDatabase = Depends(get_db_dependency),
 ):
     """
-    Fetch and analyze leads from social platforms for a conversational lead form.
-    This endpoint triggers the ConversationalLeadJobService which includes intent analysis.
+    Start async lead generation job and return immediately with job_id for polling.
+    Frontend should poll /conversation-search/job-status/{job_id} for progress.
     """
     # Get the lead form
     lead_form_result = await LeadFormRepository.get_by_id(db, lead_form_id)
@@ -108,45 +109,116 @@ async def fetch_conversational_leads(
             status_code=404
         )
 
-    # Trigger the background job to fetch and analyze leads
+    # Create job tracking document
     try:
-        stats = await ConversationalLeadJobService.fetch_leads_from_platforms(
+        from app.repository.LeadGenerationJobRepository import LeadGenerationJobRepository
+
+        job_id = await LeadGenerationJobRepository.create_job(
             db=db,
-            lead_form=lead_form,
-            user_id=user_id
+            lead_form_id=lead_form_id,
+            user_id=user_id,
+            status="processing",
+            progress=0,
+            message="Starting lead generation..."
         )
 
-        # Build a professional message based on the results
-        message = "Lead fetching and intent analysis completed successfully"
-        if stats["new_leads_saved"] > 0 and stats["duplicates_skipped"] > 0:
-            message = f"Found {stats['new_leads_saved']} new leads. {stats['duplicates_skipped']} duplicates were already in your database."
-        elif stats["new_leads_saved"] > 0:
-            message = f"Successfully found {stats['new_leads_saved']} new leads!"
-        elif stats["duplicates_skipped"] > 0:
-            message = f"No new leads found. All {stats['duplicates_skipped']} qualified leads were already in your database."
-        elif stats["total_qualified"] == 0 and stats["total_fetched"] > 0:
-            message = f"Analyzed {stats['total_fetched']} posts but none matched your criteria."
-        elif stats["total_fetched"] == 0:
-            message = "No posts found matching your keywords."
+        # Add background task (non-blocking)
+        background_tasks.add_task(
+            ConversationalLeadJobService.fetch_leads_from_platforms,
+            db,
+            lead_form,
+            user_id,
+            job_id
+        )
 
+        # Return immediately with job_id
+        return UriResponse.get_status_response(
+            response={
+                "status": True,
+                "responseCode": 202,  # 202 Accepted
+                "responseMessage": "Lead generation started. Poll /conversation-search/job-status/{job_id} for progress.",
+                "responseData": {
+                    "lead_form_id": lead_form_id,
+                    "job_id": job_id,
+                    "status": "processing",
+                    "poll_url": f"/conversation-search/job-status/{job_id}"
+                }
+            },
+            status_code=202
+        )
+    except Exception as e:
+        print(f"Error starting lead generation: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return UriResponse.get_status_response(
+            response={"message": f"Error starting lead generation: {str(e)}", "lead_form_id": lead_form_id},
+            status_code=500
+        )
+
+
+@router.get("/conversation-search/job-status/{job_id}")
+async def get_job_status(
+    job_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Poll endpoint to check lead generation job status.
+    Frontend should call this every 3-5 seconds until status is 'completed' or 'failed'.
+    """
+    print(f"[JOB_STATUS] Received request for job_id: {job_id}")
+    try:
+        from app.repository.LeadGenerationJobRepository import LeadGenerationJobRepository
+        import asyncio
+
+        print(f"[JOB_STATUS] Querying database for job_id: {job_id}")
+
+        # Add timeout to prevent hanging
+        job = await asyncio.wait_for(
+            LeadGenerationJobRepository.get_job_status(db, job_id),
+            timeout=5.0
+        )
+
+        print(f"[JOB_STATUS] Query result: {job is not None}")
+
+        if not job:
+            print(f"[JOB_STATUS] Job not found: {job_id}")
+            return UriResponse.get_status_response(
+                response={"message": "Job not found"},
+                status_code=404
+            )
+
+        print(f"[JOB_STATUS] Returning job status: {job['status']}, progress: {job['progress']}")
         return UriResponse.get_status_response(
             response={
                 "status": True,
                 "responseCode": 200,
-                "responseMessage": message,
+                "responseMessage": job["message"],
                 "responseData": {
-                    "lead_form_id": lead_form_id,
-                    "stats": stats
+                    "job_id": job["job_id"],
+                    "lead_form_id": job["lead_form_id"],
+                    "status": job["status"],  # processing, completed, failed
+                    "progress": job["progress"],  # 0-100
+                    "message": job["message"],
+                    "stats": job.get("stats"),  # Only available when completed
+                    "error": job.get("error"),  # Only available when failed
+                    "created_at": job["created_at"],
+                    "updated_at": job["updated_at"]
                 }
             },
             status_code=200
         )
+    except asyncio.TimeoutError:
+        print(f"[JOB_STATUS] Database query timed out for job_id: {job_id}")
+        return UriResponse.get_status_response(
+            response={"message": "Database query timed out"},
+            status_code=500
+        )
     except Exception as e:
-        print(f"Error in fetch_conversational_leads endpoint: {str(e)}")
+        print(f"[JOB_STATUS] Error fetching job status: {str(e)}")
         import traceback
         traceback.print_exc()
         return UriResponse.get_status_response(
-            response={"message": f"Error fetching leads: {str(e)}", "lead_form_id": lead_form_id},
+            response={"message": f"Error fetching job status: {str(e)}"},
             status_code=500
         )
 
