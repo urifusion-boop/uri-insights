@@ -696,7 +696,7 @@ class ConversationalLeadJobService:
         competitors = lead_form.get("competitors", [])
         buying_signals = lead_form.get("buying_signals", [])
         excluded_keywords = lead_form.get("excluded_keywords", [])
-        location = lead_form.get("location", [])
+        location = lead_form.get("location") or []  # Handle None case
 
         return CategoryConfig(
             category_context=category_context,
