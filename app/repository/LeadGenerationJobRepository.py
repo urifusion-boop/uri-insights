@@ -13,6 +13,22 @@ class LeadGenerationJobRepository:
     COLLECTION_NAME = "lead_generation_jobs"
 
     @staticmethod
+    async def ensure_indexes(db: AsyncIOMotorDatabase):
+        """Ensure indexes exist for fast queries"""
+        collection = db[LeadGenerationJobRepository.COLLECTION_NAME]
+
+        # Create index on job_id for fast lookups
+        await collection.create_index("job_id", unique=True)
+
+        # Create index on user_id for user-specific queries
+        await collection.create_index("user_id")
+
+        # Create index on created_at for cleanup queries
+        await collection.create_index("created_at")
+
+        print(f"✅ Indexes created for {LeadGenerationJobRepository.COLLECTION_NAME}")
+
+    @staticmethod
     async def create_job(
         db: AsyncIOMotorDatabase,
         lead_form_id: str,
