@@ -877,6 +877,10 @@ class ConversationalLeadJobService:
     @staticmethod
     def _convert_twitter_date(twitter_date: str) -> datetime:
         """Convert Twitter date format to datetime"""
+        # Handle empty or None dates
+        if not twitter_date or not twitter_date.strip():
+            return datetime.utcnow()
+
         try:
             # Twitter format: "Sun Nov 09 17:51:05 +0000 2025"
             return datetime.strptime(twitter_date, "%a %b %d %H:%M:%S %z %Y")
