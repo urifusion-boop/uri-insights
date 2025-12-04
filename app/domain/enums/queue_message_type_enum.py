@@ -49,3 +49,12 @@ class LeadManagementMessageTypeEnum(Enum):
 
 class LeadFormNotificationMessageTypeEnum(Enum):
     LEAD_REQUEST = "LEAD_REQUEST"
+
+
+class LeadGenerationQueueMessageTypeEnum(Enum):
+    """Message types for async lead generation jobs"""
+    CONVERSATIONAL_LEAD_GENERATION = "CONVERSATIONAL_LEAD_GENERATION"
+
+
+# Alias for backwards compatibility
+QueueMessageTypeEnum = LeadGenerationQueueMessageTypeEnum

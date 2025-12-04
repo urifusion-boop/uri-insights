@@ -93,6 +93,7 @@ class LeadBase(BaseModel):
     intent_category: Optional[IntentCategoryEnum] = None  # Type of intent detected
     final_score: Optional[float] = None  # Combined qualification score (0-1)
     intent_reasoning: Optional[str] = None  # Brief explanation of intent analysis
+    content_hash: Optional[str] = None  # Hash of normalized content to detect retweets/shares
 
     class Config:
         json_encoders = {datetime: lambda v: v.isoformat() + "Z" if v else None}
