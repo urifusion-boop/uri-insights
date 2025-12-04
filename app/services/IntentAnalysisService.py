@@ -276,17 +276,17 @@ Based on the USER'S BUSINESS CONTEXT, determine if this post author is a good ma
     @staticmethod
     def meets_thresholds(
         result: IntentAnalysisResult,
-        intent_min: float = 0.55,
-        relevance_min: float = 0.50,
-        final_min: float = 0.60
+        intent_min: float = 0.50,
+        relevance_min: float = 0.45,
+        final_min: float = 0.55
     ) -> bool:
         """
         Check if analysis result meets qualification thresholds
 
-        Default thresholds from requirements:
-        - intent_score >= 0.55
-        - relevance_score >= 0.50
-        - final_score >= 0.60
+        Default thresholds (lowered for better coverage):
+        - intent_score >= 0.50
+        - relevance_score >= 0.45
+        - final_score >= 0.55
         """
         final_score = IntentAnalysisService.calculate_final_score(
             result.intent_score,
@@ -303,9 +303,9 @@ Based on the USER'S BUSINESS CONTEXT, determine if this post author is a good ma
     @staticmethod
     def filter_qualified_leads(
         results: List[tuple[str, IntentAnalysisResult]],
-        intent_min: float = 0.55,
-        relevance_min: float = 0.50,
-        final_min: float = 0.60
+        intent_min: float = 0.50,
+        relevance_min: float = 0.45,
+        final_min: float = 0.55
     ) -> List[tuple[str, IntentAnalysisResult, float]]:
         """
         Filter results to only include qualified leads

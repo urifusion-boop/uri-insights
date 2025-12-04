@@ -85,12 +85,16 @@ class PlatformKeywordOptimizer:
     @staticmethod
     def optimize_for_twitter(keyword: str) -> str:
         """
-        Twitter optimization: Convert statements to questions for better engagement
+        Twitter optimization: Smart transformation based on keyword type
+
+        Product/Service keywords → Questions: "laptop repair" → "where can I buy laptop repair?"
+        Problem keywords → Keep natural: "laptop won't turn on" → "laptop won't turn on"
 
         Examples:
-        - "laptop" → "where can I buy laptop?"
-        - "need laptop" → "where can I buy laptop?"
-        - "looking for laptop" → "looking for laptop" (already question-like)
+        - "laptop repair" → "where can I buy laptop repair?"
+        - "laptop won't turn on" → "laptop won't turn on" (problem statement)
+        - "broken screen" → "broken screen" (problem statement)
+        - "looking for laptop" → "looking for laptop" (already has intent)
         """
         keyword_lower = keyword.lower().strip()
 
@@ -99,29 +103,60 @@ class PlatformKeywordOptimizer:
         if any(word in keyword_lower for word in question_words):
             return keyword
 
-        # Remove "need", "looking for", "want" prefixes
-        keyword_lower = keyword_lower.replace("need ", "").replace("looking for ", "").replace("want ", "")
+        # Problem indicators - these should stay natural, not converted to "where can I buy"
+        problem_indicators = [
+            "won't", "doesn't", "can't", "not working", "broken", "cracked",
+            "damaged", "issue", "problem", "error", "failed", "stopped",
+            "no longer", "keeps", "always", "never", "stuck", "frozen"
+        ]
 
-        # Convert to question format
-        return f"where can I buy {keyword_lower}?"
+        # If keyword contains problem indicators, keep it natural
+        if any(indicator in keyword_lower for indicator in problem_indicators):
+            return keyword
+
+        # If keyword already has intent words, keep as-is
+        intent_words = ["need", "looking for", "want", "searching for", "help with"]
+        if any(intent in keyword_lower for intent in intent_words):
+            return keyword
+
+        # Otherwise, it's a product/service keyword - convert to question
+        # Remove any remaining "need", "looking for", "want" prefixes for clean question
+        clean_keyword = keyword_lower.replace("need ", "").replace("looking for ", "").replace("want ", "")
+
+        return f"where can I buy {clean_keyword}?"
 
     @staticmethod
     def optimize_for_facebook(keyword: str) -> str:
         """
         Facebook optimization: Use natural language, keep conversational tone
 
+        Product/Service keywords → Add "need": "laptop repair" → "need laptop repair"
+        Problem keywords → Keep natural: "laptop won't turn on" → "laptop won't turn on"
+
         Examples:
-        - "laptop" → "need laptop"
-        - "laptop lagos" → "need laptop in lagos"
+        - "laptop repair" → "need laptop repair"
+        - "laptop won't turn on" → "laptop won't turn on" (problem statement)
+        - "broken screen" → "broken screen" (problem statement)
         """
         keyword_lower = keyword.lower().strip()
 
-        # If already has intent words, keep as-is
-        intent_words = ["need", "looking for", "want", "searching for", "where can"]
+        # Problem indicators - keep natural
+        problem_indicators = [
+            "won't", "doesn't", "can't", "not working", "broken", "cracked",
+            "damaged", "issue", "problem", "error", "failed", "stopped",
+            "no longer", "keeps", "always", "never", "stuck", "frozen"
+        ]
+
+        # If keyword contains problem indicators, keep it natural
+        if any(indicator in keyword_lower for indicator in problem_indicators):
+            return keyword
+
+        # If already has intent words or questions, keep as-is
+        intent_words = ["need", "looking for", "want", "searching for", "where can", "how", "what", "?"]
         if any(word in keyword_lower for word in intent_words):
             return keyword
 
-        # Add "need" prefix for natural language
+        # Otherwise, add "need" prefix for natural language
         return f"need {keyword}"
 
     @staticmethod
@@ -234,43 +269,98 @@ class ConversationalLeadJobService:
             print(f"   Checking for Facebook: '{BrowsercloudPlatformEnum.FACEBOOK.value}'")
             print(f"   Checking for TikTok: '{BrowsercloudPlatformEnum.TIKTOK.value}'")
 
-            # MULTI-KEYWORD FALLBACK STRATEGY
-            # Prioritize: direct keywords > implied keywords > buying signals (if needed)
-            # Try up to 3 keywords, stop when we get 5+ qualified leads
+            # MULTI-KEYWORD STRATEGY - Mix direct and implied keywords with smart prioritization
+            # Strategy: Use 8 keywords total - 4 direct + 4 implied
+            # Each group: 2 multi-word (3+) + 2 two-word keywords for optimal specificity
             buying_signals = lead_form.get("buying_signals", [])
             prioritized_keywords = []
 
-            # Build prioritized keyword list (CORRECT ORDER)
-            # 1. Use actual search keywords first (what we're looking for)
+            def select_keywords_by_word_count(keyword_list, target_count=4):
+                """
+                Select keywords with optimal word count distribution:
+                - Prefer 2 keywords with 3+ words (most specific)
+                - Then 2 keywords with exactly 2 words
+
+                Returns list of selected keywords
+                """
+                if not keyword_list:
+                    return []
+
+                # Separate keywords by word count
+                three_plus_words = [k for k in keyword_list if len(k.split()) >= 3]
+                two_words = [k for k in keyword_list if len(k.split()) == 2]
+                one_word = [k for k in keyword_list if len(k.split()) == 1]
+
+                # Sort each group by word count (descending) for tie-breaking
+                three_plus_words.sort(key=lambda k: len(k.split()), reverse=True)
+
+                selected = []
+
+                # Priority 1: Get 2 keywords with 3+ words
+                selected.extend(three_plus_words[:2])
+
+                # Priority 2: Get 2 keywords with 2 words
+                if len(selected) < target_count and two_words:
+                    selected.extend(two_words[:2])
+
+                # Fallback: If we don't have enough, fill with what's available
+                if len(selected) < target_count:
+                    # Add more 3+ word keywords if available
+                    if len(three_plus_words) > 2:
+                        remaining = target_count - len(selected)
+                        selected.extend(three_plus_words[2:2+remaining])
+
+                    # Still short? Add more 2-word keywords
+                    if len(selected) < target_count and len(two_words) > 2:
+                        remaining = target_count - len(selected)
+                        selected.extend(two_words[2:2+remaining])
+
+                    # Still short? Add 1-word keywords as last resort
+                    if len(selected) < target_count and one_word:
+                        remaining = target_count - len(selected)
+                        selected.extend(one_word[:remaining])
+
+                return selected[:target_count]  # Ensure we don't exceed target
+
+            # Build prioritized keyword list (8 KEYWORDS: 4 direct + 4 implied)
+            # 1. Add 4 direct keywords (2 with 3+ words, 2 with 2 words)
             if keywords and len(keywords) > 0:
-                prioritized_keywords.extend(keywords[:3])  # Top 3 direct keywords
-            # 2. Then implied keywords (contextual variations)
-            if len(prioritized_keywords) < 3 and implied_keywords and len(implied_keywords) > 0:
-                prioritized_keywords.extend(implied_keywords[:3 - len(prioritized_keywords)])
-            # 3. Buying signals are for INTENT ANALYSIS, not search keywords
-            # (Only use if absolutely no other keywords available - which shouldn't happen)
-            if len(prioritized_keywords) < 3 and buying_signals and len(buying_signals) > 0:
-                prioritized_keywords.extend(buying_signals[:3 - len(prioritized_keywords)])
+                direct_selected = select_keywords_by_word_count(keywords, target_count=4)
+                prioritized_keywords.extend(direct_selected)
+                print(f"   📝 Direct keywords selected: {direct_selected}")
+
+            # 2. Add 4 implied keywords (2 with 3+ words, 2 with 2 words)
+            if implied_keywords and len(implied_keywords) > 0:
+                implied_selected = select_keywords_by_word_count(implied_keywords, target_count=4)
+                prioritized_keywords.extend(implied_selected)
+                print(f"   📝 Implied keywords selected: {implied_selected}")
+
+            # 3. Fallback: If we still don't have 8 keywords, use buying signals
+            if len(prioritized_keywords) < 8 and buying_signals and len(buying_signals) > 0:
+                remaining_slots = 8 - len(prioritized_keywords)
+                signal_selected = select_keywords_by_word_count(buying_signals, target_count=remaining_slots)
+                prioritized_keywords.extend(signal_selected)
+                print(f"   📝 Buying signal keywords selected: {signal_selected}")
 
             if not prioritized_keywords:
                 print(f"⚠️ No keywords available for search")
                 return stats
 
-            print(f"🎯 Prioritized keywords (max 3 attempts): {prioritized_keywords}")
+            print(f"🎯 Prioritized keywords (8 total: 4 direct + 4 implied): {prioritized_keywords}")
 
             # Build category configuration once (used for intent analysis)
             category_config = ConversationalLeadJobService._build_category_config(lead_form)
 
             # Get custom scoring thresholds if specified
             scoring_thresholds = lead_form.get("scoring_thresholds", {})
-            intent_min = scoring_thresholds.get("intent_score_min", 0.55)
-            relevance_min = scoring_thresholds.get("relevance_score_min", 0.50)
-            final_min = scoring_thresholds.get("final_score_min", 0.60)
+            intent_min = scoring_thresholds.get("intent_score_min", 0.50)
+            relevance_min = scoring_thresholds.get("relevance_score_min", 0.45)
+            final_min = scoring_thresholds.get("final_score_min", 0.55)
 
             # Update progress: Starting keyword search
             await update_progress(10, f"Searching with {len(prioritized_keywords)} keyword(s) across {len(enabled_platforms)} platform(s)...")
 
-            # Try keywords one by one until we get enough qualified leads
+            # Try ALL keywords to maximize qualified leads (no early stopping)
             qualified_leads = []
             for keyword_idx, keyword in enumerate(prioritized_keywords, 1):
                 print(f"\n🔍 KEYWORD ATTEMPT {keyword_idx}/{len(prioritized_keywords)}: '{keyword}'")
@@ -345,14 +435,7 @@ class ConversationalLeadJobService:
                     print(f"   ✅ {len(keyword_qualified)} qualified from this keyword")
                     print(f"   📈 TOTAL QUALIFIED SO FAR: {len(qualified_leads)}")
 
-                # STOP CONDITION: If we have 5+ qualified leads, stop trying more keywords
-                if len(qualified_leads) >= 5:
-                    print(f"\n🎉 SUCCESS: Found {len(qualified_leads)} qualified leads, stopping keyword attempts")
-                    break
-                elif keyword_idx < len(prioritized_keywords):
-                    print(f"   ⚠️ Only {len(qualified_leads)} qualified so far, trying next keyword...")
-                else:
-                    print(f"   ⚠️ Exhausted all {len(prioritized_keywords)} keywords, got {len(qualified_leads)} qualified leads")
+                # Continue with all keywords to maximize results (no early stopping)
 
             # Update statistics
             stats["total_fetched"] = len(all_leads)
@@ -485,7 +568,7 @@ class ConversationalLeadJobService:
         try:
             print(f"🐦 Fetching Twitter leads with search query: '{search_query}'")
             twitter_service = OpenAIApifyTwitterService()
-            response = await twitter_service.fetch_tweets_with_analysis(search_query, max_tweets=10, analyze_sentiment=False)
+            response = await twitter_service.fetch_tweets_with_analysis(search_query, max_tweets=25, analyze_sentiment=False)
             print(f"   Twitter API response success: {response.get('success')}")
             tweets = response.get("tweets", [])
             print(f"   Found {len(tweets)} tweets")
@@ -546,7 +629,7 @@ class ConversationalLeadJobService:
         try:
             print(f"📘 Fetching Facebook leads with search query: '{search_query}'")
             facebook_service = OpenAIApifyFacebookService()
-            response = await facebook_service.fetch_posts_with_analysis(search_query, max_posts=10, analyze_sentiment=False)
+            response = await facebook_service.fetch_posts_with_analysis(search_query, max_posts=25, analyze_sentiment=False)
             print(f"   Facebook API response success: {response.get('success')}")
             posts = response.get("posts", [])
             print(f"   Found {len(posts)} posts")
@@ -612,7 +695,7 @@ class ConversationalLeadJobService:
         try:
             print(f"🎵 Fetching TikTok leads with search query: '{search_query}'")
             tiktok_service = OpenAIApifyTiktokService()
-            response = await tiktok_service.fetch_posts_with_analysis(search_query, max_posts=10, analyze_sentiment=False)
+            response = await tiktok_service.fetch_posts_with_analysis(search_query, max_posts=25, analyze_sentiment=False)
             print(f"   TikTok API response success: {response.get('success')}")
             posts = response.get("posts", [])
             print(f"   Found {len(posts)} posts")
@@ -790,9 +873,9 @@ class ConversationalLeadJobService:
     async def _analyze_and_filter_leads(
         leads: List[LeadCreate],
         category_config: CategoryConfig,
-        intent_min: float = 0.55,
-        relevance_min: float = 0.50,
-        final_min: float = 0.60
+        intent_min: float = 0.50,
+        relevance_min: float = 0.45,
+        final_min: float = 0.55
     ) -> List[LeadCreate]:
         """
         Analyze all leads for buying intent in parallel with adaptive thresholds
