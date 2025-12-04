@@ -41,7 +41,7 @@ class ConversationalSearchRequest(BaseBusinessAndConversationalSearchRequest):
     buying_signals: Optional[List[str]] = None
     excluded_keywords: Optional[List[str]] = None
     intent_type: Optional[str] = None
-    location: Optional[str] = None
+    location: Optional[List[str]] = None  # Changed from str to List[str] for geographic filtering
 
     # V2 Real-time Monitoring fields
     enable_realtime: Optional[bool] = False

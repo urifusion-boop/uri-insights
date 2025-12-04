@@ -85,79 +85,34 @@ class PlatformKeywordOptimizer:
     @staticmethod
     def optimize_for_twitter(keyword: str) -> str:
         """
-        Twitter optimization: Smart transformation based on keyword type
+        Twitter optimization: Keep keywords natural for best platform API matching
 
-        Product/Service keywords → Questions: "laptop repair" → "where can I buy laptop repair?"
-        Problem keywords → Keep natural: "laptop won't turn on" → "laptop won't turn on"
+        No transformation needed - Twitter's search API handles fuzzy matching,
+        synonyms, and relevance ranking automatically. Natural keywords yield
+        better results than forced question formats.
 
         Examples:
-        - "laptop repair" → "where can I buy laptop repair?"
-        - "laptop won't turn on" → "laptop won't turn on" (problem statement)
-        - "broken screen" → "broken screen" (problem statement)
-        - "looking for laptop" → "looking for laptop" (already has intent)
+        - "laptop repair" → "laptop repair"
+        - "struggling with brand identity" → "struggling with brand identity"
+        - "broken screen" → "broken screen"
         """
-        keyword_lower = keyword.lower().strip()
-
-        # If already question-like or contains interrogative words, keep as-is
-        question_words = ["where", "how", "what", "who", "when", "why", "can", "should", "?"]
-        if any(word in keyword_lower for word in question_words):
-            return keyword
-
-        # Problem indicators - these should stay natural, not converted to "where can I buy"
-        problem_indicators = [
-            "won't", "doesn't", "can't", "not working", "broken", "cracked",
-            "damaged", "issue", "problem", "error", "failed", "stopped",
-            "no longer", "keeps", "always", "never", "stuck", "frozen"
-        ]
-
-        # If keyword contains problem indicators, keep it natural
-        if any(indicator in keyword_lower for indicator in problem_indicators):
-            return keyword
-
-        # If keyword already has intent words, keep as-is
-        intent_words = ["need", "looking for", "want", "searching for", "help with"]
-        if any(intent in keyword_lower for intent in intent_words):
-            return keyword
-
-        # Otherwise, it's a product/service keyword - convert to question
-        # Remove any remaining "need", "looking for", "want" prefixes for clean question
-        clean_keyword = keyword_lower.replace("need ", "").replace("looking for ", "").replace("want ", "")
-
-        return f"where can I buy {clean_keyword}?"
+        return keyword.strip()
 
     @staticmethod
     def optimize_for_facebook(keyword: str) -> str:
         """
-        Facebook optimization: Use natural language, keep conversational tone
+        Facebook optimization: Keep keywords natural for best platform API matching
 
-        Product/Service keywords → Add "need": "laptop repair" → "need laptop repair"
-        Problem keywords → Keep natural: "laptop won't turn on" → "laptop won't turn on"
+        No transformation needed - Facebook's search API handles natural language,
+        fuzzy matching, and relevance ranking automatically. Natural keywords yield
+        better results than forced prefixes.
 
         Examples:
-        - "laptop repair" → "need laptop repair"
-        - "laptop won't turn on" → "laptop won't turn on" (problem statement)
-        - "broken screen" → "broken screen" (problem statement)
+        - "laptop repair" → "laptop repair"
+        - "struggling with brand identity" → "struggling with brand identity"
+        - "broken screen" → "broken screen"
         """
-        keyword_lower = keyword.lower().strip()
-
-        # Problem indicators - keep natural
-        problem_indicators = [
-            "won't", "doesn't", "can't", "not working", "broken", "cracked",
-            "damaged", "issue", "problem", "error", "failed", "stopped",
-            "no longer", "keeps", "always", "never", "stuck", "frozen"
-        ]
-
-        # If keyword contains problem indicators, keep it natural
-        if any(indicator in keyword_lower for indicator in problem_indicators):
-            return keyword
-
-        # If already has intent words or questions, keep as-is
-        intent_words = ["need", "looking for", "want", "searching for", "where can", "how", "what", "?"]
-        if any(word in keyword_lower for word in intent_words):
-            return keyword
-
-        # Otherwise, add "need" prefix for natural language
-        return f"need {keyword}"
+        return keyword.strip()
 
     @staticmethod
     def optimize_for_tiktok(keyword: str) -> str:
@@ -502,7 +457,7 @@ class ConversationalLeadJobService:
                 user_id=user_id,
                 lead_form_id=lead_form.get("lead_form_id", ""),
                 lead_form_name=lead_form.get("form_title", ""),
-                keyword=", ".join(all_search_keywords[:3]) + ("..." if len(all_search_keywords) > 3 else ""),  # Show first 3 keywords
+                keyword=", ".join(all_search_keywords[:3]) + ("..." if len(all_search_keywords) > 3 else ""),  # Show first 3 keywords # type: ignore
                 platforms=list(enabled_platforms.keys()),  # Convert dict keys to list
                 results=SearchResultStats(**stats),
                 duration_seconds=round(duration, 2),
