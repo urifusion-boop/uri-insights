@@ -7,7 +7,7 @@ from app.domain.requests.apollo_requests import (
     OrganizationSearchRequest,
     PersonSearchRequest,
 )
-from app.domain.schemas.leadform_schema import PlatformConfig
+from app.domain.schemas.leadform_schema import PlatformConfig, ScoringThresholds
 
 
 class BaseBusinessAndConversationalSearchRequest(BaseModel):
@@ -42,6 +42,12 @@ class ConversationalSearchRequest(BaseBusinessAndConversationalSearchRequest):
     excluded_keywords: Optional[List[str]] = None
     intent_type: Optional[str] = None
     location: Optional[List[str]] = None  # Changed from str to List[str] for geographic filtering
+    post_age_filter: Optional[str] = "all"  # Time range filter: "24h", "7d", "30d", "3m", "6m", "1y", "all"
+
+    # CLG Upgrade fields - Intent Analysis
+    category_context: Optional[str] = None  # Industry/category context (e.g., "skincare", "fintech")
+    implied_keywords: Optional[List[str]] = None  # Indirect signals (e.g., "harmattan", "dry skin", "winter")
+    scoring_thresholds: Optional[ScoringThresholds] = None  # Custom qualification thresholds
 
     # V2 Real-time Monitoring fields
     enable_realtime: Optional[bool] = False

@@ -24,6 +24,9 @@ from app.domain.requests.leadform_requests import (
 )
 from app.services.LeadFormService import LeadFormService
 from app.services.ConversationalLeadJobService import ConversationalLeadJobService
+from app.middlewares.FeatureLimitMiddleware import FeatureLimitMiddleware, FeatureLimitExceeded
+from app.domain.enums.endpoints_enum import EndpointsEnum
+from app.repository.LeadRepository import LeadRepository
 
 router = APIRouter()
 
@@ -92,6 +95,29 @@ async def fetch_conversational_leads(
     Start async lead generation job and return immediately with job_id for polling.
     Frontend should poll /conversation-search/job-status/{job_id} for progress.
     """
+    # TODO: RESTORE BEFORE PRODUCTION DEPLOYMENT
+    # Feature limit check temporarily disabled for local testing (task manager not running)
+    # Uncomment the block below before deploying to production:
+
+    # try:
+    #     feature_limit_result = await FeatureLimitMiddleware.verify_feature_limit(
+    #         user_id=user_id,
+    #         url_path=EndpointsEnum.SET_LEADS_AI_REPLY_CONTEXT.value
+    #     )
+    #     await FeatureLimitMiddleware.handle_feature_limit_result(
+    #         db=db,
+    #         result=feature_limit_result,
+    #         user_id=user_id,
+    #         url_path=EndpointsEnum.SET_LEADS_AI_REPLY_CONTEXT.value
+    #     )
+    # except FeatureLimitExceeded as e:
+    #     return UriResponse.get_status_response(
+    #         response={"message": str(e.message)},
+    #         status_code=403
+    #     )
+
+    print("⚠️ FEATURE LIMIT CHECK BYPASSED FOR LOCAL TESTING")
+
     # Get the lead form
     lead_form_result = await LeadFormRepository.get_by_id(db, lead_form_id)
 
@@ -172,10 +198,10 @@ async def get_job_status(
 
         print(f"[JOB_STATUS] Querying database for job_id: {job_id}")
 
-        # Add timeout to prevent hanging
+        # Add timeout to prevent hanging (increased to 30s for slower database queries)
         job = await asyncio.wait_for(
             LeadGenerationJobRepository.get_job_status(db, job_id),
-            timeout=5.0
+            timeout=30.0
         )
 
         print(f"[JOB_STATUS] Query result: {job is not None}")

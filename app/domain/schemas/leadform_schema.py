@@ -97,6 +97,7 @@ class LeadFormBase(BaseModel):
     excluded_keywords: Optional[List[str]] = None
     location: Optional[List[str]] = None
     intent_type: Optional[str] = None
+    post_age_filter: Optional[str] = None  # Time range filter: "24h", "7d", "30d", "3m", "6m", "1y", "all"
 
     # CLG Upgrade fields - Intent Analysis
     category_context: Optional[str] = None  # Industry/category context (e.g., "skincare", "fintech")
@@ -194,6 +195,7 @@ class ConversationalLeadFormUpdate(BizConvLeadFormUpdateBase):
     excluded_keywords: Optional[List[str]] = None
     location: Optional[List[str]] = None
     intent_type: Optional[str] = None
+    post_age_filter: Optional[str] = None  # Time range filter: "24h", "7d", "30d", "3m", "6m", "1y", "all"
 
     # CLG Upgrade fields - Intent Analysis
     category_context: Optional[str] = None  # Industry/category context (e.g., "skincare", "fintech")

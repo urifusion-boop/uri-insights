@@ -8,8 +8,9 @@ import time
 import re
 import hashlib
 from typing import Dict, List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from app.core.helpers.text_helper import TextHelper
 
 from app.services.OpenAIApifyTwitterService import OpenAIApifyTwitterService
 from app.services.OpenAIApifyFacebookService import OpenAIApifyFacebookService
@@ -25,6 +26,144 @@ from app.domain.schemas.lead_search_history_schema import LeadSearchHistoryCreat
 from app.domain.enums.lead_enum import LeadSourceEnum, LeadStatusEnum, LeadOpportunityTypeEnum, IntentCategoryEnum, SentimentTypeEnum
 from app.domain.enums.leadform_enum import LeadFormTypeEnum
 from app.domain.schemas.browsercloud_schema import BrowsercloudPlatformEnum
+
+
+class LeadFilter:
+    """
+    Handles filtering of leads based on time range and location.
+    """
+
+    # Time range mappings
+    TIME_RANGE_MAP = {
+        "24h": timedelta(hours=24),
+        "7d": timedelta(days=7),
+        "30d": timedelta(days=30),
+        "3m": timedelta(days=90),
+        "6m": timedelta(days=180),
+        "1y": timedelta(days=365),
+        "all": None  # No time filter
+    }
+
+    @staticmethod
+    def calculate_cutoff_date(post_age_filter: str) -> Optional[datetime]:
+        """
+        Calculate the cutoff date based on the post age filter.
+
+        Args:
+            post_age_filter: Time range string ("24h", "7d", "30d", "3m", "6m", "1y", "all")
+
+        Returns:
+            Cutoff datetime or None if "all"
+        """
+        if not post_age_filter or post_age_filter == "all":
+            return None
+
+        time_delta = LeadFilter.TIME_RANGE_MAP.get(post_age_filter)
+        if not time_delta:
+            print(f"⚠️ Invalid post_age_filter '{post_age_filter}', defaulting to 'all'")
+            return None
+
+        cutoff_date = datetime.now(timezone.utc) - time_delta
+        return cutoff_date
+
+    @staticmethod
+    def filter_by_time_range(leads: List, cutoff_date: Optional[datetime]) -> List:
+        """
+        Filter leads by creation date.
+
+        Args:
+            leads: List of LeadCreate objects
+            cutoff_date: Minimum date for leads (or None for no filter)
+
+        Returns:
+            Filtered list of leads
+        """
+        if not cutoff_date:
+            return leads  # No time filter
+
+        filtered_leads = []
+        filtered_out_count = 0
+        unknown_date_count = 0
+        oldest_date = None
+        newest_date = None
+
+        for lead in leads:
+            if hasattr(lead, 'created_date') and lead.created_date:
+                # Ensure created_date is datetime object
+                lead_date = lead.created_date if isinstance(lead.created_date, datetime) else datetime.fromisoformat(str(lead.created_date).replace('Z', '+00:00'))
+                if lead_date.tzinfo is None:
+                    lead_date = lead_date.replace(tzinfo=timezone.utc)
+
+                # Check if this is a default/invalid timestamp (1970)
+                if lead_date.year == 1970:
+                    # Unknown date - INCLUDE the lead (don't filter it out)
+                    filtered_leads.append(lead)
+                    unknown_date_count += 1
+                    continue
+
+                # Track date range for valid dates only
+                if oldest_date is None or lead_date < oldest_date:
+                    oldest_date = lead_date
+                if newest_date is None or lead_date > newest_date:
+                    newest_date = lead_date
+
+                if lead_date >= cutoff_date:
+                    filtered_leads.append(lead)
+                else:
+                    filtered_out_count += 1
+            else:
+                # No created_date - INCLUDE the lead (don't filter it out)
+                filtered_leads.append(lead)
+                unknown_date_count += 1
+
+        # Log filtering results
+        if unknown_date_count > 0:
+            print(f"   ⚠️ {unknown_date_count} posts have unknown dates - including them (scraper didn't provide timestamps)")
+        if filtered_out_count > 0 and oldest_date and newest_date:
+            print(f"   📅 Valid posts date range: {oldest_date.strftime('%Y-%m-%d')} to {newest_date.strftime('%Y-%m-%d')}")
+            print(f"   🔍 Cutoff date: {cutoff_date.strftime('%Y-%m-%d')} (keeping posts >= this date)")
+
+        return filtered_leads
+
+    @staticmethod
+    def filter_by_location(leads: List, target_locations: Optional[List[str]]) -> List:
+        """
+        Filter leads by location - strict matching.
+
+        Args:
+            leads: List of LeadCreate objects
+            target_locations: List of location strings to match (e.g., ["Lagos", "Nigeria"])
+
+        Returns:
+            Filtered list of leads that match any of the target locations
+        """
+        if not target_locations or len(target_locations) == 0:
+            return leads  # No location filter
+
+        filtered_leads = []
+
+        # Normalize target locations for comparison
+        normalized_targets = [loc.lower().strip() for loc in target_locations]
+
+        for lead in leads:
+            # Check multiple potential location fields
+            lead_location_text = ""
+
+            # Extract location from various fields
+            if hasattr(lead, 'location') and lead.location:
+                lead_location_text += f" {lead.location}"
+            if hasattr(lead, 'mention') and lead.mention:
+                lead_location_text += f" {lead.mention}"
+            if hasattr(lead, 'lead_reason') and lead.lead_reason:
+                lead_location_text += f" {lead.lead_reason}"
+
+            lead_location_lower = lead_location_text.lower()
+
+            # Check if any target location is mentioned in the lead content
+            if any(target in lead_location_lower for target in normalized_targets):
+                filtered_leads.append(lead)
+
+        return filtered_leads
 
 
 class ContentDeduplicator:
@@ -381,14 +520,39 @@ class ConversationalLeadJobService:
                 all_leads.extend(keyword_leads)
                 print(f"   📊 Fetched {len(keyword_leads)} raw leads for keyword '{keyword}'")
 
-                # Analyze leads from this keyword
+                # Apply time range and location filters
                 if keyword_leads:
-                    keyword_qualified = await ConversationalLeadJobService._analyze_and_filter_leads(
-                        keyword_leads, category_config, intent_min, relevance_min, final_min
-                    )
-                    qualified_leads.extend(keyword_qualified)
-                    print(f"   ✅ {len(keyword_qualified)} qualified from this keyword")
-                    print(f"   📈 TOTAL QUALIFIED SO FAR: {len(qualified_leads)}")
+                    # Extract filter parameters from lead_form
+                    post_age_filter = lead_form.get("post_age_filter", "all")
+                    location_filter = lead_form.get("location") or []
+
+                    # Calculate cutoff date for time filtering
+                    cutoff_date = LeadFilter.calculate_cutoff_date(post_age_filter)
+
+                    # Apply time range filter
+                    leads_after_time_filter = LeadFilter.filter_by_time_range(keyword_leads, cutoff_date)
+                    time_filtered_count = len(keyword_leads) - len(leads_after_time_filter)
+                    if time_filtered_count > 0:
+                        print(f"   🕒 Filtered out {time_filtered_count} leads older than {post_age_filter}")
+
+                    # Apply location filter
+                    leads_after_location_filter = LeadFilter.filter_by_location(leads_after_time_filter, location_filter)
+                    location_filtered_count = len(leads_after_time_filter) - len(leads_after_location_filter)
+                    if location_filtered_count > 0:
+                        print(f"   📍 Filtered out {location_filtered_count} leads not matching location {location_filter}")
+
+                    print(f"   ✅ {len(leads_after_location_filter)} leads passed filters (from {len(keyword_leads)} raw)")
+
+                    # Analyze filtered leads
+                    if leads_after_location_filter:
+                        keyword_qualified = await ConversationalLeadJobService._analyze_and_filter_leads(
+                            leads_after_location_filter, category_config, intent_min, relevance_min, final_min
+                        )
+                        qualified_leads.extend(keyword_qualified)
+                        print(f"   ✅ {len(keyword_qualified)} qualified from this keyword")
+                        print(f"   📈 TOTAL QUALIFIED SO FAR: {len(qualified_leads)}")
+                    else:
+                        print(f"   ⚠️ No leads passed filters for this keyword")
 
                 # Continue with all keywords to maximize results (no early stopping)
 
@@ -528,6 +692,12 @@ class ConversationalLeadJobService:
             tweets = response.get("tweets", [])
             print(f"   Found {len(tweets)} tweets")
 
+            # DEBUG: Log first tweet structure to see available fields
+            if tweets and len(tweets) > 0:
+                print(f"   🔍 DEBUG - First tweet keys: {list(tweets[0].keys())}")
+                print(f"   🔍 DEBUG - created_at value: '{tweets[0].get('created_at')}'")
+                print(f"   🔍 DEBUG - Full first tweet: {tweets[0]}")
+
             leads = []
             for tweet in tweets:
                 tweet_text = tweet.get("text", "")
@@ -589,9 +759,15 @@ class ConversationalLeadJobService:
             posts = response.get("posts", [])
             print(f"   Found {len(posts)} posts")
 
+            # DEBUG: Log first post structure to see available fields
+            if posts and len(posts) > 0:
+                print(f"   🔍 DEBUG - First post keys: {list(posts[0].keys())}")
+                print(f"   🔍 DEBUG - created_at value: '{posts[0].get('created_at')}'")
+                print(f"   🔍 DEBUG - Full first post: {posts[0]}")
+
             leads = []
             for post in posts:
-                created_date = datetime.utcnow()
+                created_date = datetime(1970, 1, 1, tzinfo=timezone.utc)
                 if post.get("created_at"):
                     try:
                         created_date = datetime.fromisoformat(
@@ -599,6 +775,17 @@ class ConversationalLeadJobService:
                         )
                     except:
                         pass
+                if created_date.year == 1970:
+                    extracted = (
+                        TextHelper.extract_timestamp_from_text(post.get("text"))
+                        or TextHelper.extract_timestamp_from_date_text(post.get("text"))
+                        or TextHelper.extract_timestamp_from_relative_date_text(post.get("text"))
+                    )
+                    if extracted:
+                        try:
+                            created_date = datetime.fromisoformat(str(extracted).replace("Z", "+00:00"))
+                        except Exception:
+                            created_date = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
                 post_text = post.get("text", "")
                 lead = LeadCreate(
@@ -655,20 +842,46 @@ class ConversationalLeadJobService:
             posts = response.get("posts", [])
             print(f"   Found {len(posts)} posts")
 
+            # DEBUG: Log first post structure to see available fields
+            if posts and len(posts) > 0:
+                print(f"   🔍 DEBUG - First video keys: {list(posts[0].keys())}")
+                print(f"   🔍 DEBUG - createTime value: '{posts[0].get('createTime')}'")
+                print(f"   🔍 DEBUG - created_at value: '{posts[0].get('created_at')}'")
+                print(f"   🔍 DEBUG - Full first video: {posts[0]}")
+
             leads = []
             for post in posts:
-                created_date = datetime.utcnow()
+                created_date = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
-                # Handle TikTok timestamp formats
-                if "createTime" in post and isinstance(post["createTime"], (int, float)):
-                    created_date = datetime.fromtimestamp(post["createTime"])
-                elif "created_at" in post:
+                # Handle TikTok timestamp formats - created_at can be Unix timestamp (int) or ISO string
+                created_at_value = post.get("created_at")
+
+                if isinstance(created_at_value, (int, float)) and created_at_value > 0:
+                    # Unix timestamp (e.g., 1728885285)
+                    created_date = datetime.fromtimestamp(created_at_value, tz=timezone.utc)
+                elif isinstance(created_at_value, str) and created_at_value.strip():
+                    # Try ISO format string
                     try:
-                        created_date = datetime.fromisoformat(
-                            post["created_at"].replace("Z", "+00:00")
-                        )
+                        created_date = datetime.fromisoformat(created_at_value.replace("Z", "+00:00"))
+                        if created_date.tzinfo is None:
+                            created_date = created_date.replace(tzinfo=timezone.utc)
                     except:
                         pass
+                elif "createTime" in post and isinstance(post["createTime"], (int, float)):
+                    # Alternative field name
+                    created_date = datetime.fromtimestamp(post["createTime"], tz=timezone.utc)
+                if created_date.year == 1970:
+                    post_text = post.get("text") or post.get("desc", "")
+                    extracted = (
+                        TextHelper.extract_timestamp_from_text(post_text)
+                        or TextHelper.extract_timestamp_from_date_text(post_text)
+                        or TextHelper.extract_timestamp_from_relative_date_text(post_text)
+                    )
+                    if extracted:
+                        try:
+                            created_date = datetime.fromisoformat(str(extracted).replace("Z", "+00:00"))
+                        except Exception:
+                            created_date = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
                 post_text = post.get("text") or post.get("desc", "")
                 lead = LeadCreate(
@@ -726,15 +939,19 @@ class ConversationalLeadJobService:
     def _build_category_config(lead_form: Dict) -> CategoryConfig:
         """
         Build CategoryConfig from lead form data for intent analysis
+
+        Handles backward compatibility with old forms that don't have
+        category_context or implied_keywords fields.
         """
-        # Extract configuration from lead form
-        category_context = lead_form.get("category_context", "General product/service")
-        keywords = lead_form.get("keywords", [])
-        implied_keywords = lead_form.get("implied_keywords", [])
-        competitors = lead_form.get("competitors", [])
-        buying_signals = lead_form.get("buying_signals", [])
-        excluded_keywords = lead_form.get("excluded_keywords", [])
-        location = lead_form.get("location") or []  # Handle None case
+        # Extract configuration from lead form with fallbacks for None values
+        # Use `or` to handle both missing keys and explicit None values
+        category_context = lead_form.get("category_context") or "General product/service"
+        keywords = lead_form.get("keywords") or []
+        implied_keywords = lead_form.get("implied_keywords") or []
+        competitors = lead_form.get("competitors") or []
+        buying_signals = lead_form.get("buying_signals") or []
+        excluded_keywords = lead_form.get("excluded_keywords") or []
+        location = lead_form.get("location") or []
 
         return CategoryConfig(
             category_context=category_context,
@@ -917,11 +1134,16 @@ class ConversationalLeadJobService:
         """Convert Twitter date format to datetime"""
         # Handle empty or None dates
         if not twitter_date or not twitter_date.strip():
-            return datetime.utcnow()
+            return datetime(1970, 1, 1, tzinfo=timezone.utc)
 
         try:
-            # Twitter format: "Sun Nov 09 17:51:05 +0000 2025"
+            iso_candidate = twitter_date.replace("Z", "+00:00")
+            dt = datetime.fromisoformat(iso_candidate)
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        except Exception:
+            pass
+        try:
             return datetime.strptime(twitter_date, "%a %b %d %H:%M:%S %z %Y")
         except Exception as e:
             print(f"Error converting Twitter date '{twitter_date}': {str(e)}")
-            return datetime.utcnow()
+            return datetime(1970, 1, 1, tzinfo=timezone.utc)
