@@ -24,8 +24,7 @@ from app.domain.requests.leadform_requests import (
 )
 from app.services.LeadFormService import LeadFormService
 from app.services.ConversationalLeadJobService import ConversationalLeadJobService
-from app.middlewares.FeatureLimitMiddleware import FeatureLimitMiddleware, FeatureLimitExceeded
-from app.domain.enums.endpoints_enum import EndpointsEnum
+ 
 from app.repository.LeadRepository import LeadRepository
 
 router = APIRouter()
@@ -95,27 +94,6 @@ async def fetch_conversational_leads(
     Start async lead generation job and return immediately with job_id for polling.
     Frontend should poll /conversation-search/job-status/{job_id} for progress.
     """
-    # Feature limit validation - RESTORED FOR PRODUCTION
-    try:
-        feature_limit_result = await FeatureLimitMiddleware.verify_feature_limit(
-            user_id=user_id,
-            url_path=EndpointsEnum.SET_LEADS_AI_REPLY_CONTEXT.value
-        )
-        await FeatureLimitMiddleware.handle_feature_limit_result(
-            db=db,
-            result=feature_limit_result,
-            user_id=user_id,
-            url_path=EndpointsEnum.SET_LEADS_AI_REPLY_CONTEXT.value
-        )
-    except FeatureLimitExceeded as e:
-        return UriResponse.get_status_response(
-            response={
-                "message": str(e.message),
-                "limit_exceeded": True,
-                "feature": "lead_generation"
-            },
-            status_code=403
-        )
 
     # Get the lead form
     lead_form_result = await LeadFormRepository.get_by_id(db, lead_form_id)
