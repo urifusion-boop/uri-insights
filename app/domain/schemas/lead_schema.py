@@ -1,6 +1,7 @@
 from typing import Optional, List
 from datetime import datetime
 from pydantic import BaseModel, Field
+from app.core.helpers.date_helper import DateHelper
 from bson import ObjectId
 from app.domain.enums.lead_enum import (
     LeadSourceEnum,
@@ -93,9 +94,10 @@ class LeadBase(BaseModel):
     intent_category: Optional[IntentCategoryEnum] = None  # Type of intent detected
     final_score: Optional[float] = None  # Combined qualification score (0-1)
     intent_reasoning: Optional[str] = None  # Brief explanation of intent analysis
+    content_hash: Optional[str] = None  # Hash of normalized content to detect retweets/shares
 
     class Config:
-        json_encoders = {datetime: lambda v: v.isoformat() + "Z" if v else None}
+        json_encoders = {datetime: lambda v: DateHelper.to_iso8601_utc(v) if v else None}
 
 
 # Models for CRUD Operations
@@ -168,7 +170,7 @@ class LeadUpdate(BaseModel):
     last_updated: datetime = Field(default_factory=datetime.utcnow)
 
     class Config:
-        json_encoders = {datetime: lambda v: v.isoformat() + "Z" if v else None}
+        json_encoders = {datetime: lambda v: DateHelper.to_iso8601_utc(v) if v else None}
 
 
 class Lead(LeadBase):
@@ -179,4 +181,4 @@ class Lead(LeadBase):
     id: str = Field(default_factory=lambda: str(ObjectId()))  # MongoDB ObjectId
 
     class Config:
-        json_encoders = {datetime: lambda v: v.isoformat() + "Z" if v else None}
+        json_encoders = {datetime: lambda v: DateHelper.to_iso8601_utc(v) if v else None}

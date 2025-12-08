@@ -122,20 +122,13 @@ class UriResponse:
     def get_list_data_response(
         entity_name: str, data: List[Any], message: Optional[str] = None
     ):
-        if not data:
-            return {
-                "status": False,
-                "responseCode": HTTP_404_NOT_FOUND,
-                "responseMessage": f"{entity_name}s not found.",
-                "responseData": data,
-            }
-        else:
-            return {
-                "status": True,
-                "responseCode": HTTP_200_OK,
-                "responseMessage": message or f"{entity_name}s successfully retrieved.",
-                "responseData": data,
-            }
+        # Always return 200 for list responses, even if empty (better UX for new users)
+        return {
+            "status": True,
+            "responseCode": HTTP_200_OK,
+            "responseMessage": message or f"{entity_name}s successfully retrieved.",
+            "responseData": data,
+        }
 
     @staticmethod
     def get_paged_data_response(

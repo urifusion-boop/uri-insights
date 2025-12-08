@@ -50,6 +50,7 @@ from app.routers import (
     openai_apify_tiktok,
     openai_apify_facebook,
     lead_search_history,
+    websockets_leads,
 )
 from app.core.auth_bearer import JWTBearer
 from app.core.handlers.exception_handler import global_exception_handler
@@ -384,6 +385,12 @@ app.include_router(
     prefix="/api/v1",
     tags=["Lead Search History"],
     dependencies=[Depends(JWTBearer(validate_subscription=True))],
+)
+
+app.include_router(
+    websockets_leads.router,
+    prefix="",
+    tags=["WebSocket Real-time Leads"],
 )
 
 

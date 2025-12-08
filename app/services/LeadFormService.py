@@ -183,16 +183,21 @@ class LeadFormService:
         db: AsyncIOMotorDatabase,
         lead_form_id: str,
         updates: ConversationalLeadFormUpdate,
+        background_tasks: Optional[BackgroundTasks] = None,
     ):
         update_response = await LeadFormRepository.update(db, updates, lead_form_id)
 
         if update_response.get("status"):
             lead_form = update_response.get("responseData", {})
             user_id = lead_form.get("user_id", "")
-            await LeadFormService.send_lead_request_notification(db, lead_form, user_id)
+            if background_tasks:
+                background_tasks.add_task(LeadFormService.send_lead_request_notification, db, lead_form, user_id)
+            else:
+                import asyncio
+                asyncio.create_task(LeadFormService.send_lead_request_notification(db, lead_form, user_id))
 
-            # NOTE: Lead fetching is now handled by the frontend
-            # See ConversationLeadForm.tsx for sequential platform fetching
+        # NOTE: Lead fetching is now handled by the frontend
+        # See ConversationLeadForm.tsx for sequential platform fetching
 
         return update_response
 
@@ -239,7 +244,8 @@ class LeadFormService:
         )
         results = []
         if not user_lead_forms:
-            return UriResponse.custom_response("Lead forms not found.", 404)
+            # Return empty list instead of 404 for better UX (new users have no forms yet)
+            return UriResponse.get_list_data_response("Lead form", [])
 
         for lead_form in user_lead_forms:
             lead_form["total_leads"] = await LeadFormService.get_metadata_for_lead_form(

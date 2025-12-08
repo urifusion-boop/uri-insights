@@ -1,4 +1,4 @@
-name: Build and Deploy Dockerized Python FastAPI App to Azure VM
+name: Build and Deploy Dockerized Python FastAPI App to Azure VM (PROD)
 
 on:
   push:

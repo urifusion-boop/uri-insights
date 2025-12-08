@@ -44,6 +44,8 @@ class SentimentType(str, Enum):
     NEUTRAL = "neutral"
 
 
+
+
 class IntentAnalysisResult(BaseModel):
     """Structured response model for intent analysis"""
     intent_score: float = Field(ge=0, le=1, description="How strong is the buying intent (0-1)")
@@ -62,12 +64,13 @@ class CategoryConfig(BaseModel):
     competitors: List[str] = []
     buying_signals: List[str] = []
     excluded_keywords: List[str] = []
+    location: List[str] = []  # Geographic targeting (cities, regions, countries)
 
 
 class IntentAnalysisService:
     """
     Service for analyzing social media posts for buying intent
-    Uses LLM to detect direct and implied intent signals
+    Uses LLM to detect direct and implied intent signals with context-aware promotional filtering
     """
 
     SYSTEM_PROMPT = """You are an expert lead qualification analyst. Your task is to determine if a social media post author matches what the user is looking for.
@@ -119,13 +122,21 @@ Be generous with genuine personal expression, but ruthless with promotional cont
     @staticmethod
     def _build_analysis_prompt(text: str, config: CategoryConfig) -> str:
         """Build the analysis prompt with category context"""
+        location_text = ""
+        if config.location:
+            location_text = f"""
+TARGET LOCATION/GEOGRAPHY (CRITICAL - post must match this location):
+{', '.join(config.location)}
+⚠️ IMPORTANT: If the post mentions a DIFFERENT location/city/country than the target location above, set intent_score to 0.0 and relevance_score to 0.0 immediately.
+"""
+
         return f"""Analyze this social media post to determine if the author is a qualified lead based on the user's business context.
 
 POST: "{text}"
 
 USER'S BUSINESS CONTEXT (what they do and who they're looking for):
 {config.category_context}
-
+{location_text}
 DIRECT KEYWORDS (explicit signals to look for):
 {', '.join(config.keywords) if config.keywords else 'None specified'}
 
@@ -141,7 +152,7 @@ INTENT SIGNALS (phrases showing readiness/interest):
 EXCLUDED KEYWORDS (filter out these - wrong audience type):
 {', '.join(config.excluded_keywords) if config.excluded_keywords else 'None specified'}
 
-Based on the USER'S BUSINESS CONTEXT, determine if this post author is a good match for what they're looking for. Consider both direct and implied signals."""
+Based on the USER'S BUSINESS CONTEXT, determine if this post author is a good match for what they're looking for. Consider both direct and implied signals. If location is specified, posts must match that geographic area."""
 
     @staticmethod
     async def analyze_post(
@@ -150,7 +161,7 @@ Based on the USER'S BUSINESS CONTEXT, determine if this post author is a good ma
         model: str = "gpt-4o-mini"
     ) -> IntentAnalysisResult:
         """
-        Analyze a single post for buying intent
+        Analyze a single post for buying intent using universal prompt
 
         Args:
             text: The social media post text
@@ -161,12 +172,15 @@ Based on the USER'S BUSINESS CONTEXT, determine if this post author is a good ma
             IntentAnalysisResult with scores and reasoning
         """
         try:
-            # Build the prompt
+            # Use universal system prompt
+            system_prompt = IntentAnalysisService.SYSTEM_PROMPT
+
+            # Build the user prompt
             user_prompt = IntentAnalysisService._build_analysis_prompt(text, config)
 
-            # Create chat model
+            # Create chat model with universal prompt
             messages = [
-                {"role": "system", "content": IntentAnalysisService.SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ]
 
@@ -262,17 +276,17 @@ Based on the USER'S BUSINESS CONTEXT, determine if this post author is a good ma
     @staticmethod
     def meets_thresholds(
         result: IntentAnalysisResult,
-        intent_min: float = 0.55,
-        relevance_min: float = 0.50,
-        final_min: float = 0.60
+        intent_min: float = 0.50,
+        relevance_min: float = 0.45,
+        final_min: float = 0.55
     ) -> bool:
         """
         Check if analysis result meets qualification thresholds
 
-        Default thresholds from requirements:
-        - intent_score >= 0.55
-        - relevance_score >= 0.50
-        - final_score >= 0.60
+        Default thresholds (lowered for better coverage):
+        - intent_score >= 0.50
+        - relevance_score >= 0.45
+        - final_score >= 0.55
         """
         final_score = IntentAnalysisService.calculate_final_score(
             result.intent_score,
@@ -289,9 +303,9 @@ Based on the USER'S BUSINESS CONTEXT, determine if this post author is a good ma
     @staticmethod
     def filter_qualified_leads(
         results: List[tuple[str, IntentAnalysisResult]],
-        intent_min: float = 0.55,
-        relevance_min: float = 0.50,
-        final_min: float = 0.60
+        intent_min: float = 0.50,
+        relevance_min: float = 0.45,
+        final_min: float = 0.55
     ) -> List[tuple[str, IntentAnalysisResult, float]]:
         """
         Filter results to only include qualified leads

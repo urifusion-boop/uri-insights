@@ -1,6 +1,6 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
 from app.services.LeadNotificationManager import LeadNotificationManager
-from app.core.auth_handler import AuthHandler
+from app.core.auth_handler import decode_jwt
 from typing import Optional
 
 router = APIRouter()
@@ -15,7 +15,15 @@ async def websocket_endpoint(
     """WebSocket endpoint for real-time lead notifications."""
     try:
         # Verify the user's token
-        if not token or not await AuthHandler.verify_access_token(token):
+        if not token:
+            await websocket.close(code=4001, reason="Unauthorized")
+            return
+        try:
+            payload = decode_jwt(token)
+            if not payload or not payload.get("claims", {}).get("userId"):
+                await websocket.close(code=4001, reason="Unauthorized")
+                return
+        except Exception:
             await websocket.close(code=4001, reason="Unauthorized")
             return
             

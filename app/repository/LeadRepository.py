@@ -74,7 +74,7 @@ class LeadRepository:
                 sparse=True,
             )
 
-            # Duplicate detection index for conversational leads
+            # Duplicate detection index for conversational leads (URL-based)
             # Prevents same post URL from being saved multiple times for the same user
             await db["leads"].create_index(
                 [
@@ -82,6 +82,17 @@ class LeadRepository:
                     ("assigned_to", 1),
                 ],
                 name="lead_link_user_duplicate_check",
+                sparse=True,
+            )
+
+            # Duplicate detection index for conversational leads (content-based)
+            # Prevents retweets/shares with same content from being saved multiple times
+            await db["leads"].create_index(
+                [
+                    ("content_hash", 1),
+                    ("assigned_to", 1),
+                ],
+                name="content_hash_user_duplicate_check",
                 sparse=True,
             )
 
@@ -270,31 +281,59 @@ class LeadRepository:
         id_to_lead_map = {}
         skipped_count = 0
 
-        # Build list of existing lead_link + assigned_to combinations for this user
+        # Build list of existing lead_link + assigned_to combinations AND content_hash for this user
         user_lead_links = {}
+        user_content_hashes = {}
         for lead in leads:
             if lead.lead_link and lead.assigned_to:
                 if lead.assigned_to not in user_lead_links:
                     user_lead_links[lead.assigned_to] = []
                 user_lead_links[lead.assigned_to].append(lead.lead_link)
 
-        # Fetch all existing leads for these users with these links in one query
+            # Also track content hashes for content-based deduplication
+            if lead.content_hash and lead.assigned_to:
+                if lead.assigned_to not in user_content_hashes:
+                    user_content_hashes[lead.assigned_to] = []
+                user_content_hashes[lead.assigned_to].append(lead.content_hash)
+
+        # Fetch all existing leads for these users with these links OR content hashes in one query
         existing_leads_by_user = {}
+        existing_hashes_by_user = {}
         for user_id, links in user_lead_links.items():
+            # Build query to check both lead_link and content_hash
+            query_conditions = [
+                {"assigned_to": user_id, "lead_link": {"$in": links}}
+            ]
+
+            # Add content_hash check if available
+            if user_id in user_content_hashes:
+                query_conditions.append({
+                    "assigned_to": user_id,
+                    "content_hash": {"$in": user_content_hashes[user_id], "$ne": None, "$ne": ""}
+                })
+
             existing = await db["leads"].find({
-                "assigned_to": user_id,
-                "lead_link": {"$in": links}
+                "$or": query_conditions
             }).to_list(length=None)
-            existing_leads_by_user[user_id] = {lead["lead_link"] for lead in existing}
+
+            existing_leads_by_user[user_id] = {lead["lead_link"] for lead in existing if lead.get("lead_link")}
+            existing_hashes_by_user[user_id] = {lead["content_hash"] for lead in existing if lead.get("content_hash")}
 
         for lead in leads:
             lead_data = lead.dict()
 
-            # Check if this lead already exists for this user
+            # Check if this lead already exists for this user (URL-based)
             if lead.lead_link and lead.assigned_to:
                 if lead.lead_link in existing_leads_by_user.get(lead.assigned_to, set()):
                     skipped_count += 1
-                    print(f"Skipping duplicate lead: {lead.lead_link} for user {lead.assigned_to}")
+                    print(f"⏭️ Skipping duplicate URL: {lead.lead_link} for user {lead.assigned_to}")
+                    continue
+
+            # Check if this lead already exists for this user (content-based)
+            if lead.content_hash and lead.assigned_to:
+                if lead.content_hash in existing_hashes_by_user.get(lead.assigned_to, set()):
+                    skipped_count += 1
+                    print(f"⏭️ Skipping duplicate content (hash: {lead.content_hash[:8]}...) for user {lead.assigned_to}")
                     continue
 
             # Generate lead_id if not present

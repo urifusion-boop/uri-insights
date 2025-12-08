@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import json
 import traceback
 from typing import (
@@ -78,6 +78,8 @@ from app.services.uri_microservices.UriTaskManagerService import UriTaskManagerS
 from app.services.OpenAIApifyTwitterService import OpenAIApifyTwitterService
 from app.services.OpenAIApifyTiktokService import OpenAIApifyTiktokService
 from app.services.OpenAIApifyFacebookService import OpenAIApifyFacebookService
+from app.core.helpers.date_helper import DateHelper
+from app.core.helpers.text_helper import TextHelper
 
 
 from app.services.BrowsercloudService import BrowsercloudService
@@ -88,6 +90,7 @@ from app.services.IntentAnalysisService import (
     IntentAnalysisResult,
 )
 from app.domain.enums.lead_enum import IntentCategoryEnum, SentimentTypeEnum
+from app.services.ConversationalLeadJobService import LeadFilter
 
 class LeadService:
     PLATFORM_SCRAPERS: dict[str, LeadDataScraper] = {
@@ -397,15 +400,49 @@ class LeadService:
             return
 
         tweets = result.get("tweets", [])
+        post_age_filter = lead_form.get("post_age_filter", "all")
+        cutoff_date = LeadFilter.calculate_cutoff_date(post_age_filter)
+        if cutoff_date:
+            filtered_tweets: List[Dict] = []
+            for t in tweets:
+                created_dt = None
+                ts = t.get("created_at")
+                if ts:
+                    try:
+                        created_dt = datetime.strptime(ts, "%a %b %d %H:%M:%S %z %Y")
+                    except Exception:
+                        try:
+                            created_dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+                        except Exception:
+                            created_dt = None
+                if not created_dt:
+                    # Fallback: try to extract timestamp from text
+                    extracted = (
+                        TextHelper.extract_timestamp_from_text(t.get("text"))
+                        or TextHelper.extract_timestamp_from_date_text(t.get("text"))
+                        or TextHelper.extract_timestamp_from_relative_date_text(t.get("text"))
+                    )
+                    if extracted:
+                        try:
+                            created_dt = datetime.fromisoformat(str(extracted).replace("Z", "+00:00"))
+                        except Exception:
+                            created_dt = None
+                if not created_dt:
+                    # If cutoff is active and timestamp unknown, skip
+                    continue
+                if created_dt.tzinfo is None:
+                    created_dt = created_dt.replace(tzinfo=timezone.utc)
+                if created_dt >= cutoff_date:
+                    filtered_tweets.append(t)
+            tweets = filtered_tweets
         leads_to_create: List[LeadCreate] = []
         for t in tweets:
             # Parse Twitter date format: 'Sat Nov 15 16:00:13 +0000 2025'
             created_at_str = t.get("created_at")
             if created_at_str:
                 try:
-                    # Twitter uses this format: '%a %b %d %H:%M:%S %z %Y'
                     created_dt = datetime.strptime(created_at_str, '%a %b %d %H:%M:%S %z %Y')
-                    created_iso = created_dt.isoformat()
+                    created_iso = DateHelper.to_iso8601_utc(created_dt)
                 except Exception:
                     # Fallback to current time if parsing fails
                     created_iso = DateHelper.utc_now_iso()
@@ -535,6 +572,39 @@ class LeadService:
             return
 
         posts = result.get("posts", [])
+        post_age_filter = lead_form.get("post_age_filter", "all")
+        cutoff_date = LeadFilter.calculate_cutoff_date(post_age_filter)
+        if cutoff_date:
+            filtered_posts: List[Dict] = []
+            for p in posts:
+                created_dt = None
+                ts = p.get("created_at") or p.get("createTime")
+                if ts is not None:
+                    try:
+                        if isinstance(ts, str):
+                            created_dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+                        else:
+                            created_dt = datetime.utcfromtimestamp(int(ts)).replace(tzinfo=timezone.utc)
+                    except Exception:
+                        created_dt = None
+                if not created_dt:
+                    extracted = (
+                        TextHelper.extract_timestamp_from_text(p.get("text") or p.get("desc"))
+                        or TextHelper.extract_timestamp_from_date_text(p.get("text") or p.get("desc"))
+                        or TextHelper.extract_timestamp_from_relative_date_text(p.get("text") or p.get("desc"))
+                    )
+                    if extracted:
+                        try:
+                            created_dt = datetime.fromisoformat(str(extracted).replace("Z", "+00:00"))
+                        except Exception:
+                            created_dt = None
+                if not created_dt:
+                    continue
+                if created_dt.tzinfo is None:
+                    created_dt = created_dt.replace(tzinfo=timezone.utc)
+                if created_dt >= cutoff_date:
+                    filtered_posts.append(p)
+            posts = filtered_posts
         leads_to_create: List[LeadCreate] = []
         for p in posts:
             created_iso = DateHelper.utc_now_iso()
@@ -542,9 +612,10 @@ class LeadService:
             if ts:
                 try:
                     if isinstance(ts, str):
-                        created_iso = datetime.fromisoformat(ts).isoformat()
+                        dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
                     else:
-                        created_iso = datetime.utcfromtimestamp(int(ts)).isoformat()
+                        dt = datetime.utcfromtimestamp(int(ts))
+                    created_iso = DateHelper.to_iso8601_utc(dt)
                 except Exception:
                     created_iso = DateHelper.utc_now_iso()
 
@@ -673,13 +744,44 @@ class LeadService:
             return
 
         posts = result.get("posts", [])
+        post_age_filter = lead_form.get("post_age_filter", "all")
+        cutoff_date = LeadFilter.calculate_cutoff_date(post_age_filter)
+        if cutoff_date:
+            filtered_posts: List[Dict] = []
+            for p in posts:
+                created_dt = None
+                ts = p.get("created_at") or p.get("created_time")
+                if ts:
+                    try:
+                        created_dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+                    except Exception:
+                        created_dt = None
+                if not created_dt:
+                    extracted = (
+                        TextHelper.extract_timestamp_from_text(p.get("text"))
+                        or TextHelper.extract_timestamp_from_date_text(p.get("text"))
+                        or TextHelper.extract_timestamp_from_relative_date_text(p.get("text"))
+                    )
+                    if extracted:
+                        try:
+                            created_dt = datetime.fromisoformat(str(extracted).replace("Z", "+00:00"))
+                        except Exception:
+                            created_dt = None
+                if not created_dt:
+                    continue
+                if created_dt.tzinfo is None:
+                    created_dt = created_dt.replace(tzinfo=timezone.utc)
+                if created_dt >= cutoff_date:
+                    filtered_posts.append(p)
+            posts = filtered_posts
         leads_to_create: List[LeadCreate] = []
         for p in posts:
             created_iso = DateHelper.utc_now_iso()
             ts = p.get("created_at") or p.get("created_time")
             if ts:
                 try:
-                    created_iso = datetime.fromisoformat(str(ts)).isoformat()
+                    dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+                    created_iso = DateHelper.to_iso8601_utc(dt)
                 except Exception:
                     created_iso = DateHelper.utc_now_iso()
 

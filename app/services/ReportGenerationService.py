@@ -47,6 +47,17 @@ class ReportGenerationService:
         # Dynamically call a unified method in the background
         background_tasks.add_task(generator.generate)
 
+        # Track trial usage for report generation (non-blocking)
+        try:
+            from app.services.uri_microservices.UriBackendService import UriBackendService
+            await UriBackendService.increment_trial_usage(
+                user_id=report_generation_data.user_id,
+                field="trialReportsGenerated",
+                amount=1
+            )
+        except Exception as e:
+            print(f"Failed to track trial usage for report generation: {e}")
+
         return UriResponse.custom_response(
             f"""Your {
                 report_generation_type.value.lower().replace('_', ' ')

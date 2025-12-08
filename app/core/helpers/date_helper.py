@@ -242,3 +242,11 @@ class DateHelper:
             str: ISO 8601 formatted UTC timestamp (e.g., "2025-11-25T12:24:00.123456Z")
         """
         return datetime.utcnow().isoformat() + 'Z'
+
+    @staticmethod
+    def to_iso8601_utc(dt: datetime) -> str:
+        if dt.tzinfo:
+            dt_utc = dt.astimezone(timezone.utc)
+        else:
+            dt_utc = dt.replace(tzinfo=timezone.utc)
+        return dt_utc.strftime("%Y-%m-%dT%H:%M:%S.%fZ")

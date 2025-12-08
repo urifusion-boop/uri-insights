@@ -3,6 +3,7 @@ from app.repository.EmbeddingRepository import EmbeddingRepository
 from app.repository.LeadFormRepository import LeadFormRepository
 from app.repository.LeadRepository import LeadRepository
 from app.repository.LeadSearchHistoryRepository import LeadSearchHistoryRepository
+from app.repository.LeadGenerationJobRepository import LeadGenerationJobRepository
 from app.services.azure.consumers.FileImportConsumer import FileImportConsumer
 from app.services.azure.consumers.LeadProcessorConsumer import LeadProcessorConsumer
 from app.services.azure.consumers.NewSubscriptionConsumer import NewSubscriptionConsumer
@@ -21,6 +22,8 @@ async def run_db_startup_tasks():
     await EmbeddingRepository.create_vector_index(db)
     # Create indexes for search history
     await LeadSearchHistoryRepository.setup_indexes(db)
+    # Create indexes for lead generation jobs (for polling)
+    await LeadGenerationJobRepository.ensure_indexes(db)
     # await LeadRepository.update_conv_to_biz_leads(db)
     # await LeadFormRepository.change_conversational_lead_forms_to_business_lead_forms(db)
     # await LeadRepository.delete_duplicate_leads(get_db())

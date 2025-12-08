@@ -579,9 +579,11 @@ class LeadFormAutoPopulateEnum(Enum):
             "competitors": ["<string>", "..."],
             // Relevant competitor brands/alternatives in this space.
             "ai_response_guide": "<string>",
-            // How the AI should respond to leads (optional).
+            // REQUIRED: A persona/tone description for AI responses. Example: "Respond as a friendly copywriter offering free audit", "Reply as a construction materials sales rep", "Act as a fintech partnership manager". Be specific about role and approach.
             "location": ["<city or region>", "..."],
             // Only if explicitly mentioned or confidently inferred.
+            "post_age_filter": "<string>",
+            // OPTIONAL: Time range for posts. Extract if user mentions recency: "24h" (last 24 hours), "7d" (last week), "30d" (last month), "3m" (last 3 months), "6m" (last 6 months), "1y" (last year), or "all" (default - no time filter). Only set if user explicitly mentions timeframe like "recent posts", "last week", "past month", etc.
             "buying_signals": ["<string>", "..."],
             // Phrases showing the TARGET AUDIENCE is ready/interested.
             "excluded_keywords": ["<string>", "..."],
