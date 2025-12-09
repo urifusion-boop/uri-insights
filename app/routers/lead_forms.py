@@ -119,6 +119,8 @@ async def fetch_conversational_leads(
     try:
         from app.repository.LeadGenerationJobRepository import LeadGenerationJobRepository
         from app.services.azure.producers.LeadGenerationProducer import LeadGenerationProducer
+        from bson import json_util
+        import json
 
         job_id = await LeadGenerationJobRepository.create_job(
             db=db,
@@ -132,12 +134,16 @@ async def fetch_conversational_leads(
         # Add job_id to lead_form for worker to track progress
         lead_form["job_id"] = job_id
 
+        # Serialize lead_form to handle datetime objects
+        # Convert to JSON string then back to dict to remove datetime objects
+        lead_form_serialized = json.loads(json_util.dumps(lead_form))
+
         # Send to Azure Service Bus queue for async processing by worker
         # This is non-blocking and returns immediately
         await LeadGenerationProducer.send_lead_generation_job(
             lead_form_id=lead_form_id,
             user_id=user_id,
-            lead_form=lead_form
+            lead_form=lead_form_serialized
         )
 
         print(f"✅ Lead generation job {job_id} queued successfully")
