@@ -9,7 +9,7 @@ from app.domain.enums.queue_enum import QueueEnum
 from app.domain.enums.queue_message_type_enum import LeadGenerationQueueMessageTypeEnum
 from app.services.azure.AzureServiceBusConsumer import AzureServiceBusConsumer
 from app.services.ConversationalLeadJobService import ConversationalLeadJobService
-from app.dependencies import get_db_dependency
+from app.database import get_db
 
 
 class LeadGenerationConsumer(AzureServiceBusConsumer):
@@ -30,7 +30,7 @@ class LeadGenerationConsumer(AzureServiceBusConsumer):
         """Initialize consumer and database connection"""
         await super().setup()
         # Get database connection for this worker
-        self.db = await get_db_dependency()
+        self.db = get_db()
         print(f"✅ LeadGenerationConsumer initialized with database connection")
 
     async def handle_message(self, msg: ServiceBusReceivedMessage, message_type: str):

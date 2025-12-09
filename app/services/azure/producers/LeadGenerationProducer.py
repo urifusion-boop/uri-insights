@@ -2,9 +2,10 @@
 LeadGenerationProducer - Sends lead generation jobs to queue for async processing
 """
 from typing import Dict, Any
+from app.domain.enums.datasenderservices_enum import DataSenderServicesEnum
 from app.domain.enums.queue_enum import QueueEnum
-from app.domain.enums.queue_message_type_enum import QueueMessageTypeEnum
-from app.services.azure.ServiceBusProducerService import ServiceBusProducerService
+from app.domain.enums.queue_message_type_enum import LeadGenerationQueueMessageTypeEnum
+from app.services.DataSenderService import DataSenderService
 
 
 class LeadGenerationProducer:
@@ -30,10 +31,11 @@ class LeadGenerationProducer:
             "lead_form": lead_form
         }
 
-        await ServiceBusProducerService.send_message(
-            queue_enum=QueueEnum.LEAD_GENERATION_QUEUE,
-            message=message_body,
-            message_type=QueueMessageTypeEnum.CONVERSATIONAL_LEAD_GENERATION
+        await DataSenderService.send_data(
+            DataSenderServicesEnum.AZURE_SERVICE_BUS,
+            QueueEnum.LEAD_GENERATION_QUEUE,  # type: ignore
+            message_body,
+            LeadGenerationQueueMessageTypeEnum.CONVERSATIONAL_LEAD_GENERATION
         )
 
         print(f"📤 Lead generation job queued for form {lead_form_id}")
