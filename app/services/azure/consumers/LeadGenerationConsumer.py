@@ -47,7 +47,8 @@ class LeadGenerationConsumer(AzureServiceBusConsumer):
             lead_form_id = message_body.get("lead_form_id")
             user_id = message_body.get("user_id")
             lead_form = message_body.get("lead_form")
-            job_id = message_body.get("job_id")
+            # job_id is inside lead_form, not at top level
+            job_id = lead_form.get("job_id") if lead_form else None
 
             print(f"📥 Processing lead generation job: {job_id} for form {lead_form_id}")
 
