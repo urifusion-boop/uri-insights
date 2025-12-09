@@ -7,6 +7,7 @@ import asyncio
 import time
 import re
 import hashlib
+from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, List, Optional
 from datetime import datetime, timedelta, timezone
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -279,6 +280,10 @@ class ConversationalLeadJobService:
     Service to handle background jobs for fetching conversational leads
     from multiple social media platforms.
     """
+
+    # ThreadPoolExecutor for CPU-bound LLM API calls
+    # This prevents blocking the async event loop during intensive operations
+    _llm_executor = ThreadPoolExecutor(max_workers=10, thread_name_prefix="llm_worker")
 
     @staticmethod
     async def fetch_leads_from_platforms(
@@ -1068,10 +1073,17 @@ class ConversationalLeadJobService:
 
         print(f"📊 INTENT ANALYSIS: Analyzing {len(leads)} posts in parallel for lead qualification...")
 
-        # Process all leads in parallel using asyncio.gather
+        # Process all leads in parallel using ThreadPoolExecutor + asyncio.gather
+        # This offloads CPU-intensive LLM API calls to threads, preventing event loop blocking
+        loop = asyncio.get_event_loop()
         tasks = [
-            ConversationalLeadJobService._analyze_single_lead(
-                lead, category_config, intent_min, relevance_min, final_min
+            loop.run_in_executor(
+                ConversationalLeadJobService._llm_executor,
+                lambda l=lead: asyncio.run(
+                    ConversationalLeadJobService._analyze_single_lead(
+                        l, category_config, intent_min, relevance_min, final_min
+                    )
+                )
             )
             for lead in leads
         ]

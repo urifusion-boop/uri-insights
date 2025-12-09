@@ -39,11 +39,13 @@ jobs:
       - name: Log in to Docker Hub
         run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
 
-      # Build and push Docker image
-      - name: Build and push Docker image
+      # Build and push Docker images (API + Worker)
+      - name: Build and push Docker images
         run: |
           docker build -t uriteam/urisvc:uriinsightprod .
           docker push uriteam/urisvc:uriinsightprod
+          docker build -f Dockerfile.worker -t uriteam/urisvc:uriinsightworker .
+          docker push uriteam/urisvc:uriinsightworker
 
   deploy:
     runs-on: ubuntu-latest

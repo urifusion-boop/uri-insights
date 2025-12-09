@@ -17,3 +17,16 @@ services:
     ports:
       - "8002:80"
       - "8445:443"
+    depends_on:
+      - uri-insight.worker
+
+  uri-insight.worker:
+    image: uriteam/urisvc:uriinsightworker
+    container_name: uri-insight.worker
+    env_file:
+      - .env
+    environment:
+      - ENV=Production
+    restart: always
+    # Worker processes background jobs from Azure Service Bus queue
+    # No ports needed - this service only consumes from queue

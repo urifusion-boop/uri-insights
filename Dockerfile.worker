@@ -1,3 +1,6 @@
+# Dockerfile for Lead Generation Worker
+# This runs the queue consumer process separately from the web server
+
 # Stage 1: Build the application
 FROM python:3.13.0-bullseye AS build
 
@@ -27,26 +30,21 @@ FROM python:3.13.0-bullseye AS production
 # Create and set the working directory
 WORKDIR /app
 
-# Install Uvicorn directly in the production image
-RUN pip install uvicorn
-
 # Copy the Python environment and application code from the build stage
 COPY --from=build /usr/local/lib/python3.13 /usr/local/lib/python3.13
 COPY --from=build /app /app
 
-# Expose ports for the application
-EXPOSE 80
-EXPOSE 443
-
-# Copy the Google service account JSON file
+# Copy the Google service account JSON file (if needed for GCP services)
 COPY --from=build /app/app/uri-creative-805581062eaa.json /app/app/uri-creative-805581062eaa.json
 
 # Set environment variables
-# ENV SSL_CERT_PATH=/https/fullchain.pem \
-#     SSL_KEY_PATH=/https/privkey.pem \
-#     GOOGLE_APPLICATION_CREDENTIALS=/app/uri-creative-805581062eaa.json \
-#     ENV=Production
+ENV PYTHONUNBUFFERED=1 \
+    GOOGLE_APPLICATION_CREDENTIALS=/app/uri-creative-805581062eaa.json \
+    ENV=Production
 
-# Set the entrypoint to run the FastAPI application with Uvicorn and SSL
-# Using 8 workers for concurrent request handling (prevents blocking during lead generation)
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "443", "--workers", "8", "--ssl-keyfile", "/https/privkey.pem", "--ssl-certfile", "/https/fullchain.pem"]
+# Health check - worker should be running continuously
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD pgrep -f "python worker.py" || exit 1
+
+# Run the worker process
+CMD ["python", "worker.py"]

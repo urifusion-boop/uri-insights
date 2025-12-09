@@ -87,12 +87,15 @@ async def create_conversational_lead_form(
 async def fetch_conversational_leads(
     lead_form_id: str,
     user_id: str,
-    background_tasks: BackgroundTasks,
     db: AsyncIOMotorDatabase = Depends(get_db_dependency),
 ):
     """
-    Start async lead generation job and return immediately with job_id for polling.
-    Frontend should poll /conversation-search/job-status/{job_id} for progress.
+    Queue lead generation job for async processing by worker.
+    Returns immediately with job_id for polling status.
+
+    This endpoint is non-blocking - the job is sent to Azure Service Bus queue
+    and processed by a separate worker process. Frontend should poll
+    /conversation-search/job-status/{job_id} for progress.
     """
 
     # Get the lead form
@@ -115,35 +118,40 @@ async def fetch_conversational_leads(
     # Create job tracking document
     try:
         from app.repository.LeadGenerationJobRepository import LeadGenerationJobRepository
+        from app.services.azure.producers.LeadGenerationProducer import LeadGenerationProducer
 
         job_id = await LeadGenerationJobRepository.create_job(
             db=db,
             lead_form_id=lead_form_id,
             user_id=user_id,
-            status="processing",
+            status="queued",
             progress=0,
-            message="Starting lead generation..."
+            message="Job queued for processing..."
         )
 
-        # Add background task (non-blocking)
-        background_tasks.add_task(
-            ConversationalLeadJobService.fetch_leads_from_platforms,
-            db,
-            lead_form,
-            user_id,
-            job_id
+        # Add job_id to lead_form for worker to track progress
+        lead_form["job_id"] = job_id
+
+        # Send to Azure Service Bus queue for async processing by worker
+        # This is non-blocking and returns immediately
+        await LeadGenerationProducer.send_lead_generation_job(
+            lead_form_id=lead_form_id,
+            user_id=user_id,
+            lead_form=lead_form
         )
+
+        print(f"✅ Lead generation job {job_id} queued successfully")
 
         # Return immediately with job_id
         return UriResponse.get_status_response(
             response={
                 "status": True,
                 "responseCode": 202,  # 202 Accepted
-                "responseMessage": "Lead generation started. Poll /conversation-search/job-status/{job_id} for progress.",
+                "responseMessage": "Lead generation queued. Poll /conversation-search/job-status/{job_id} for progress.",
                 "responseData": {
                     "lead_form_id": lead_form_id,
                     "job_id": job_id,
-                    "status": "processing",
+                    "status": "queued",
                     "poll_url": f"/conversation-search/job-status/{job_id}"
                 }
             },
