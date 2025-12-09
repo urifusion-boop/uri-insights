@@ -115,6 +115,31 @@ async def fetch_conversational_leads(
             status_code=404
         )
 
+    # Check feature limits before starting lead generation
+    from app.middlewares.FeatureLimitMiddleware import FeatureLimitMiddleware, FeatureLimitExceeded
+    from app.domain.enums.endpoints_enum import EndpointsEnum
+
+    try:
+        limit_check_result = await FeatureLimitMiddleware.verify_feature_limit(
+            user_id=user_id,
+            url_path=EndpointsEnum.LEAD_GEN.value
+        )
+
+        await FeatureLimitMiddleware.handle_feature_limit_result(
+            db=db,
+            result=limit_check_result,
+            user_id=user_id,
+            url_path=EndpointsEnum.LEAD_GEN.value
+        )
+    except FeatureLimitExceeded as e:
+        return UriResponse.get_status_response(
+            response={
+                "message": str(e.message),
+                "limit_exceeded": True
+            },
+            status_code=403
+        )
+
     # Create job tracking document
     try:
         from app.repository.LeadGenerationJobRepository import LeadGenerationJobRepository
