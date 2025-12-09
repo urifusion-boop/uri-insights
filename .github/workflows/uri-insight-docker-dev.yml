@@ -52,19 +52,6 @@ jobs:
     needs: build
 
     steps:
-      # Checkout code to get docker-compose files
-      - uses: actions/checkout@v4
-
-      # Copy docker-compose file to VM
-      - name: Copy docker-compose.dev.yml to VM
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.VM_IP }}
-          username: urifusion
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "docker-compose.dev.yml"
-          target: "/tmp/"
-
       # SSH into the VM and deploy the Docker container
       - name: SSH into VM and Deploy
         uses: appleboy/ssh-action@v0.1.6
@@ -81,14 +68,10 @@ jobs:
               mkdir -p /home/uritest/uri-insight;
             fi
             cd /home/uritest/uri-insight
-
-            # Copy docker-compose file from tmp to working directory
-            cp /tmp/docker-compose.dev.yml /home/uritest/uri-insight/docker-compose.dev.yml
-
             echo '${{ secrets.DOCKER_PASSWORD }}' | docker login -u '${{ secrets.DOCKER_USERNAME }}' --password-stdin
-            docker-compose -f docker-compose.dev.yml down
-            docker-compose -f docker-compose.dev.yml pull
-            docker-compose -f docker-compose.dev.yml up -d --scale uri-insight.worker=5
+            docker-compose down
+            docker-compose pull
+            docker-compose up -d --scale uri-insight.worker=5
 
             # Cleanup redundant image
             docker image prune -f

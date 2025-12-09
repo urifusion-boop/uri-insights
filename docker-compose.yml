@@ -11,8 +11,8 @@ services:
       - SSL_CERT_PATH=/https/fullchain.pem
       - SSL_KEY_PATH=/https/privkey.pem
     volumes:
-      - /etc/letsencrypt/archive/api.uricreative.com/fullchain1.pem:/https/fullchain.pem:ro
-      - /etc/letsencrypt/archive/api.uricreative.com/privkey1.pem:/https/privkey.pem:ro
+      - /etc/letsencrypt/live/api.uricreative.com/fullchain.pem:/https/fullchain.pem
+      - /etc/letsencrypt/live/api.uricreative.com/privkey.pem:/https/privkey.pem
     restart: always
     ports:
       - "8002:80"
@@ -21,8 +21,7 @@ services:
       - uri-insight.worker
 
   uri-insight.worker:
-    image: uriteam/urisvc:uriinsightworker
-    container_name: uri-insight.worker
+    image: uriteam/urisvc:uriinsightworkerdev
     env_file:
       - .env
     environment:
