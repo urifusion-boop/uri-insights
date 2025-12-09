@@ -21,6 +21,7 @@ class FeatureLimitHelper:
         EndpointsEnum.LEAD_ENRICHMENT.value: "lead",
         EndpointsEnum.LEAD_ENRICHMENT_PHONE.value: "lead",
         EndpointsEnum.LEAD_ENRICHMENT_EMAIL.value: "lead",
+        EndpointsEnum.LEAD_GEN.value: "lead",
     }
 
     account_tracking_sub_features = [
