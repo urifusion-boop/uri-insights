@@ -41,7 +41,7 @@ async def main():
     try:
         # Connect to MongoDB first (required before consumer can use get_db())
         print("🔌 Connecting to MongoDB...")
-        connect_to_mongo(settings.DATABASE_NAME)
+        connect_to_mongo(settings.MONGODB_DB)
         print("✅ MongoDB connected")
 
         # Create and initialize consumer
