@@ -66,6 +66,7 @@ class ApolloHelper:
             "buying_signals",
             "excluded_keywords",
             "location",
+            "post_age_filter",
             "intent_type",
             "category_context",
             "implied_keywords",
