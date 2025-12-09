@@ -104,7 +104,12 @@ class AzureServiceBusConsumer:
                                             pass
 
                                     # Complete message to remove from queue
-                                    await receiver.complete_message(msg)
+                                    try:
+                                        await receiver.complete_message(msg)
+                                    except Exception as complete_error:
+                                        # If lock expired, message auto-returns to queue or completes
+                                        # Don't crash the consumer
+                                        print(f"⚠️ Could not complete message (likely lock expired): {complete_error}")
                 except Exception as e:
                     print(f"Error in consuming from {self.queue_name}: {e}")
                     await asyncio.sleep(5)  # backoff before retry

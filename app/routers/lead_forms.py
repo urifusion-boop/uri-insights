@@ -134,9 +134,21 @@ async def fetch_conversational_leads(
         # Add job_id to lead_form for worker to track progress
         lead_form["job_id"] = job_id
 
-        # Serialize lead_form to handle datetime objects
-        # Convert to JSON string then back to dict to remove datetime objects
-        lead_form_serialized = json.loads(json_util.dumps(lead_form))
+        # Serialize lead_form to handle datetime objects - convert to ISO strings
+        def serialize_datetime(obj):
+            """Recursively convert datetime objects to ISO format strings"""
+            if isinstance(obj, dict):
+                return {k: serialize_datetime(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [serialize_datetime(item) for item in obj]
+            elif isinstance(obj, datetime):
+                return obj.isoformat()
+            elif hasattr(obj, '__dict__'):
+                return serialize_datetime(obj.__dict__)
+            return obj
+
+        from datetime import datetime
+        lead_form_serialized = serialize_datetime(lead_form)
 
         # Send to Azure Service Bus queue for async processing by worker
         # This is non-blocking and returns immediately
