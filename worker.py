@@ -17,6 +17,8 @@ import asyncio
 import signal
 import sys
 from app.services.azure.consumers.LeadGenerationConsumer import LeadGenerationConsumer
+from app.database import connect_to_mongo
+from app.core.config import settings
 
 
 # Global consumer instance for graceful shutdown
@@ -37,6 +39,11 @@ async def main():
     print("=" * 80)
 
     try:
+        # Connect to MongoDB first (required before consumer can use get_db())
+        print("🔌 Connecting to MongoDB...")
+        connect_to_mongo(settings.DATABASE_NAME)
+        print("✅ MongoDB connected")
+
         # Create and initialize consumer
         consumer_instance = LeadGenerationConsumer()
         await consumer_instance._async_init()
