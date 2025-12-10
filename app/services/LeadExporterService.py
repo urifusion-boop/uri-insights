@@ -43,19 +43,68 @@ class LeadExporter:
 
     @staticmethod
     def _format_leads_for_export(leads: List[dict]) -> None:
-        keys_to_include = [
-            "username",
-            "first_name",
-            "last_name",
-            "phone",
-            "company_name",
-            "job_title",
-            "keywords",
-            "lead_email",
-            "social_profile_link",
-            "location",
-        ]
         for lead in leads:
+            lead_type = lead.get("lead_type", "")
+
+            # Common fields for all lead types
+            common_keys = [
+                "username",
+                "first_name",
+                "last_name",
+                "location",
+                "tags",
+                "lead_status",
+                "interest_level",
+                "lead_source",
+                "lead_type",
+                "created_date",
+                "last_updated",
+                "starred",
+            ]
+
+            if lead_type == "CONVERSATIONAL":
+                # Fields shown in conversational leads table
+                keys_to_include = [
+                    "username",
+                    "first_name",
+                    "last_name",
+                    "picture_url",
+                    "lead_reason",
+                    "lead_status",
+                    "tags",
+                    "opportunity_type",
+                    "lead_link",
+                    "linkedin_url",
+                    "facebook_url",
+                    "twitter_url",
+                    "github_url",
+                    "website_url",
+                    "created_date",
+                ]
+            else:
+                # Fields shown in individual/person/organization/business leads table
+                keys_to_include = [
+                    "username",
+                    "first_name",
+                    "last_name",
+                    "job_title",
+                    "picture_url",
+                    "company_name",
+                    "industry",
+                    "company_logo",
+                    "lead_email",
+                    "phone",
+                    "location",
+                    "tags",
+                    "lead_status",
+                    "linkedin_url",
+                    "facebook_url",
+                    "twitter_url",
+                    "github_url",
+                    "website_url",
+                    "created_date",
+                ]
+
             DictHelper.include_keys(lead, keys_to_include)
 
     @staticmethod
