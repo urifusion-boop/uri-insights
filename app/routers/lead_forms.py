@@ -3,7 +3,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends
 from fastapi.encoders import jsonable_encoder
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
-from app.dependencies import get_db_dependency
+from app.dependencies import enforce_feature_limit, get_db_dependency
 from app.domain.enums.leadform_enum import LeadFormTypeEnum
 from app.domain.schemas.leadform_schema import (
     BusinessLeadFormUpdate,
@@ -35,6 +35,7 @@ async def create_person_search_lead_form(
     data: PersonSearchFormInput,
     background_tasks: BackgroundTasks,
     db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+    _: dict = Depends(enforce_feature_limit),
 ):
     payload = LeadFormCreate(**data.dict())
     result = await LeadFormService.create(db, payload, background_tasks)
@@ -48,6 +49,7 @@ async def create_organization_lead_form(
     data: OrganizationSearchFormInput,
     background_tasks: BackgroundTasks,
     db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+    _: dict = Depends(enforce_feature_limit),
 ):
     payload = LeadFormCreate(**data.dict())
     result = await LeadFormService.create(db, payload, background_tasks)
@@ -61,6 +63,7 @@ async def create_business_lead_form(
     data: BusinessSearchFormInput,
     background_tasks: BackgroundTasks,
     db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+    _: dict = Depends(enforce_feature_limit),
 ):
     payload = LeadFormCreate(**data.model_dump())
     result = await LeadFormService.create(db, background_tasks, payload)
@@ -304,6 +307,7 @@ async def update_person_lead_form(
     data: PersonLeadFormUpdate,
     background_tasks: BackgroundTasks,
     db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+    _: dict = Depends(enforce_feature_limit),
 ):
     result = await LeadFormService.update_apollo_lead_forms(
         db, data, lead_form_id, background_tasks
@@ -319,6 +323,7 @@ async def update_organization_lead_form(
     data: OrganizationLeadFormUpdate,
     background_tasks: BackgroundTasks,
     db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+    _: dict = Depends(enforce_feature_limit),
 ):
     result = await LeadFormService.update_apollo_lead_forms(
         db, data, lead_form_id, background_tasks
@@ -349,6 +354,7 @@ async def update_business_lead_form(
     data: BusinessLeadFormUpdate,
     background_tasks: BackgroundTasks,
     db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+    _: dict = Depends(enforce_feature_limit),
 ):
     result = await LeadFormService.update_business_lead_form(
         db, lead_form_id, data, background_tasks

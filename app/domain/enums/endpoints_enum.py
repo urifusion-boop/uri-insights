@@ -17,6 +17,12 @@ class EndpointsEnum(Enum):
     LEAD_ENRICHMENT_PHONE = "/lead/enrich/phone"
     LEAD_ENRICHMENT_EMAIL = "/lead/enrich/email"
     LEAD_GEN = "/lead/generate"
+    PERSON_SEARCH_CREATE = "/lead-forms/person-search/create"
+    ORGANIZATION_SEARCH_CREATE = "/lead-forms/organization-search/create"
+    BUSINESS_SEARCH_CREATE = "/lead-forms/business-search/create"
+    PERSON_SEARCH_UPDATE = "/lead-forms/person-search/update"
+    ORGANIZATION_SEARCH_UPDATE = "/lead-forms/organization-search/update"
+    BUSINESS_SEARCH_UPDATE = "/lead-forms/business-search/update"
 
 
 class UriBackendEndpointsEnum(Enum):
