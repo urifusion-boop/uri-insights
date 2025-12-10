@@ -51,8 +51,12 @@ async def global_exception_handler(request: Request, exc: Exception):
         )
     elif isinstance(exc, FeatureLimitExceeded):
         return JSONResponse(
-            status_code=400,
-            content=UriResponse.custom_response(error_code=400, message=str(exc)),
+            status_code=403,
+            content={
+                "message": str(exc),
+                "limit_exceeded": True,
+                "error_code": 403
+            },
         )
     else:
         return JSONResponse(
