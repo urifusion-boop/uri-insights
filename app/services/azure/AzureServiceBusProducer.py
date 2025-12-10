@@ -46,8 +46,9 @@ class AzureServiceBusProducer:
         message_body: dict,
         message_type: str = "default",
     ):
-        async with self.service_bus_client:
-            sender = self.service_bus_client.get_queue_sender(queue_name=queue_name)
+        # Create a fresh client for each send to avoid connection reuse issues
+        async with ServiceBusClient.from_connection_string(self.connection_string) as client:
+            sender = client.get_queue_sender(queue_name=queue_name)
             async with sender:
                 # Ensure message body is a JSON string
                 message_body_json = (

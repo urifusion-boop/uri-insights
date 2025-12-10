@@ -59,12 +59,16 @@ class AzureServiceBusConsumer:
 
     async def _consume_loop(self):
         try:
-            while True:
-                try:
-                    async with self.service_bus_client:
+            print(f"🔄 Starting consume loop for {self.queue_name}...")
+            async with self.service_bus_client:
+                print(f"✅ Service Bus client connected for {self.queue_name}")
+                while True:
+                    try:
+                        print(f"🔍 Waiting for messages from {self.queue_name}...")
                         async with self.service_bus_client.get_queue_receiver(
                             self.queue_name
                         ) as receiver:
+                            print(f"📡 Receiver ready for {self.queue_name}, listening...")
                             async for msg in receiver:
                                 message_type = msg.application_properties.get(
                                     b"messageType"
@@ -110,9 +114,9 @@ class AzureServiceBusConsumer:
                                         # If lock expired, message auto-returns to queue or completes
                                         # Don't crash the consumer
                                         print(f"⚠️ Could not complete message (likely lock expired): {complete_error}")
-                except Exception as e:
-                    print(f"Error in consuming from {self.queue_name}: {e}")
-                    await asyncio.sleep(5)  # backoff before retry
+                    except Exception as e:
+                        print(f"Error in consuming from {self.queue_name}: {e}")
+                        await asyncio.sleep(5)  # backoff before retry
         except asyncio.CancelledError:
             print(f"Consumer loop for {self.queue_name} cancelled.")
             raise
