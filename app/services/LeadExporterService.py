@@ -43,6 +43,8 @@ class LeadExporter:
 
     @staticmethod
     def _format_leads_for_export(leads: List[dict]) -> None:
+        from datetime import datetime
+
         for lead in leads:
             lead_type = lead.get("lead_type", "")
 
@@ -106,6 +108,12 @@ class LeadExporter:
                 ]
 
             DictHelper.include_keys(lead, keys_to_include)
+
+            # Convert datetime objects to ISO string format
+            if "created_date" in lead and isinstance(lead["created_date"], datetime):
+                lead["created_date"] = lead["created_date"].isoformat()
+            if "last_updated" in lead and isinstance(lead["last_updated"], datetime):
+                lead["last_updated"] = lead["last_updated"].isoformat()
 
     @staticmethod
     def _build_export_request(
