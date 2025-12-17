@@ -11,6 +11,10 @@ from typing import Any
 from app.database import get_db
 from app.core.config import settings
 from app.database import connect_to_mongo
+from app.core.sentry_config import initialize_sentry
+
+# Initialize Sentry first before anything else
+initialize_sentry()
 from app.routers import (
     apollo,
     lead_form_snapshots,
@@ -153,7 +157,7 @@ app.include_router(
 )
 app.include_router(
     service_health.router,
-    prefix="/service-health",
+    prefix="",
     tags=["service-health"],
 )
 app.include_router(

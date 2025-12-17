@@ -12,7 +12,7 @@ class UriBackendService:
         url = UriBackendService.base_url + settings.URI_BACKEND_USER_DETAILS + user_id
         try:
             result = await UriGatewayService.get(url)
-            return result.get("responseData")
+            return result.get("responseData") if result else None
         except Exception as e:
             print("Exception occurred in checking feature limit: ", e)
             return None
@@ -38,10 +38,7 @@ class UriBackendService:
             field: Field to increment (trialLeadsGenerated, trialSignalsUsed, etc.)
             amount: Amount to increment by (default 1)
         """
-        url = (
-            UriBackendService.base_url
-            + UriBackendEndpointsEnum.TRIAL_USAGE_INCREMENT.value
-        )
+        url = f"{UriBackendService.base_url}/trial/usage/increment"
         payload = {
             "userId": user_id,
             "field": field,

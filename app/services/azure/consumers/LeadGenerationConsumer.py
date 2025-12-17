@@ -78,7 +78,7 @@ class LeadGenerationConsumer(AzureServiceBusConsumer):
         job_id: str | None = None
     ):
         """
-        Process conversational lead generation job.
+        Process sales signal generation job.
 
         This runs the full lead generation pipeline:
         1. Fetch leads from social media platforms (Twitter, Facebook, TikTok)
@@ -88,7 +88,7 @@ class LeadGenerationConsumer(AzureServiceBusConsumer):
         5. Update job status
         """
         try:
-            print(f"🚀 Starting conversational lead generation for form {lead_form_id}")
+            print(f"🚀 Starting sales signal generation for form {lead_form_id}")
 
             # Run the full lead generation pipeline
             stats = await ConversationalLeadJobService.fetch_leads_from_platforms(
@@ -102,7 +102,7 @@ class LeadGenerationConsumer(AzureServiceBusConsumer):
             print(f"   Stats: {stats}")
 
         except Exception as e:
-            print(f"❌ Error in conversational lead generation: {str(e)}")
+            print(f"❌ Error in sales signal generation: {str(e)}")
             import traceback
             traceback.print_exc()
 

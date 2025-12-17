@@ -66,7 +66,7 @@ async def create_business_lead_form(
     _: dict = Depends(enforce_feature_limit),
 ):
     payload = LeadFormCreate(**data.model_dump())
-    result = await LeadFormService.create(db, background_tasks, payload)
+    result = await LeadFormService.create(db, payload, background_tasks)
     return UriResponse.get_status_response(
         response=jsonable_encoder(result), status_code=result["responseCode"]
     )

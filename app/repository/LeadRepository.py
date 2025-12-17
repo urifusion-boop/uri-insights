@@ -74,7 +74,7 @@ class LeadRepository:
                 sparse=True,
             )
 
-            # Duplicate detection index for conversational leads (URL-based)
+            # Duplicate detection index for sales signals (URL-based)
             # Prevents same post URL from being saved multiple times for the same user
             await db["leads"].create_index(
                 [
@@ -85,7 +85,7 @@ class LeadRepository:
                 sparse=True,
             )
 
-            # Duplicate detection index for conversational leads (content-based)
+            # Duplicate detection index for sales signals (content-based)
             # Prevents retweets/shares with same content from being saved multiple times
             await db["leads"].create_index(
                 [
@@ -102,7 +102,7 @@ class LeadRepository:
 
     @staticmethod
     async def update_conv_to_biz_leads(db: AsyncIOMotorDatabase):
-        print("🔄 Updating all CONVERSATIONAL leads to BUSINESS...")
+        print("🔄 Updating all sales signals to BUSINESS...")
 
         try:
             result = await db["leads"].update_many(

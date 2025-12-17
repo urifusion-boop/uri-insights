@@ -1,7 +1,7 @@
 """
-ConversationalLeadJobService.py
-Background job service for fetching leads from Twitter, Facebook, and TikTok
-when a conversational lead form is created or updated.
+SalesSignalJobService.py (formerly ConversationalLeadJobService.py)
+Background job service for fetching Sales Signals from Twitter, Facebook, and TikTok.
+Sales Signals are public online conversations that indicate buying intent, pain, or opportunity.
 """
 import asyncio
 import time
@@ -27,6 +27,123 @@ from app.domain.schemas.lead_search_history_schema import LeadSearchHistoryCreat
 from app.domain.enums.lead_enum import LeadSourceEnum, LeadStatusEnum, LeadOpportunityTypeEnum, IntentCategoryEnum, SentimentTypeEnum
 from app.domain.enums.leadform_enum import LeadFormTypeEnum
 from app.domain.schemas.browsercloud_schema import BrowsercloudPlatformEnum
+
+
+class PlatformDistributionManager:
+    """
+    Manages platform distribution to enforce 70% Twitter, 20% Facebook, 10% TikTok
+    with a maximum total of 150 posts across all keywords.
+    """
+
+    def __init__(self, max_total_posts: int = 150):
+        """
+        Initialize the distribution manager.
+
+        Args:
+            max_total_posts: Maximum total posts to fetch (default: 150)
+        """
+        self.max_total_posts = max_total_posts
+        self.twitter_target = int(max_total_posts * 0.70)  # 105 posts
+        self.facebook_target = int(max_total_posts * 0.20)  # 30 posts
+        self.tiktok_target = int(max_total_posts * 0.10)   # 15 posts
+
+        # Running counters
+        self.twitter_collected = 0
+        self.facebook_collected = 0
+        self.tiktok_collected = 0
+        self.total_collected = 0
+
+        # Keywords expected (for dynamic budgeting)
+        self.total_keywords = 8
+
+        print(f"🎯 Platform Distribution Manager Initialized:")
+        print(f"   Target: {self.max_total_posts} total posts")
+        print(f"   Twitter: {self.twitter_target} (70%)")
+        print(f"   Facebook: {self.facebook_target} (20%)")
+        print(f"   TikTok: {self.tiktok_target} (10%)")
+
+    def get_keyword_limits(self, keyword_index: int, enabled_platforms: Dict) -> Dict[str, int]:
+        """
+        Calculate how many posts to fetch per platform for this keyword.
+        Uses dynamic allocation based on remaining budget.
+
+        Args:
+            keyword_index: Current keyword index (1-based)
+            enabled_platforms: Dict of enabled platforms
+
+        Returns:
+            Dict with max_posts per platform: {twitter: 13, facebook: 4, tiktok: 2}
+        """
+        remaining_keywords = self.total_keywords - keyword_index + 1
+
+        # Calculate remaining budget for each platform
+        twitter_remaining = max(0, self.twitter_target - self.twitter_collected)
+        facebook_remaining = max(0, self.facebook_target - self.facebook_collected)
+        tiktok_remaining = max(0, self.tiktok_target - self.tiktok_collected)
+
+        # Distribute remaining budget across remaining keywords
+        # Use at least 1 post per platform to avoid zero fetches
+        twitter_limit = max(1, twitter_remaining // remaining_keywords) if remaining_keywords > 0 else 0
+        facebook_limit = max(1, facebook_remaining // remaining_keywords) if remaining_keywords > 0 else 0
+        tiktok_limit = max(1, tiktok_remaining // remaining_keywords) if remaining_keywords > 0 else 0
+
+        # Ensure we don't exceed remaining budget
+        twitter_limit = min(twitter_limit, twitter_remaining)
+        facebook_limit = min(facebook_limit, facebook_remaining)
+        tiktok_limit = min(tiktok_limit, tiktok_remaining)
+
+        # Only include limits for enabled platforms
+        limits = {}
+        if BrowsercloudPlatformEnum.TWITTER.value in enabled_platforms:
+            limits["twitter"] = twitter_limit
+        if BrowsercloudPlatformEnum.FACEBOOK.value in enabled_platforms:
+            limits["facebook"] = facebook_limit
+        if BrowsercloudPlatformEnum.TIKTOK.value in enabled_platforms:
+            limits["tiktok"] = tiktok_limit
+
+        return limits
+
+    def should_stop(self) -> bool:
+        """
+        Check if we've reached or exceeded the post limit.
+
+        Returns:
+            True if we should stop fetching more keywords
+        """
+        return self.total_collected >= self.max_total_posts
+
+    def update_counts(self, twitter_count: int, facebook_count: int, tiktok_count: int):
+        """
+        Update running counters after fetching from platforms.
+
+        Args:
+            twitter_count: Number of posts fetched from Twitter
+            facebook_count: Number of posts fetched from Facebook
+            tiktok_count: Number of posts fetched from TikTok
+        """
+        self.twitter_collected += twitter_count
+        self.facebook_collected += facebook_count
+        self.tiktok_collected += tiktok_count
+        self.total_collected = self.twitter_collected + self.facebook_collected + self.tiktok_collected
+
+    def get_summary(self) -> str:
+        """
+        Get a summary of the current distribution.
+
+        Returns:
+            Formatted string with distribution stats
+        """
+        twitter_pct = (self.twitter_collected / self.total_collected * 100) if self.total_collected > 0 else 0
+        facebook_pct = (self.facebook_collected / self.total_collected * 100) if self.total_collected > 0 else 0
+        tiktok_pct = (self.tiktok_collected / self.total_collected * 100) if self.total_collected > 0 else 0
+
+        return f"""
+   📊 Platform Distribution Summary:
+      Twitter:  {self.twitter_collected}/{self.twitter_target} ({twitter_pct:.1f}% - target 70%)
+      Facebook: {self.facebook_collected}/{self.facebook_target} ({facebook_pct:.1f}% - target 20%)
+      TikTok:   {self.tiktok_collected}/{self.tiktok_target} ({tiktok_pct:.1f}% - target 10%)
+      Total:    {self.total_collected}/{self.max_total_posts} posts
+"""
 
 
 class LeadFilter:
@@ -277,7 +394,7 @@ class PlatformKeywordOptimizer:
 
 class ConversationalLeadJobService:
     """
-    Service to handle background jobs for fetching conversational leads
+    Service to handle background jobs for fetching sales signals
     from multiple social media platforms.
     """
 
@@ -459,12 +576,25 @@ class ConversationalLeadJobService:
             # Update progress: Starting keyword search
             await update_progress(10, f"Searching with {len(prioritized_keywords)} keyword(s) across {len(enabled_platforms)} platform(s)...")
 
-            # Try ALL keywords to maximize qualified leads (no early stopping)
+            # Initialize platform distribution manager (70% Twitter, 20% Facebook, 10% TikTok, max 150 posts)
+            distribution_manager = PlatformDistributionManager(max_total_posts=150)
+
+            # Try ALL keywords to maximize qualified leads (with early stopping at 150 posts)
             qualified_leads = []
             for keyword_idx, keyword in enumerate(prioritized_keywords, 1):
+                # Check if we should stop early (reached 150 post limit)
+                if distribution_manager.should_stop():
+                    print(f"\n✅ Reached {distribution_manager.max_total_posts} post limit, stopping early at keyword {keyword_idx}/{len(prioritized_keywords)}")
+                    print(distribution_manager.get_summary())
+                    break
+
                 print(f"\n🔍 KEYWORD ATTEMPT {keyword_idx}/{len(prioritized_keywords)}: '{keyword}'")
                 progress_percent = 10 + (keyword_idx * 20)  # 10, 30, 50
                 await update_progress(progress_percent, f"Fetching from platforms with keyword '{keyword}'...")
+
+                # Get dynamic limits for this keyword based on remaining budget
+                keyword_limits = distribution_manager.get_keyword_limits(keyword_idx, enabled_platforms)
+                print(f"   📊 Per-platform limits for this keyword: {keyword_limits}")
 
                 # CONCURRENT FETCHING: Optimize keywords per platform and fetch in parallel
                 fetch_tasks = []
@@ -472,39 +602,45 @@ class ConversationalLeadJobService:
 
                 if BrowsercloudPlatformEnum.TWITTER.value in enabled_platforms:
                     twitter_keyword = PlatformKeywordOptimizer.optimize_for_twitter(keyword)
-                    print(f"   🐦 Twitter: '{twitter_keyword}'")
-                    fetch_tasks.append(
-                        asyncio.wait_for(
-                            ConversationalLeadJobService._fetch_twitter_leads(
-                                twitter_keyword, user_id, lead_form.get("lead_form_id")
-                            ),
+                    twitter_limit = keyword_limits.get("twitter", 0)
+                    print(f"   🐦 Twitter: '{twitter_keyword}' (max: {twitter_limit} posts)")
+                    if twitter_limit > 0:
+                        fetch_tasks.append(
+                            asyncio.wait_for(
+                                ConversationalLeadJobService._fetch_twitter_leads(
+                                    twitter_keyword, user_id, lead_form.get("lead_form_id"), max_posts=twitter_limit
+                                ),
                             timeout=platform_timeout
                         )
                     )
 
                 if BrowsercloudPlatformEnum.FACEBOOK.value in enabled_platforms:
                     facebook_keyword = PlatformKeywordOptimizer.optimize_for_facebook(keyword)
-                    print(f"   📘 Facebook: '{facebook_keyword}'")
-                    fetch_tasks.append(
-                        asyncio.wait_for(
-                            ConversationalLeadJobService._fetch_facebook_leads(
-                                facebook_keyword, user_id, lead_form.get("lead_form_id")
-                            ),
-                            timeout=platform_timeout
+                    facebook_limit = keyword_limits.get("facebook", 0)
+                    print(f"   📘 Facebook: '{facebook_keyword}' (max: {facebook_limit} posts)")
+                    if facebook_limit > 0:
+                        fetch_tasks.append(
+                            asyncio.wait_for(
+                                ConversationalLeadJobService._fetch_facebook_leads(
+                                    facebook_keyword, user_id, lead_form.get("lead_form_id"), max_posts=facebook_limit
+                                ),
+                                timeout=platform_timeout
+                            )
                         )
-                    )
 
                 if BrowsercloudPlatformEnum.TIKTOK.value in enabled_platforms:
                     tiktok_keyword = PlatformKeywordOptimizer.optimize_for_tiktok(keyword)
-                    print(f"   🎵 TikTok: '{tiktok_keyword}'")
-                    fetch_tasks.append(
-                        asyncio.wait_for(
-                            ConversationalLeadJobService._fetch_tiktok_leads(
-                                tiktok_keyword, user_id, lead_form.get("lead_form_id")
-                            ),
-                            timeout=platform_timeout
+                    tiktok_limit = keyword_limits.get("tiktok", 0)
+                    print(f"   🎵 TikTok: '{tiktok_keyword}' (max: {tiktok_limit} posts)")
+                    if tiktok_limit > 0:
+                        fetch_tasks.append(
+                            asyncio.wait_for(
+                                ConversationalLeadJobService._fetch_tiktok_leads(
+                                    tiktok_keyword, user_id, lead_form.get("lead_form_id"), max_posts=tiktok_limit
+                                ),
+                                timeout=platform_timeout
+                            )
                         )
-                    )
 
                 # Execute all fetch tasks concurrently
                 keyword_leads = []
@@ -524,6 +660,19 @@ class ConversationalLeadJobService:
 
                 all_leads.extend(keyword_leads)
                 print(f"   📊 Fetched {len(keyword_leads)} raw leads for keyword '{keyword}'")
+
+                # Update distribution manager counters
+                twitter_count = len([l for l in keyword_leads if l.lead_source == LeadSourceEnum.X])
+                facebook_count = len([l for l in keyword_leads if l.lead_source == LeadSourceEnum.FACEBOOK])
+                tiktok_count = len([l for l in keyword_leads if l.lead_source == LeadSourceEnum.TIKTOK])
+
+                distribution_manager.update_counts(twitter_count, facebook_count, tiktok_count)
+
+                print(f"   📊 Platform distribution progress:")
+                print(f"      Twitter:  {distribution_manager.twitter_collected}/{distribution_manager.twitter_target}")
+                print(f"      Facebook: {distribution_manager.facebook_collected}/{distribution_manager.facebook_target}")
+                print(f"      TikTok:   {distribution_manager.tiktok_collected}/{distribution_manager.tiktok_target}")
+                print(f"      Total:    {distribution_manager.total_collected}/{distribution_manager.max_total_posts}")
 
                 # Apply time range and location filters
                 if keyword_leads:
@@ -566,6 +715,9 @@ class ConversationalLeadJobService:
             stats["total_qualified"] = len(qualified_leads)
             print(f"\n✅ INTENT ANALYSIS COMPLETE: {len(qualified_leads)}/{len(all_leads)} leads qualified")
 
+            # Print final platform distribution summary
+            print(distribution_manager.get_summary())
+
             # Update progress: Analyzing complete, now saving
             await update_progress(80, f"Analyzed {len(all_leads)} posts, saving {len(qualified_leads)} qualified leads...")
 
@@ -596,7 +748,7 @@ class ConversationalLeadJobService:
                             count=new_count + current_count,
                         )
                     except Exception as e:
-                        print(f"Failed to update feature limit after conversational leads: {str(e)}")
+                        print(f"Failed to update feature limit after sales signals: {str(e)}")
             else:
                 print(f"No qualified leads found after intent analysis")
 
@@ -686,13 +838,14 @@ class ConversationalLeadJobService:
     async def _fetch_twitter_leads(
         search_query: str,
         user_id: str,
-        lead_form_id: Optional[str] = None
+        lead_form_id: Optional[str] = None,
+        max_posts: int = 25
     ) -> List[LeadCreate]:
         """Fetch leads from Twitter using Apify with smart search query"""
         try:
             print(f"🐦 Fetching Twitter leads with search query: '{search_query}'")
             twitter_service = OpenAIApifyTwitterService()
-            response = await twitter_service.fetch_tweets_with_analysis(search_query, max_tweets=25, analyze_sentiment=False)
+            response = await twitter_service.fetch_tweets_with_analysis(search_query, max_tweets=max_posts, analyze_sentiment=False)
             print(f"   Twitter API response success: {response.get('success')}")
             tweets = response.get("tweets", [])
             print(f"   Found {len(tweets)} tweets")
@@ -753,13 +906,14 @@ class ConversationalLeadJobService:
     async def _fetch_facebook_leads(
         search_query: str,
         user_id: str,
-        lead_form_id: Optional[str] = None
+        lead_form_id: Optional[str] = None,
+        max_posts: int = 25
     ) -> List[LeadCreate]:
         """Fetch leads from Facebook using Apify with smart search query"""
         try:
             print(f"📘 Fetching Facebook leads with search query: '{search_query}'")
             facebook_service = OpenAIApifyFacebookService()
-            response = await facebook_service.fetch_posts_with_analysis(search_query, max_posts=25, analyze_sentiment=False)
+            response = await facebook_service.fetch_posts_with_analysis(search_query, max_posts=max_posts, analyze_sentiment=False)
             print(f"   Facebook API response success: {response.get('success')}")
             posts = response.get("posts", [])
             print(f"   Found {len(posts)} posts")
@@ -836,13 +990,14 @@ class ConversationalLeadJobService:
     async def _fetch_tiktok_leads(
         search_query: str,
         user_id: str,
-        lead_form_id: Optional[str] = None
+        lead_form_id: Optional[str] = None,
+        max_posts: int = 25
     ) -> List[LeadCreate]:
         """Fetch leads from TikTok using Apify with smart search query"""
         try:
             print(f"🎵 Fetching TikTok leads with search query: '{search_query}'")
             tiktok_service = OpenAIApifyTiktokService()
-            response = await tiktok_service.fetch_posts_with_analysis(search_query, max_posts=25, analyze_sentiment=False)
+            response = await tiktok_service.fetch_posts_with_analysis(search_query, max_posts=max_posts, analyze_sentiment=False)
             print(f"   TikTok API response success: {response.get('success')}")
             posts = response.get("posts", [])
             print(f"   Found {len(posts)} posts")

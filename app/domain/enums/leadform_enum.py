@@ -4,7 +4,7 @@ from enum import Enum
 class LeadFormTypeEnum(str, Enum):
     PERSON = "PERSON"
     ORGANIZATION = "ORGANIZATION"
-    CONVERSATIONAL = "CONVERSATIONAL"
+    CONVERSATIONAL = "CONVERSATIONAL"  # Sales Signals (kept for backward compatibility)
     BUSINESS = "BUSINESS"
 
 
@@ -33,6 +33,7 @@ class LeadFormDisabledReasonEnum(str, Enum):
 
 
 class ConversationalFormIntentTypeEnum(str, Enum):
+    """Sales Signal Form Intent Types"""
     LEAD_GENERATION = "Lead Generation"
     COMPETITOR_TRACKING = "Competitor Tracking"
     MARKET_INSIGHTS = "Market Insights"

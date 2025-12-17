@@ -559,7 +559,7 @@ class LeadFormAutoPopulateEnum(Enum):
     CONVERSATIONAL_FORM_PROMPT = """
         You are an advanced lead generation and social listening assistant. A user has described what they want to find or monitor online. Your job is to extract high-quality search parameters that work for ANY use case: selling, buying, hiring, recruiting, partnerships, or anything else.
 
-        Based on the user's description, return structured parameters to populate a Conversational Lead form for tracking relevant social media discussions.
+        Based on the user's description, return structured parameters to populate a sales signal form for tracking relevant social media discussions.
 
         ### User Input:
         {data}
@@ -628,7 +628,7 @@ class LeadFormAutoPopulateEnum(Enum):
 
 class LeadServicePrompts(Enum):
     IMPORTED_CONVERSATIONAL_LEAD_ENRICHMENT_PROMPT = """
-        You are an AI assistant enriching conversational lead data for CRM ingestion.
+        You are an AI assistant enriching sales signal data for CRM ingestion.
 
         You will receive a lead object and must infer the following fields for an ImportedConversationalLeadEnrichmentResponse:
 

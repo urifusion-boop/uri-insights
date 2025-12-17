@@ -65,7 +65,7 @@ class LeadExporter:
             ]
 
             if lead_type == "CONVERSATIONAL":
-                # Fields shown in conversational leads table
+                # Fields shown in sales signals table
                 keys_to_include = [
                     "username",
                     "first_name",

@@ -1,6 +1,7 @@
 fastapi
 uvicorn
 pymongo
+sentry-sdk[fastapi,pymongo]
 python-dotenv
 fastapi-jwt-auth
 requests
