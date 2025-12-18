@@ -22,13 +22,14 @@ class AdminLeadAnalyticsService:
         now = datetime.utcnow()
 
         date_ranges = {
-            DateFilterEnum.TODAY: timedelta(days=1),
-            DateFilterEnum.YESTERDAY: timedelta(days=2),
+            DateFilterEnum.LAST_24_HOURS: timedelta(days=1),
+            DateFilterEnum.LAST_3_DAYS: timedelta(days=3),
             DateFilterEnum.LAST_7_DAYS: timedelta(days=7),
-            DateFilterEnum.LAST_30_DAYS: timedelta(days=30),
-            DateFilterEnum.LAST_90_DAYS: timedelta(days=90),
-            DateFilterEnum.THIS_MONTH: timedelta(days=30),
-            DateFilterEnum.LAST_MONTH: timedelta(days=60),
+            DateFilterEnum.LAST_1_WEEK: timedelta(days=7),
+            DateFilterEnum.LAST_2_WEEKS: timedelta(days=14),
+            DateFilterEnum.LAST_1_MONTH: timedelta(days=30),
+            DateFilterEnum.LAST_2_MONTHS: timedelta(days=60),
+            DateFilterEnum.LAST_3_MONTHS: timedelta(days=90),
         }
 
         delta = date_ranges.get(date_filter, timedelta(days=30))

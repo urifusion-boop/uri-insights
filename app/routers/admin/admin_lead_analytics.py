@@ -20,7 +20,7 @@ router = APIRouter(prefix="/admin/leads", tags=["Admin Lead Analytics"])
 
 @router.get("/overview")
 async def get_lead_overview(
-    date_filter: DateFilterEnum = Query(DateFilterEnum.LAST_30_DAYS),
+    date_filter: DateFilterEnum = Query(DateFilterEnum.LAST_1_MONTH),
     db: AsyncIOMotorDatabase = Depends(get_db_dependency)
 ):
     """
@@ -43,7 +43,7 @@ async def get_lead_overview(
 @router.get("/by-user/{user_id}")
 async def get_user_lead_analytics(
     user_id: str,
-    date_filter: DateFilterEnum = Query(DateFilterEnum.LAST_30_DAYS),
+    date_filter: DateFilterEnum = Query(DateFilterEnum.LAST_1_MONTH),
     db: AsyncIOMotorDatabase = Depends(get_db_dependency)
 ):
     """
@@ -87,7 +87,7 @@ async def get_recent_leads_all_users(
 
 @router.get("/top-users")
 async def get_top_users_by_leads(
-    date_filter: DateFilterEnum = Query(DateFilterEnum.LAST_30_DAYS),
+    date_filter: DateFilterEnum = Query(DateFilterEnum.LAST_1_MONTH),
     limit: int = Query(10, ge=1, le=50),
     db: AsyncIOMotorDatabase = Depends(get_db_dependency)
 ):
@@ -129,7 +129,7 @@ async def get_lead_generation_trends(
 
 @router.get("/conversion-funnel")
 async def get_conversion_funnel(
-    date_filter: DateFilterEnum = Query(DateFilterEnum.LAST_30_DAYS),
+    date_filter: DateFilterEnum = Query(DateFilterEnum.LAST_1_MONTH),
     user_id: Optional[str] = None,
     db: AsyncIOMotorDatabase = Depends(get_db_dependency)
 ):
@@ -153,7 +153,7 @@ async def get_conversion_funnel(
 
 @router.get("/platform-performance")
 async def get_platform_performance(
-    date_filter: DateFilterEnum = Query(DateFilterEnum.LAST_30_DAYS),
+    date_filter: DateFilterEnum = Query(DateFilterEnum.LAST_1_MONTH),
     db: AsyncIOMotorDatabase = Depends(get_db_dependency)
 ):
     """
