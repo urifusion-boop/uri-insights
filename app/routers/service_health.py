@@ -6,7 +6,7 @@ from typing import Any, Dict
 import time
 import psutil
 import pymongo
-from app.database import db
+from app.database import get_db
 from datetime import datetime
 
 router = APIRouter()
@@ -36,7 +36,8 @@ def health_check():
     # Check MongoDB connection
     try:
         # Ping MongoDB to check if it's connected
-        db.command('ping')
+        database = get_db()
+        database.command('ping')
         is_mongo_connected = True
         mongo_state = "connected"
     except Exception as e:
