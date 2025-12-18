@@ -56,6 +56,7 @@ from app.routers import (
     lead_search_history,
     websockets_leads,
 )
+from app.routers.admin import admin_lead_analytics
 from app.core.auth_bearer import JWTBearer
 from app.core.handlers.exception_handler import global_exception_handler
 from app.services.BackgroundService import BackgroundService
@@ -395,6 +396,13 @@ app.include_router(
     websockets_leads.router,
     prefix="",
     tags=["WebSocket Real-time Leads"],
+)
+
+app.include_router(
+    admin_lead_analytics.router,
+    prefix="",
+    tags=["Admin Lead Analytics"],
+    dependencies=[Depends(JWTBearer())],
 )
 
 

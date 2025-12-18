@@ -140,26 +140,19 @@ class UriResponse:
         meta_data: Optional[Any] = None,
         message: Optional[str] = None,
     ):
-        if not data:
-            return {
-                "status": False,
-                "responseCode": HTTP_404_NOT_FOUND,
-                "responseMessage": f"{entity_name}s not found.",
-                "responseData": {"data": [], "total": 0, "pageSize": page_size},
-            }
-        else:
-            return {
-                "status": True,
-                "responseCode": HTTP_200_OK,
-                "responseMessage": message or f"{entity_name}s successfully retrieved.",
-                "responseData": {
-                    "data": data,
-                    "total": total,
-                    "page": page,
-                    "pageSize": page_size,
-                    "metaData": meta_data,
-                },
-            }
+        # Return 200 with empty array when no data found (not 404)
+        return {
+            "status": True if data else True,  # Always true for successful query
+            "responseCode": HTTP_200_OK,
+            "responseMessage": message or f"{entity_name}s successfully retrieved." if data else f"No {entity_name}s found.",
+            "responseData": {
+                "data": data if data else [],
+                "total": total,
+                "page": page,
+                "pageSize": page_size,
+                "metaData": meta_data,
+            },
+        }
 
     @staticmethod
     def update_response(
