@@ -6,13 +6,25 @@ Separate from user-facing endpoints to maintain security and performance.
 """
 from fastapi import APIRouter, Depends, Query
 from motor.motor_asyncio import AsyncIOMotorDatabase
-from typing import Optional, List
+from typing import Optional, List, Any, Dict
 from fastapi.encoders import jsonable_encoder
+from bson import ObjectId
 
 from app.dependencies import get_db_dependency
 from app.domain.responses.uri_response import UriResponse
 from app.services.admin.AdminLeadAnalyticsService import AdminLeadAnalyticsService
 from app.domain.enums.date_enum import DateFilterEnum
+
+
+def convert_objectid(data: Any) -> Any:
+    """Recursively convert ObjectId to string in dict/list structures"""
+    if isinstance(data, dict):
+        return {k: convert_objectid(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [convert_objectid(item) for item in data]
+    elif isinstance(data, ObjectId):
+        return str(data)
+    return data
 
 
 router = APIRouter(prefix="/admin/leads", tags=["Admin Lead Analytics"])
@@ -34,6 +46,7 @@ async def get_lead_overview(
     - Conversion metrics
     """
     data = await AdminLeadAnalyticsService.get_lead_overview(db, date_filter)
+    data = convert_objectid(data)
     response = jsonable_encoder(data)
     return UriResponse.get_status_response(
         response=response, status_code=response["responseCode"]
@@ -57,6 +70,7 @@ async def get_user_lead_analytics(
     - Platform breakdown
     """
     data = await AdminLeadAnalyticsService.get_user_lead_analytics(db, user_id, date_filter)
+    data = convert_objectid(data)
     response = jsonable_encoder(data)
     return UriResponse.get_status_response(
         response=response, status_code=response["responseCode"]
@@ -79,6 +93,7 @@ async def get_recent_leads_all_users(
     data = await AdminLeadAnalyticsService.get_recent_leads_paginated(
         db, limit, skip, status, platform, user_id
     )
+    data = convert_objectid(data)
     response = jsonable_encoder(data)
     return UriResponse.get_status_response(
         response=response, status_code=response["responseCode"]
@@ -101,6 +116,7 @@ async def get_top_users_by_leads(
     - Conversion rate
     """
     data = await AdminLeadAnalyticsService.get_top_users_by_leads(db, date_filter, limit)
+    data = convert_objectid(data)
     response = jsonable_encoder(data)
     return UriResponse.get_status_response(
         response=response, status_code=response["responseCode"]
@@ -121,6 +137,7 @@ async def get_lead_generation_trends(
     - Platform distribution over time
     """
     data = await AdminLeadAnalyticsService.get_lead_trends(db, days)
+    data = convert_objectid(data)
     response = jsonable_encoder(data)
     return UriResponse.get_status_response(
         response=response, status_code=response["responseCode"]
@@ -145,6 +162,7 @@ async def get_conversion_funnel(
     Includes conversion rates at each stage.
     """
     data = await AdminLeadAnalyticsService.get_conversion_funnel(db, date_filter, user_id)
+    data = convert_objectid(data)
     response = jsonable_encoder(data)
     return UriResponse.get_status_response(
         response=response, status_code=response["responseCode"]
@@ -166,6 +184,7 @@ async def get_platform_performance(
     - Conversion rate
     """
     data = await AdminLeadAnalyticsService.get_platform_performance(db, date_filter)
+    data = convert_objectid(data)
     response = jsonable_encoder(data)
     return UriResponse.get_status_response(
         response=response, status_code=response["responseCode"]
