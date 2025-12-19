@@ -138,7 +138,7 @@ class AdminLeadAnalyticsRepository:
             {
                 "$lookup": {
                     "from": AdminLeadAnalyticsRepository.USERS_COLLECTION,
-                    "let": {"userId": {"$toObjectId": "$_id"}},
+                    "let": {"userId": "$_id"},
                     "pipeline": [
                         {"$match": {"$expr": {"$eq": ["$_id", "$$userId"]}}},
                         {"$project": {"email": 1, "firstName": 1, "lastName": 1}}
@@ -486,7 +486,7 @@ class AdminLeadAnalyticsRepository:
             {
                 "$lookup": {
                     "from": AdminLeadAnalyticsRepository.USERS_COLLECTION,
-                    "let": {"userId": {"$toObjectId": "$_id"}},
+                    "let": {"userId": "$_id"},
                     "pipeline": [
                         {"$match": {"$expr": {"$eq": ["$_id", "$$userId"]}}},
                         {"$project": {"email": 1, "firstName": 1, "lastName": 1}}
