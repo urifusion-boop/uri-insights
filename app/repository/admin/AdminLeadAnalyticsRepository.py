@@ -23,8 +23,26 @@ class AdminLeadAnalyticsRepository:
         end_date: datetime
     ) -> int:
         """Get total count of leads within date range"""
+        # Debug: Check what date field exists in leads
+        sample_lead = await db[AdminLeadAnalyticsRepository.LEADS_COLLECTION].find_one()
+        print(f"[DEBUG] Sample lead fields: {sample_lead.keys() if sample_lead else 'No leads found'}")
+        print(f"[DEBUG] Date range: {start_date} to {end_date}")
+
+        # Try both created_date and created_at fields
+        count_created_date = await db[AdminLeadAnalyticsRepository.LEADS_COLLECTION].count_documents({
+            "created_date": {"$gte": start_date, "$lte": end_date}
+        })
+        count_created_at = await db[AdminLeadAnalyticsRepository.LEADS_COLLECTION].count_documents({
+            "created_at": {"$gte": start_date, "$lte": end_date}
+        })
+        total_count = await db[AdminLeadAnalyticsRepository.LEADS_COLLECTION].count_documents({})
+
+        print(f"[DEBUG] Count with created_date: {count_created_date}")
+        print(f"[DEBUG] Count with created_at: {count_created_at}")
+        print(f"[DEBUG] Total leads (no filter): {total_count}")
+
         count = await db[AdminLeadAnalyticsRepository.LEADS_COLLECTION].count_documents({
-            "date_created": {"$gte": start_date, "$lte": end_date}
+            "created_date": {"$gte": start_date, "$lte": end_date}
         })
         return count
 
