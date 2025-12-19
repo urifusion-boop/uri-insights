@@ -127,6 +127,7 @@ class ApolloHelper:
             "enable_realtime",
             "monitoring_platforms",
             "platform_configs",
+            "post_age_filter",
         ]
         organization_search_request_dict = DictHelper.remove_keys(
             lead_form.copy(), unwanted_keys
