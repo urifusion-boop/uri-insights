@@ -700,3 +700,86 @@ class AdminLeadAnalyticsRepository:
             })
 
         return formatted_result
+
+    @staticmethod
+    async def get_lead_type_distribution(
+        db: AsyncIOMotorDatabase,
+        start_date: datetime,
+        end_date: datetime
+    ) -> List[Dict[str, Any]]:
+        """Get lead distribution and metrics by lead type"""
+        date_filter = await AdminLeadAnalyticsRepository._get_date_match_filter(db, start_date, end_date)
+        pipeline = [
+            {"$match": date_filter},
+            {
+                "$group": {
+                    "_id": "$lead_type",
+                    "total_leads": {"$sum": 1},
+                    "avg_intent_score": {"$avg": "$intent_score"},
+                    "avg_relevance_score": {"$avg": "$relevance_score"},
+                    "new": {
+                        "$sum": {"$cond": [{"$eq": ["$lead_status", "new"]}, 1, 0]}
+                    },
+                    "contacted": {
+                        "$sum": {"$cond": [{"$eq": ["$lead_status", "contacted"]}, 1, 0]}
+                    },
+                    "qualified": {
+                        "$sum": {"$cond": [{"$eq": ["$lead_status", "qualified"]}, 1, 0]}
+                    },
+                    "converted": {
+                        "$sum": {"$cond": [{"$eq": ["$lead_status", "converted"]}, 1, 0]}
+                    }
+                }
+            },
+            {
+                "$addFields": {
+                    "conversion_rate": {
+                        "$cond": [
+                            {"$gt": ["$total_leads", 0]},
+                            {
+                                "$multiply": [
+                                    {"$divide": ["$converted", "$total_leads"]},
+                                    100
+                                ]
+                            },
+                            0
+                        ]
+                    },
+                    "qualification_rate": {
+                        "$cond": [
+                            {"$gt": ["$total_leads", 0]},
+                            {
+                                "$multiply": [
+                                    {"$divide": ["$qualified", "$total_leads"]},
+                                    100
+                                ]
+                            },
+                            0
+                        ]
+                    }
+                }
+            },
+            {"$sort": {"total_leads": -1}}
+        ]
+
+        result = await db[AdminLeadAnalyticsRepository.LEADS_COLLECTION].aggregate(pipeline).to_list(None)
+
+        formatted_result = []
+        for item in result:
+            lead_type = item["_id"] or "BUSINESS"
+            formatted_result.append({
+                "lead_type": lead_type,
+                "total_leads": item["total_leads"],
+                "avg_intent_score": round(item.get("avg_intent_score") or 0, 2),
+                "avg_relevance_score": round(item.get("avg_relevance_score") or 0, 2),
+                "conversion_rate": round(item["conversion_rate"], 2),
+                "qualification_rate": round(item["qualification_rate"], 2),
+                "status_breakdown": {
+                    "new": item["new"],
+                    "contacted": item["contacted"],
+                    "qualified": item["qualified"],
+                    "converted": item["converted"]
+                }
+            })
+
+        return formatted_result

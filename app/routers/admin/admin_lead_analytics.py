@@ -189,3 +189,27 @@ async def get_platform_performance(
     return UriResponse.get_status_response(
         response=response, status_code=response["responseCode"]
     )
+
+
+@router.get("/lead-type-distribution")
+async def get_lead_type_distribution(
+    date_filter: DateFilterEnum = Query(DateFilterEnum.LAST_1_MONTH),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency)
+):
+    """
+    Get lead distribution and performance metrics by lead type.
+
+    Returns for each lead type (CONVERSATIONAL, PERSON, ORGANIZATION, BUSINESS):
+    - Total leads count
+    - Average intent score
+    - Average relevance score
+    - Conversion rate
+    - Qualification rate
+    - Status breakdown (new, contacted, qualified, converted)
+    """
+    data = await AdminLeadAnalyticsService.get_lead_type_distribution(db, date_filter)
+    data = convert_objectid(data)
+    response = jsonable_encoder(data)
+    return UriResponse.get_status_response(
+        response=response, status_code=response["responseCode"]
+    )

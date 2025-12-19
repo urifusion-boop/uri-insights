@@ -290,3 +290,30 @@ class AdminLeadAnalyticsService:
                 }
             }
         }
+
+    @staticmethod
+    async def get_lead_type_distribution(
+        db: AsyncIOMotorDatabase,
+        date_filter: DateFilterEnum
+    ) -> Dict[str, Any]:
+        """
+        Get lead distribution and analytics by lead type
+        """
+        date_range = AdminLeadAnalyticsService._get_date_range(date_filter)
+
+        type_metrics = await AdminLeadAnalyticsRepository.get_lead_type_distribution(
+            db, date_range["start_date"], date_range["end_date"]
+        )
+
+        return {
+            "status": True,
+            "responseCode": 200,
+            "responseMessage": "Lead type distribution retrieved successfully",
+            "responseData": {
+                "lead_types": type_metrics,
+                "date_range": {
+                    "start": date_range["start_date"].isoformat(),
+                    "end": date_range["end_date"].isoformat()
+                }
+            }
+        }
