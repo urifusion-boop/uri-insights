@@ -15,6 +15,26 @@ class AdminLeadAnalyticsRepository:
 
     LEADS_COLLECTION = "leads"
     USERS_COLLECTION = "users"
+    _is_date_string = None  # Cache for date type check
+
+    @staticmethod
+    async def _check_date_field_type(db: AsyncIOMotorDatabase) -> bool:
+        """Check if created_date is stored as string (cached)"""
+        if AdminLeadAnalyticsRepository._is_date_string is None:
+            sample = await db[AdminLeadAnalyticsRepository.LEADS_COLLECTION].find_one()
+            if sample and "created_date" in sample:
+                AdminLeadAnalyticsRepository._is_date_string = isinstance(sample['created_date'], str)
+            else:
+                AdminLeadAnalyticsRepository._is_date_string = False
+        return AdminLeadAnalyticsRepository._is_date_string
+
+    @staticmethod
+    async def _get_date_match_filter(db: AsyncIOMotorDatabase, start_date: datetime, end_date: datetime) -> dict:
+        """Get date match filter based on whether dates are stored as strings"""
+        is_string = await AdminLeadAnalyticsRepository._check_date_field_type(db)
+        if is_string:
+            return {"created_date": {"$gte": start_date.isoformat(), "$lte": end_date.isoformat()}}
+        return {"created_date": {"$gte": start_date, "$lte": end_date}}
 
     @staticmethod
     async def get_total_leads_count(
@@ -23,26 +43,8 @@ class AdminLeadAnalyticsRepository:
         end_date: datetime
     ) -> int:
         """Get total count of leads within date range"""
-        # Check if created_date is stored as string
-        sample = await db[AdminLeadAnalyticsRepository.LEADS_COLLECTION].find_one()
-        if sample and "created_date" in sample:
-            print(f"[DEBUG] created_date type: {type(sample['created_date'])}, value: {sample['created_date']}")
-
-            # If string, convert datetime to ISO string for comparison
-            if isinstance(sample['created_date'], str):
-                start_str = start_date.isoformat()
-                end_str = end_date.isoformat()
-                print(f"[DEBUG] Using string comparison: {start_str} to {end_str}")
-                count = await db[AdminLeadAnalyticsRepository.LEADS_COLLECTION].count_documents({
-                    "created_date": {"$gte": start_str, "$lte": end_str}
-                })
-                print(f"[DEBUG] String comparison count: {count}")
-                return count
-
-        # Default datetime comparison
-        count = await db[AdminLeadAnalyticsRepository.LEADS_COLLECTION].count_documents({
-            "created_date": {"$gte": start_date, "$lte": end_date}
-        })
+        date_filter = await AdminLeadAnalyticsRepository._get_date_match_filter(db, start_date, end_date)
+        count = await db[AdminLeadAnalyticsRepository.LEADS_COLLECTION].count_documents(date_filter)
         return count
 
     @staticmethod
@@ -52,12 +54,9 @@ class AdminLeadAnalyticsRepository:
         end_date: datetime
     ) -> Dict[str, int]:
         """Aggregate leads by status"""
+        date_filter = await AdminLeadAnalyticsRepository._get_date_match_filter(db, start_date, end_date)
         pipeline = [
-            {
-                "$match": {
-                    "created_date": {"$gte": start_date, "$lte": end_date}
-                }
-            },
+            {"$match": date_filter},
             {
                 "$group": {
                     "_id": "$lead_status",
@@ -90,12 +89,9 @@ class AdminLeadAnalyticsRepository:
         end_date: datetime
     ) -> Dict[str, int]:
         """Aggregate leads by platform/source"""
+        date_filter = await AdminLeadAnalyticsRepository._get_date_match_filter(db, start_date, end_date)
         pipeline = [
-            {
-                "$match": {
-                    "created_date": {"$gte": start_date, "$lte": end_date}
-                }
-            },
+            {"$match": date_filter},
             {
                 "$group": {
                     "_id": "$lead_source",
@@ -124,12 +120,9 @@ class AdminLeadAnalyticsRepository:
         limit: int
     ) -> List[Dict[str, Any]]:
         """Get top users by lead count"""
+        date_filter = await AdminLeadAnalyticsRepository._get_date_match_filter(db, start_date, end_date)
         pipeline = [
-            {
-                "$match": {
-                    "created_date": {"$gte": start_date, "$lte": end_date}
-                }
-            },
+            {"$match": date_filter},
             {
                 "$group": {
                     "_id": "$user_id",
@@ -182,12 +175,9 @@ class AdminLeadAnalyticsRepository:
         end_date: datetime
     ) -> Dict[str, Any]:
         """Calculate conversion metrics"""
+        date_filter = await AdminLeadAnalyticsRepository._get_date_match_filter(db, start_date, end_date)
         pipeline = [
-            {
-                "$match": {
-                    "created_date": {"$gte": start_date, "$lte": end_date}
-                }
-            },
+            {"$match": date_filter},
             {
                 "$group": {
                     "_id": None,
@@ -238,13 +228,10 @@ class AdminLeadAnalyticsRepository:
         end_date: datetime
     ) -> Optional[Dict[str, Any]]:
         """Get comprehensive lead statistics for a specific user"""
+        date_filter = await AdminLeadAnalyticsRepository._get_date_match_filter(db, start_date, end_date)
+        match_filter = {"user_id": user_id, **date_filter}
         pipeline = [
-            {
-                "$match": {
-                    "user_id": user_id,
-                    "created_date": {"$gte": start_date, "$lte": end_date}
-                }
-            },
+            {"$match": match_filter},
             {
                 "$facet": {
                     "status_breakdown": [
@@ -432,12 +419,9 @@ class AdminLeadAnalyticsRepository:
         limit: int
     ) -> List[Dict[str, Any]]:
         """Get top users with detailed metrics"""
+        date_filter = await AdminLeadAnalyticsRepository._get_date_match_filter(db, start_date, end_date)
         pipeline = [
-            {
-                "$match": {
-                    "created_date": {"$gte": start_date, "$lte": end_date}
-                }
-            },
+            {"$match": date_filter},
             {
                 "$group": {
                     "_id": "$user_id",
@@ -511,20 +495,21 @@ class AdminLeadAnalyticsRepository:
         end_date: datetime
     ) -> List[Dict[str, Any]]:
         """Get daily lead generation trends"""
+        date_filter = await AdminLeadAnalyticsRepository._get_date_match_filter(db, start_date, end_date)
+        is_string = await AdminLeadAnalyticsRepository._check_date_field_type(db)
+
+        if is_string:
+            # For string dates, use substr to extract date portion
+            group_id = {"$substr": ["$created_date", 0, 10]}
+        else:
+            # For datetime objects, use dateToString
+            group_id = {"$dateToString": {"format": "%Y-%m-%d", "date": "$created_date"}}
+
         pipeline = [
-            {
-                "$match": {
-                    "created_date": {"$gte": start_date, "$lte": end_date}
-                }
-            },
+            {"$match": date_filter},
             {
                 "$group": {
-                    "_id": {
-                        "$dateToString": {
-                            "format": "%Y-%m-%d",
-                            "date": "$created_date"
-                        }
-                    },
+                    "_id": group_id,
                     "total": {"$sum": 1},
                     "new": {
                         "$sum": {"$cond": [{"$eq": ["$lead_status", "new"]}, 1, 0]}
@@ -566,9 +551,8 @@ class AdminLeadAnalyticsRepository:
         user_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """Get conversion funnel with stage progression"""
-        match_filter = {
-            "date_created": {"$gte": start_date, "$lte": end_date}
-        }
+        date_filter = await AdminLeadAnalyticsRepository._get_date_match_filter(db, start_date, end_date)
+        match_filter = {**date_filter}
 
         if user_id:
             match_filter["user_id"] = user_id
@@ -578,10 +562,10 @@ class AdminLeadAnalyticsRepository:
             {
                 "$group": {
                     "_id": None,
-                    "new": {"$sum": {"$cond": [{"$eq": ["$status", "new"]}, 1, 0]}},
-                    "contacted": {"$sum": {"$cond": [{"$eq": ["$status", "contacted"]}, 1, 0]}},
-                    "qualified": {"$sum": {"$cond": [{"$eq": ["$status", "qualified"]}, 1, 0]}},
-                    "converted": {"$sum": {"$cond": [{"$eq": ["$status", "converted"]}, 1, 0]}},
+                    "new": {"$sum": {"$cond": [{"$eq": ["$lead_status", "new"]}, 1, 0]}},
+                    "contacted": {"$sum": {"$cond": [{"$eq": ["$lead_status", "contacted"]}, 1, 0]}},
+                    "qualified": {"$sum": {"$cond": [{"$eq": ["$lead_status", "qualified"]}, 1, 0]}},
+                    "converted": {"$sum": {"$cond": [{"$eq": ["$lead_status", "converted"]}, 1, 0]}},
                     "total": {"$sum": 1}
                 }
             }
@@ -636,12 +620,9 @@ class AdminLeadAnalyticsRepository:
         end_date: datetime
     ) -> List[Dict[str, Any]]:
         """Get performance metrics by platform"""
+        date_filter = await AdminLeadAnalyticsRepository._get_date_match_filter(db, start_date, end_date)
         pipeline = [
-            {
-                "$match": {
-                    "created_date": {"$gte": start_date, "$lte": end_date}
-                }
-            },
+            {"$match": date_filter},
             {
                 "$group": {
                     "_id": "$lead_source",
