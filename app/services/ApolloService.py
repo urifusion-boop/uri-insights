@@ -100,7 +100,7 @@ class ApolloService:
         search_result = {}
         url = ApolloHelper.get_url_for_search_request(lead_form)
         async with httpx.AsyncClient() as client:
-            response = await client.get(
+            response = await client.post(
                 url,
                 headers=ApolloService.HEADERS,
             )
