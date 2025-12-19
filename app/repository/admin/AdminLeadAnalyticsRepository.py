@@ -23,6 +23,23 @@ class AdminLeadAnalyticsRepository:
         end_date: datetime
     ) -> int:
         """Get total count of leads within date range"""
+        # Check if created_date is stored as string
+        sample = await db[AdminLeadAnalyticsRepository.LEADS_COLLECTION].find_one()
+        if sample and "created_date" in sample:
+            print(f"[DEBUG] created_date type: {type(sample['created_date'])}, value: {sample['created_date']}")
+
+            # If string, convert datetime to ISO string for comparison
+            if isinstance(sample['created_date'], str):
+                start_str = start_date.isoformat()
+                end_str = end_date.isoformat()
+                print(f"[DEBUG] Using string comparison: {start_str} to {end_str}")
+                count = await db[AdminLeadAnalyticsRepository.LEADS_COLLECTION].count_documents({
+                    "created_date": {"$gte": start_str, "$lte": end_str}
+                })
+                print(f"[DEBUG] String comparison count: {count}")
+                return count
+
+        # Default datetime comparison
         count = await db[AdminLeadAnalyticsRepository.LEADS_COLLECTION].count_documents({
             "created_date": {"$gte": start_date, "$lte": end_date}
         })
