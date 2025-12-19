@@ -159,6 +159,8 @@ class AdminLeadAnalyticsRepository:
         formatted_result = []
         for item in result:
             user_info = item.get("user_info", {})
+            # Debug logging
+            print(f"DEBUG - Item _id: {item['_id']}, user_info: {user_info}")
             formatted_result.append({
                 "user_id": item["_id"],
                 "email": user_info.get("email", "Unknown"),
