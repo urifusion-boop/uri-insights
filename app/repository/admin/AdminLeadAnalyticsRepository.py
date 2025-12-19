@@ -23,24 +23,6 @@ class AdminLeadAnalyticsRepository:
         end_date: datetime
     ) -> int:
         """Get total count of leads within date range"""
-        # Debug: Check what date field exists in leads
-        sample_lead = await db[AdminLeadAnalyticsRepository.LEADS_COLLECTION].find_one()
-        print(f"[DEBUG] Sample lead fields: {sample_lead.keys() if sample_lead else 'No leads found'}")
-        print(f"[DEBUG] Date range: {start_date} to {end_date}")
-
-        # Try both created_date and created_at fields
-        count_created_date = await db[AdminLeadAnalyticsRepository.LEADS_COLLECTION].count_documents({
-            "created_date": {"$gte": start_date, "$lte": end_date}
-        })
-        count_created_at = await db[AdminLeadAnalyticsRepository.LEADS_COLLECTION].count_documents({
-            "created_at": {"$gte": start_date, "$lte": end_date}
-        })
-        total_count = await db[AdminLeadAnalyticsRepository.LEADS_COLLECTION].count_documents({})
-
-        print(f"[DEBUG] Count with created_date: {count_created_date}")
-        print(f"[DEBUG] Count with created_at: {count_created_at}")
-        print(f"[DEBUG] Total leads (no filter): {total_count}")
-
         count = await db[AdminLeadAnalyticsRepository.LEADS_COLLECTION].count_documents({
             "created_date": {"$gte": start_date, "$lte": end_date}
         })
@@ -56,12 +38,12 @@ class AdminLeadAnalyticsRepository:
         pipeline = [
             {
                 "$match": {
-                    "date_created": {"$gte": start_date, "$lte": end_date}
+                    "created_date": {"$gte": start_date, "$lte": end_date}
                 }
             },
             {
                 "$group": {
-                    "_id": "$status",
+                    "_id": "$lead_status",
                     "count": {"$sum": 1}
                 }
             }
@@ -94,7 +76,7 @@ class AdminLeadAnalyticsRepository:
         pipeline = [
             {
                 "$match": {
-                    "date_created": {"$gte": start_date, "$lte": end_date}
+                    "created_date": {"$gte": start_date, "$lte": end_date}
                 }
             },
             {
@@ -128,7 +110,7 @@ class AdminLeadAnalyticsRepository:
         pipeline = [
             {
                 "$match": {
-                    "date_created": {"$gte": start_date, "$lte": end_date}
+                    "created_date": {"$gte": start_date, "$lte": end_date}
                 }
             },
             {
@@ -186,7 +168,7 @@ class AdminLeadAnalyticsRepository:
         pipeline = [
             {
                 "$match": {
-                    "date_created": {"$gte": start_date, "$lte": end_date}
+                    "created_date": {"$gte": start_date, "$lte": end_date}
                 }
             },
             {
@@ -243,7 +225,7 @@ class AdminLeadAnalyticsRepository:
             {
                 "$match": {
                     "user_id": user_id,
-                    "date_created": {"$gte": start_date, "$lte": end_date}
+                    "created_date": {"$gte": start_date, "$lte": end_date}
                 }
             },
             {
@@ -251,7 +233,7 @@ class AdminLeadAnalyticsRepository:
                     "status_breakdown": [
                         {
                             "$group": {
-                                "_id": "$status",
+                                "_id": "$lead_status",
                                 "count": {"$sum": 1}
                             }
                         }
@@ -346,7 +328,7 @@ class AdminLeadAnalyticsRepository:
         match_filter = {}
 
         if status:
-            match_filter["status"] = status
+            match_filter["lead_status"] = status
 
         if platform:
             match_filter["lead_source"] = platform
@@ -356,7 +338,7 @@ class AdminLeadAnalyticsRepository:
 
         pipeline = [
             {"$match": match_filter} if match_filter else {"$match": {}},
-            {"$sort": {"date_created": -1}},
+            {"$sort": {"created_date": -1}},
             {"$skip": skip},
             {"$limit": limit},
             {
@@ -382,11 +364,11 @@ class AdminLeadAnalyticsRepository:
                     "name": "$lead_full_name",
                     "email": "$lead_email",
                     "platform": "$lead_source",
-                    "status": 1,
+                    "status": "$lead_status",
                     "interest_level": 1,
                     "intent_score": 1,
                     "relevance_score": 1,
-                    "created_date": "$date_created",
+                    "created_date": "$created_date",
                     "assigned_to": "$assigned_to",
                     "user_email": "$user_info.email",
                     "user_name": {
@@ -414,7 +396,7 @@ class AdminLeadAnalyticsRepository:
         match_filter = {}
 
         if status:
-            match_filter["status"] = status
+            match_filter["lead_status"] = status
 
         if platform:
             match_filter["lead_source"] = platform
@@ -436,7 +418,7 @@ class AdminLeadAnalyticsRepository:
         pipeline = [
             {
                 "$match": {
-                    "date_created": {"$gte": start_date, "$lte": end_date}
+                    "created_date": {"$gte": start_date, "$lte": end_date}
                 }
             },
             {
@@ -444,10 +426,10 @@ class AdminLeadAnalyticsRepository:
                     "_id": "$user_id",
                     "total_leads": {"$sum": 1},
                     "qualified_leads": {
-                        "$sum": {"$cond": [{"$eq": ["$status", "qualified"]}, 1, 0]}
+                        "$sum": {"$cond": [{"$eq": ["$lead_status", "qualified"]}, 1, 0]}
                     },
                     "converted_leads": {
-                        "$sum": {"$cond": [{"$eq": ["$status", "converted"]}, 1, 0]}
+                        "$sum": {"$cond": [{"$eq": ["$lead_status", "converted"]}, 1, 0]}
                     }
                 }
             },
@@ -515,7 +497,7 @@ class AdminLeadAnalyticsRepository:
         pipeline = [
             {
                 "$match": {
-                    "date_created": {"$gte": start_date, "$lte": end_date}
+                    "created_date": {"$gte": start_date, "$lte": end_date}
                 }
             },
             {
@@ -523,21 +505,21 @@ class AdminLeadAnalyticsRepository:
                     "_id": {
                         "$dateToString": {
                             "format": "%Y-%m-%d",
-                            "date": "$date_created"
+                            "date": "$created_date"
                         }
                     },
                     "total": {"$sum": 1},
                     "new": {
-                        "$sum": {"$cond": [{"$eq": ["$status", "new"]}, 1, 0]}
+                        "$sum": {"$cond": [{"$eq": ["$lead_status", "new"]}, 1, 0]}
                     },
                     "contacted": {
-                        "$sum": {"$cond": [{"$eq": ["$status", "contacted"]}, 1, 0]}
+                        "$sum": {"$cond": [{"$eq": ["$lead_status", "contacted"]}, 1, 0]}
                     },
                     "qualified": {
-                        "$sum": {"$cond": [{"$eq": ["$status", "qualified"]}, 1, 0]}
+                        "$sum": {"$cond": [{"$eq": ["$lead_status", "qualified"]}, 1, 0]}
                     },
                     "converted": {
-                        "$sum": {"$cond": [{"$eq": ["$status", "converted"]}, 1, 0]}
+                        "$sum": {"$cond": [{"$eq": ["$lead_status", "converted"]}, 1, 0]}
                     }
                 }
             },
@@ -640,7 +622,7 @@ class AdminLeadAnalyticsRepository:
         pipeline = [
             {
                 "$match": {
-                    "date_created": {"$gte": start_date, "$lte": end_date}
+                    "created_date": {"$gte": start_date, "$lte": end_date}
                 }
             },
             {
@@ -650,10 +632,10 @@ class AdminLeadAnalyticsRepository:
                     "avg_intent_score": {"$avg": "$intent_score"},
                     "avg_relevance_score": {"$avg": "$relevance_score"},
                     "converted": {
-                        "$sum": {"$cond": [{"$eq": ["$status", "converted"]}, 1, 0]}
+                        "$sum": {"$cond": [{"$eq": ["$lead_status", "converted"]}, 1, 0]}
                     },
                     "qualified": {
-                        "$sum": {"$cond": [{"$eq": ["$status", "qualified"]}, 1, 0]}
+                        "$sum": {"$cond": [{"$eq": ["$lead_status", "qualified"]}, 1, 0]}
                     }
                 }
             },
