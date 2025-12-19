@@ -4,7 +4,7 @@ Admin Lead Analytics Repository
 MongoDB aggregation pipelines for admin lead analytics.
 Optimized queries using proper indexing and aggregation framework.
 """
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from motor.motor_asyncio import AsyncIOMotorDatabase, AsyncIOMotorClient
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from bson import ObjectId
@@ -156,15 +156,29 @@ class AdminLeadAnalyticsRepository:
 
         result = await db[AdminLeadAnalyticsRepository.LEADS_COLLECTION].aggregate(pipeline).to_list(None)
 
+        # Get backend database for user lookups (users are in Uri database, not Uri_Insight)
+        backend_db = db.client["Uri"]
+
         formatted_result = []
         for item in result:
-            user_info = item.get("user_info", {})
-            # Debug logging
-            print(f"DEBUG - Item _id: {item['_id']}, user_info: {user_info}")
+            user_id = item["_id"]
+            # Fetch user from Uri database
+            user_doc = await backend_db[AdminLeadAnalyticsRepository.USERS_COLLECTION].find_one(
+                {"_id": user_id},
+                {"email": 1, "firstName": 1, "lastName": 1}
+            )
+
+            if user_doc:
+                user_name = f"{user_doc.get('firstName', '')} {user_doc.get('lastName', '')}".strip()
+                user_email = user_doc.get("email", "Unknown")
+            else:
+                user_name = "Unknown"
+                user_email = "Unknown"
+
             formatted_result.append({
-                "user_id": item["_id"],
-                "email": user_info.get("email", "Unknown"),
-                "name": f"{user_info.get('firstName', '')} {user_info.get('lastName', '')}".strip() or "Unknown",
+                "user_id": user_id,
+                "email": user_email,
+                "name": user_name or "Unknown",
                 "lead_count": item["lead_count"]
             })
 
@@ -506,13 +520,29 @@ class AdminLeadAnalyticsRepository:
 
         result = await db[AdminLeadAnalyticsRepository.LEADS_COLLECTION].aggregate(pipeline).to_list(None)
 
+        # Get backend database for user lookups (users are in Uri database, not Uri_Insight)
+        backend_db = db.client["Uri"]
+
         formatted_result = []
         for item in result:
-            user_info = item.get("user_info", {})
+            user_id = item["_id"]
+            # Fetch user from Uri database
+            user_doc = await backend_db[AdminLeadAnalyticsRepository.USERS_COLLECTION].find_one(
+                {"_id": user_id},
+                {"email": 1, "firstName": 1, "lastName": 1}
+            )
+
+            if user_doc:
+                user_name = f"{user_doc.get('firstName', '')} {user_doc.get('lastName', '')}".strip()
+                user_email = user_doc.get("email", "Unknown")
+            else:
+                user_name = "Unknown"
+                user_email = "Unknown"
+
             formatted_result.append({
-                "user_id": item["_id"],
-                "email": user_info.get("email", "Unknown"),
-                "name": f"{user_info.get('firstName', '')} {user_info.get('lastName', '')}".strip() or "Unknown",
+                "user_id": user_id,
+                "email": user_email,
+                "name": user_name or "Unknown",
                 "total_leads": item["total_leads"],
                 "qualified_leads": item["qualified_leads"],
                 "converted_leads": item["converted_leads"],
