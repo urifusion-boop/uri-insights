@@ -613,7 +613,7 @@ class ApolloService:
 
         latest_lead_form_snapshot: LeadFormSnapshot = (
             await ApolloService.get_latest_lead_form_snapshot(
-                db, user_id=user_id, form_type=LeadFormTypeEnum.PERSON
+                db, user_id=user_id, form_type=LeadFormTypeEnum.ORGANIZATION
             )
         ).get("responseData")
 
