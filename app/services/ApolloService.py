@@ -55,16 +55,22 @@ class ApolloService:
 
     @staticmethod
     async def handle_organization_leads_gen(lead_form: dict, db: AsyncIOMotorDatabase):
+        print(f"[ORG LEADS] Starting organization leads generation for form: {lead_form.get('lead_form_id')}")
         search_result = await ApolloService.search_organizations(lead_form=lead_form)
 
+        print(f"[ORG LEADS] Search result received: {len(search_result.get('organizations', []))} organizations found")
+
         if not search_result:
+            print("[ORG LEADS] ERROR: Apollo search returned empty result")
             raise ValueError("Apollo leads gen failed.")
 
         await ApolloService.handle_search_result(search_result, lead_form, db)
 
-        return await ApolloService.handle_organization_search_result(
+        result = await ApolloService.handle_organization_search_result(
             search_result, lead_form.get("user_id", ""), db
         )
+        print(f"[ORG LEADS] Completed. Leads to create: {len(result) if result else 0}")
+        return result
 
     @staticmethod
     @ApolloHelper.cache_result(
@@ -99,12 +105,15 @@ class ApolloService:
             )
         search_result = {}
         url = ApolloHelper.get_url_for_search_request(lead_form)
+        print(f"[ORG SEARCH] Calling Apollo API: {url[:100]}...")
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 url,
                 headers=ApolloService.HEADERS,
             )
+            print(f"[ORG SEARCH] Apollo API response status: {response.status_code}")
             search_result = ApolloService._process_response(response)
+        print(f"[ORG SEARCH] Organizations in response: {len(search_result.get('organizations', []))}")
         return search_result
 
     @staticmethod
