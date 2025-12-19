@@ -125,7 +125,7 @@ class AdminLeadAnalyticsRepository:
             {"$match": date_filter},
             {
                 "$group": {
-                    "_id": "$user_id",
+                    "_id": "$assigned_to",
                     "lead_count": {"$sum": 1}
                 }
             },
@@ -229,7 +229,7 @@ class AdminLeadAnalyticsRepository:
     ) -> Optional[Dict[str, Any]]:
         """Get comprehensive lead statistics for a specific user"""
         date_filter = await AdminLeadAnalyticsRepository._get_date_match_filter(db, start_date, end_date)
-        match_filter = {"user_id": user_id, **date_filter}
+        match_filter = {"assigned_to": user_id, **date_filter}
         pipeline = [
             {"$match": match_filter},
             {
@@ -338,7 +338,7 @@ class AdminLeadAnalyticsRepository:
             match_filter["lead_source"] = platform
 
         if user_id:
-            match_filter["user_id"] = user_id
+            match_filter["assigned_to"] = user_id
 
         pipeline = [
             {"$match": match_filter} if match_filter else {"$match": {}},
@@ -351,12 +351,12 @@ class AdminLeadAnalyticsRepository:
                     "let": {
                         "userId": {
                             "$cond": {
-                                "if": {"$eq": [{"$type": "$user_id"}, "objectId"]},
-                                "then": "$user_id",
+                                "if": {"$eq": [{"$type": "$assigned_to"}, "objectId"]},
+                                "then": "$assigned_to",
                                 "else": {
                                     "$cond": {
-                                        "if": {"$and": [{"$ne": ["$user_id", None]}, {"$ne": ["$user_id", ""]}]},
-                                        "then": {"$toObjectId": "$user_id"},
+                                        "if": {"$and": [{"$ne": ["$assigned_to", None]}, {"$ne": ["$assigned_to", ""]}]},
+                                        "then": {"$toObjectId": "$assigned_to"},
                                         "else": None
                                     }
                                 }
@@ -395,6 +395,7 @@ class AdminLeadAnalyticsRepository:
                     "email": "$lead_email",
                     "platform": "$lead_source",
                     "status": "$lead_status",
+                    "lead_type": "$lead_type",
                     "interest_level": 1,
                     "intent_score": 1,
                     "relevance_score": 1,
@@ -436,7 +437,7 @@ class AdminLeadAnalyticsRepository:
             match_filter["lead_source"] = platform
 
         if user_id:
-            match_filter["user_id"] = user_id
+            match_filter["assigned_to"] = user_id
 
         count = await db[AdminLeadAnalyticsRepository.LEADS_COLLECTION].count_documents(match_filter)
         return count
@@ -454,7 +455,7 @@ class AdminLeadAnalyticsRepository:
             {"$match": date_filter},
             {
                 "$group": {
-                    "_id": "$user_id",
+                    "_id": "$assigned_to",
                     "total_leads": {"$sum": 1},
                     "qualified_leads": {
                         "$sum": {"$cond": [{"$eq": ["$lead_status", "qualified"]}, 1, 0]}
@@ -585,7 +586,7 @@ class AdminLeadAnalyticsRepository:
         match_filter = {**date_filter}
 
         if user_id:
-            match_filter["user_id"] = user_id
+            match_filter["assigned_to"] = user_id
 
         pipeline = [
             {"$match": match_filter},
