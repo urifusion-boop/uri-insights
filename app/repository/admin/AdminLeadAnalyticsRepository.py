@@ -348,7 +348,21 @@ class AdminLeadAnalyticsRepository:
             {
                 "$lookup": {
                     "from": AdminLeadAnalyticsRepository.USERS_COLLECTION,
-                    "let": {"userId": {"$toObjectId": "$user_id"}},
+                    "let": {
+                        "userId": {
+                            "$cond": {
+                                "if": {"$eq": [{"$type": "$user_id"}, "objectId"]},
+                                "then": "$user_id",
+                                "else": {
+                                    "$cond": {
+                                        "if": {"$and": [{"$ne": ["$user_id", None]}, {"$ne": ["$user_id", ""]}]},
+                                        "then": {"$toObjectId": "$user_id"},
+                                        "else": None
+                                    }
+                                }
+                            }
+                        }
+                    },
                     "pipeline": [
                         {"$match": {"$expr": {"$eq": ["$_id", "$$userId"]}}},
                         {"$project": {"email": 1, "firstName": 1, "lastName": 1}}
@@ -365,7 +379,19 @@ class AdminLeadAnalyticsRepository:
             {
                 "$project": {
                     "lead_id": {"$toString": "$_id"},
-                    "name": "$lead_full_name",
+                    "name": {
+                        "$cond": {
+                            "if": {"$ne": [{"$ifNull": ["$first_name", ""]}, ""]},
+                            "then": {
+                                "$concat": [
+                                    {"$ifNull": ["$first_name", ""]},
+                                    " ",
+                                    {"$ifNull": ["$last_name", ""]}
+                                ]
+                            },
+                            "else": {"$ifNull": ["$username", "Unknown"]}
+                        }
+                    },
                     "email": "$lead_email",
                     "platform": "$lead_source",
                     "status": "$lead_status",
@@ -376,11 +402,15 @@ class AdminLeadAnalyticsRepository:
                     "assigned_to": "$assigned_to",
                     "user_email": "$user_info.email",
                     "user_name": {
-                        "$concat": [
-                            {"$ifNull": ["$user_info.firstName", ""]},
-                            " ",
-                            {"$ifNull": ["$user_info.lastName", ""]}
-                        ]
+                        "$trim": {
+                            "input": {
+                                "$concat": [
+                                    {"$ifNull": ["$user_info.firstName", ""]},
+                                    " ",
+                                    {"$ifNull": ["$user_info.lastName", ""]}
+                                ]
+                            }
+                        }
                     }
                 }
             }
