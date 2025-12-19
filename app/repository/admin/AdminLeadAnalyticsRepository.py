@@ -8,6 +8,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase, AsyncIOMotorClient
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from bson import ObjectId
+from app.services.uri_microservices.UriBackendService import UriBackendService
 
 
 class AdminLeadAnalyticsRepository:
@@ -156,21 +157,15 @@ class AdminLeadAnalyticsRepository:
 
         result = await db[AdminLeadAnalyticsRepository.LEADS_COLLECTION].aggregate(pipeline).to_list(None)
 
-        # Get backend database for user lookups (users are in Uri database, not Uri_Insight)
-        backend_db = db.client["Uri"]
-
         formatted_result = []
         for item in result:
             user_id = item["_id"]
-            # Fetch user from Uri database
-            user_doc = await backend_db[AdminLeadAnalyticsRepository.USERS_COLLECTION].find_one(
-                {"_id": user_id},
-                {"email": 1, "firstName": 1, "lastName": 1}
-            )
+            # Fetch user from uri-backend via API
+            user_data = await UriBackendService.get_user_details(user_id)
 
-            if user_doc:
-                user_name = f"{user_doc.get('firstName', '')} {user_doc.get('lastName', '')}".strip()
-                user_email = user_doc.get("email", "Unknown")
+            if user_data:
+                user_name = f"{user_data.get('firstName', '')} {user_data.get('lastName', '')}".strip()
+                user_email = user_data.get("email", "Unknown")
             else:
                 user_name = "Unknown"
                 user_email = "Unknown"
@@ -520,21 +515,15 @@ class AdminLeadAnalyticsRepository:
 
         result = await db[AdminLeadAnalyticsRepository.LEADS_COLLECTION].aggregate(pipeline).to_list(None)
 
-        # Get backend database for user lookups (users are in Uri database, not Uri_Insight)
-        backend_db = db.client["Uri"]
-
         formatted_result = []
         for item in result:
             user_id = item["_id"]
-            # Fetch user from Uri database
-            user_doc = await backend_db[AdminLeadAnalyticsRepository.USERS_COLLECTION].find_one(
-                {"_id": user_id},
-                {"email": 1, "firstName": 1, "lastName": 1}
-            )
+            # Fetch user from uri-backend via API
+            user_data = await UriBackendService.get_user_details(user_id)
 
-            if user_doc:
-                user_name = f"{user_doc.get('firstName', '')} {user_doc.get('lastName', '')}".strip()
-                user_email = user_doc.get("email", "Unknown")
+            if user_data:
+                user_name = f"{user_data.get('firstName', '')} {user_data.get('lastName', '')}".strip()
+                user_email = user_data.get("email", "Unknown")
             else:
                 user_name = "Unknown"
                 user_email = "Unknown"
