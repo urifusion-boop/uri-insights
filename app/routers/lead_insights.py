@@ -33,6 +33,7 @@ from app.domain.requests.lead_requests import (
 )
 from app.domain.enums.leadform_enum import LeadFormTypeEnum
 from app.repository.LeadFormRepository import LeadFormRepository
+from app.services.uri_microservices.UriBackendService import UriBackendService
 
 
 router = APIRouter()
@@ -444,23 +445,37 @@ async def generate_job_keywords(
         business_context = context
         source = "provided"
         
-        # If no context provided, fetch from user's onboarding data
+        # If no context provided, fetch from user's onboarding data (PRD Section 5)
         if not business_context or business_context.strip() == "":
             print(f"📥 No context provided, fetching onboarding data for user: {user_id}")
-            
-            # Fetch user's business info from LeadBusinessInfo
-            business_info_response = await LeadBusinessInfoRepository.get_lead_business_info_by_filters(
-                db, user_id=user_id, skip=0, limit=1
-            )
-            
-            business_info_list = business_info_response.get("responseData", [])
-            if business_info_list and len(business_info_list) > 0:
-                business_context = business_info_list[0].get("business_summary")
-                source = "onboarding_data"
-                print(f"✅ Found onboarding data: {business_context[:100]}...")
-            else:
+
+            # PRD: "Users have already defined what they sell" - fetch from user.businessDetails
+            user_details = await UriBackendService.get_user_details(user_id)
+
+            if user_details and user_details.get("businessDetails"):
+                what_you_sell = user_details["businessDetails"].get("whatYouSell")
+                if what_you_sell and what_you_sell.strip():
+                    business_context = what_you_sell
+                    source = "user_onboarding"
+                    print(f"✅ Found user onboarding data (whatYouSell): {business_context[:100]}...")
+
+            # Fallback to LeadBusinessInfo if user onboarding doesn't have it
+            if not business_context:
+                print(f"   Trying LeadBusinessInfo as fallback...")
+                business_info_response = await LeadBusinessInfoRepository.get_lead_business_info_by_filters(
+                    db, user_id=user_id, skip=0, limit=1
+                )
+
+                business_info_list = business_info_response.get("responseData", [])
+                if business_info_list and len(business_info_list) > 0:
+                    business_context = business_info_list[0].get("business_summary")
+                    source = "lead_business_info"
+                    print(f"✅ Found LeadBusinessInfo data: {business_context[:100]}...")
+
+            # If still no context found, return error
+            if not business_context:
                 return UriResponse.custom_response(
-                    "No business context provided and no onboarding data found. Please provide a business description.",
+                    "No business context provided and no onboarding data found. Please complete your business details in onboarding or provide a description.",
                     400,
                     False
                 )

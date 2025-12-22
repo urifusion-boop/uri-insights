@@ -649,6 +649,18 @@ class ConversationalLeadJobService:
                 if BrowsercloudPlatformEnum.JOB_BOARDS.value in enabled_platforms:
                     solution_context = lead_form.get("solution_context", "")
 
+                    # PRD: Fetch from user onboarding if solution_context not provided
+                    if not solution_context or solution_context.strip() == "":
+                        print(f"   📥 No solution_context, fetching from user onboarding...")
+                        from app.services.uri_microservices.UriBackendService import UriBackendService
+                        user_details = await UriBackendService.get_user_details(user_id)
+
+                        if user_details and user_details.get("businessDetails"):
+                            what_you_sell = user_details["businessDetails"].get("whatYouSell")
+                            if what_you_sell and what_you_sell.strip():
+                                solution_context = what_you_sell
+                                print(f"   ✅ Using user onboarding whatYouSell: {solution_context[:50]}...")
+
                     # Use job_keywords if available, otherwise fallback to current keyword
                     job_keyword_to_use = keyword  # Default fallback
                     if job_keywords and len(job_keywords) > 0:
@@ -661,7 +673,7 @@ class ConversationalLeadJobService:
                             job_keyword_to_use = job_keywords[0]
 
                     print(f"   💼 Job Boards: '{job_keyword_to_use}' (max: 20 jobs)")
-                    if solution_context:
+                    if solution_context and solution_context.strip():
                         fetch_tasks.append(
                             asyncio.wait_for(
                                 ConversationalLeadJobService._fetch_job_board_signals(
@@ -671,7 +683,7 @@ class ConversationalLeadJobService:
                             )
                         )
                     else:
-                        print(f"   ⚠️ Job Boards enabled but no solution_context provided - skipping")
+                        print(f"   ⚠️ Job Boards enabled but no solution_context available (not in form or user onboarding) - skipping")
 
                 # Execute all fetch tasks concurrently
                 keyword_leads = []
