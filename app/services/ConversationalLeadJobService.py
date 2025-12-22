@@ -491,6 +491,9 @@ class ConversationalLeadJobService:
             buying_signals = lead_form.get("buying_signals", [])
             prioritized_keywords = []
 
+            # PRD Section 5: Separate job keywords for Job Boards platform
+            job_keywords = lead_form.get("job_keywords", [])
+
             def select_keywords_by_word_count(keyword_list, target_count=4):
                 """
                 Select keywords with optimal word count distribution:
@@ -641,6 +644,34 @@ class ConversationalLeadJobService:
                                 timeout=platform_timeout
                             )
                         )
+
+                # PRD Section 5: Job Boards use job_keywords array (not regular keywords)
+                if BrowsercloudPlatformEnum.JOB_BOARDS.value in enabled_platforms:
+                    solution_context = lead_form.get("solution_context", "")
+
+                    # Use job_keywords if available, otherwise fallback to current keyword
+                    job_keyword_to_use = keyword  # Default fallback
+                    if job_keywords and len(job_keywords) > 0:
+                        # Use the corresponding job keyword if available (by index)
+                        keyword_index = keyword_idx - 1
+                        if keyword_index < len(job_keywords):
+                            job_keyword_to_use = job_keywords[keyword_index]
+                        else:
+                            # If we've exhausted job_keywords, use first one as fallback
+                            job_keyword_to_use = job_keywords[0]
+
+                    print(f"   💼 Job Boards: '{job_keyword_to_use}' (max: 20 jobs)")
+                    if solution_context:
+                        fetch_tasks.append(
+                            asyncio.wait_for(
+                                ConversationalLeadJobService._fetch_job_board_signals(
+                                    job_keyword_to_use, user_id, lead_form.get("lead_form_id"), solution_context, max_jobs=20
+                                ),
+                                timeout=90  # Longer timeout for job scraping + AI analysis
+                            )
+                        )
+                    else:
+                        print(f"   ⚠️ Job Boards enabled but no solution_context provided - skipping")
 
                 # Execute all fetch tasks concurrently
                 keyword_leads = []
@@ -1295,6 +1326,209 @@ class ConversationalLeadJobService:
                 print(f"💡 TIP: Your search keyword may be too generic or attracting wrong audience type")
 
         return qualified_leads
+
+    @staticmethod
+    async def _fetch_job_board_signals(
+        search_query: str,
+        user_id: str,
+        lead_form_id: Optional[str] = None,
+        solution_context: str = "",
+        max_jobs: int = 20
+    ) -> List[LeadCreate]:
+        """
+        Fetch and analyze job postings from LinkedIn Jobs and Jobberman
+        Pattern: Same as _fetch_twitter_leads() but for job boards
+
+        Args:
+            search_query: Search query for jobs (e.g., "DevOps Engineer")
+            user_id: User ID to assign leads to
+            lead_form_id: Lead form snapshot ID
+            solution_context: User's solution description (for AI analysis)
+            max_jobs: Maximum number of jobs to fetch
+
+        Returns:
+            List of LeadCreate objects from qualified job postings
+        """
+        try:
+            print(f"💼 Fetching job board signals with query: '{search_query}'")
+
+            # Import services
+            from app.services.ApifyLinkedInJobsService import ApifyLinkedInJobsService
+            from app.services.ApifyJobbermanService import ApifyJobbermanService
+            from app.services.JobSignalAnalysisService import JobSignalAnalysisService
+
+            # Initialize services
+            linkedin_service = ApifyLinkedInJobsService()
+            jobberman_service = ApifyJobbermanService()
+
+            # Fetch from LinkedIn Jobs and Jobberman concurrently
+            linkedin_result = await linkedin_service.fetch_job_postings(search_query, max_jobs=15)
+            jobberman_result = await jobberman_service.fetch_job_postings(search_query, max_jobs=5)
+
+            # Collect all jobs with source attribution
+            all_jobs = []
+            if linkedin_result.get("success"):
+                for job in linkedin_result.get("jobs", []):
+                    job["source"] = "LinkedIn Jobs"
+                    all_jobs.append(job)
+            if jobberman_result.get("success"):
+                for job in jobberman_result.get("jobs", []):
+                    job["source"] = "Jobberman"
+                    all_jobs.append(job)
+
+            print(f"   Found {len(all_jobs)} total job postings (LinkedIn: {len(linkedin_result.get('jobs', []))}, Jobberman: {len(jobberman_result.get('jobs', []))})")
+
+            if not all_jobs:
+                print(f"   ⚠️ No jobs found for query '{search_query}'")
+                return []
+
+            # Deduplicate jobs (same company + similar title)
+            deduplicated_jobs = ConversationalLeadJobService._deduplicate_jobs(all_jobs)
+            print(f"   After deduplication: {len(deduplicated_jobs)} unique jobs")
+
+            # Analyze each job posting with AI
+            qualified_signals = []
+            for job in deduplicated_jobs[:max_jobs]:  # Limit to max_jobs
+                try:
+                    # Run AI analysis
+                    analysis = await JobSignalAnalysisService.analyze_job_posting(
+                        job_description=job.get("description", ""),
+                        job_title=job.get("title", ""),
+                        company_name=job.get("company", ""),
+                        solution_context=solution_context
+                    )
+
+                    # Filter by problem-solution match threshold (PRD requirement: >= 0.3)
+                    if analysis.problem_solution_match >= 0.3:
+                        # Create lead object (same pattern as Twitter/Facebook leads)
+                        lead = LeadCreate(
+                            first_name=job.get("company", "Unknown Company"),
+                            last_name="",
+                            username="",
+                            mention=job.get("description", ""),
+                            lead_reason=analysis.reasoning,  # AI explanation of why this is a sales signal
+                            lead_status=LeadStatusEnum.NEW,
+                            opportunity_type=LeadOpportunityTypeEnum.OTHER,
+                            tags=[],
+                            lead_link=job.get("url", ""),
+                            website_url=job.get("url", ""),
+                            created_date=datetime.now(timezone.utc),
+                            last_updated=datetime.now(timezone.utc),
+                            lead_type=LeadFormTypeEnum.CONVERSATIONAL,
+                            lead_source=LeadSourceEnum.JOB_BOARDS,
+                            assigned_to=user_id,
+                            starred=False,
+                            lead_form_snapshot_id=lead_form_id,
+                            # Job-specific fields
+                            job_posting_url=job.get("url", ""),
+                            job_title_field=job.get("title", ""),
+                            hiring_company=job.get("company", ""),
+                            problem_solution_match=analysis.problem_solution_match,
+                            hiring_intent_score=analysis.hiring_intent_score,
+                            commercial_relevance=analysis.commercial_relevance,
+                            implied_problems=analysis.implied_problems,
+                            job_source=job.get("source", "Unknown"),
+                            company_confidence=analysis.company_confidence,  # PRD Sections 14-16
+                            # Intent analysis fields (for consistency with social media leads)
+                            final_score=analysis.commercial_relevance,
+                            intent_reasoning=analysis.reasoning,
+                        )
+                        qualified_signals.append(lead)
+                        print(f"   ✅ QUALIFIED: {job.get('company')} - {job.get('title')} | Match:{analysis.problem_solution_match:.2f} Relevance:{analysis.commercial_relevance:.2f}")
+                    else:
+                        print(f"   ❌ FILTERED: {job.get('company')} - {job.get('title')} | Match:{analysis.problem_solution_match:.2f} (below 0.3 threshold)")
+
+                except Exception as analysis_error:
+                    print(f"   ⚠️ Error analyzing job {job.get('title')}: {str(analysis_error)}")
+                    continue
+
+            print(f"   ✅ {len(qualified_signals)} qualified job signals (from {len(deduplicated_jobs)} analyzed)")
+            return qualified_signals
+
+        except Exception as e:
+            print(f"❌ Error fetching job board signals: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return []
+
+    @staticmethod
+    def _deduplicate_jobs(jobs: List[Dict]) -> List[Dict]:
+        """
+        Remove duplicate job postings across job boards
+        PRD Section 13.1: De-duplication with semantic similarity
+
+        Jobs are considered duplicates if ALL of the following match:
+        - Company name (normalized)
+        - Job title (semantic similarity ≥ 0.7)
+        - Job description similarity (≥ 0.8 threshold)
+
+        Source priority order (for display metadata):
+        1. LinkedIn Jobs
+        2. Jobberman
+
+        Args:
+            jobs: List of job dictionaries
+
+        Returns:
+            List of unique job dictionaries (retains highest priority source)
+        """
+        from difflib import SequenceMatcher
+
+        # Source priority (LinkedIn Jobs > Jobberman)
+        source_priority = {"LinkedIn Jobs": 1, "Jobberman": 2, "linkedin jobs": 1, "jobberman": 2}
+
+        unique_jobs = []
+
+        for job in jobs:
+            is_duplicate = False
+            company = job.get("company", "").lower().strip()
+            title = job.get("title", "").lower().strip()
+            description = job.get("description", "")[:500].lower().strip()  # First 500 chars
+
+            # Check against existing unique jobs
+            for i, existing in enumerate(unique_jobs):
+                existing_company = existing.get("company", "").lower().strip()
+                existing_title = existing.get("title", "").lower().strip()
+                existing_description = existing.get("description", "")[:500].lower().strip()
+
+                # 1. Company name match (normalized)
+                if company != existing_company:
+                    continue
+
+                # 2. Job title similarity (semantic, not exact)
+                title_similarity = SequenceMatcher(None, title, existing_title).ratio()
+                if title_similarity < 0.7:  # 70% similarity threshold
+                    continue
+
+                # 3. Job description similarity
+                if description and existing_description:
+                    desc_similarity = SequenceMatcher(None, description, existing_description).ratio()
+                    if desc_similarity < 0.8:  # 80% similarity threshold (PRD requirement)
+                        continue
+
+                # All conditions met - this is a duplicate
+                is_duplicate = True
+
+                # Apply source priority - keep higher priority source
+                job_source = job.get("source", "")
+                existing_source = existing.get("source", "")
+
+                job_priority = source_priority.get(job_source, 999)
+                existing_priority = source_priority.get(existing_source, 999)
+
+                if job_priority < existing_priority:
+                    # Replace with higher priority source
+                    unique_jobs[i] = job
+                    print(f"   🔁 Duplicate found, keeping higher priority: {company} - {title} (from {job_source})")
+                else:
+                    print(f"   🔁 Duplicate removed: {company} - {title} (lower priority: {job_source})")
+
+                break
+
+            if not is_duplicate:
+                unique_jobs.append(job)
+
+        return unique_jobs
 
     @staticmethod
     def _convert_twitter_date(twitter_date: str) -> datetime:

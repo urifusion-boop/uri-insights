@@ -414,3 +414,180 @@ async def trigger_conversational_leads_gen(
     )
 
     return UriResponse.custom_response("Leads gen triggered successfully.", 202, True)
+
+
+# Generate job keywords from business context (PRD Section 5)
+@router.post("/generate-job-keywords")
+async def generate_job_keywords(
+    user_id: str,
+    context: Optional[str] = None,
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency)
+):
+    """
+    Generate job role keywords for job board searching
+    PRD: "The AI uses the prompt and user's onboarding information to pre-fill keyword logic"
+    
+    Args:
+        user_id: User ID to fetch onboarding data if context not provided
+        context: Optional business description (if not provided, fetches from LeadBusinessInfo)
+        
+    Returns:
+        {
+            "job_keywords": ["DevOps Engineer", "Cloud Engineer", ...],
+            "solution_context": "business description used",
+            "source": "provided" | "onboarding_data"
+        }
+    """
+    from app.services.JobKeywordGenerationService import JobKeywordGenerationService
+    
+    try:
+        business_context = context
+        source = "provided"
+        
+        # If no context provided, fetch from user's onboarding data
+        if not business_context or business_context.strip() == "":
+            print(f"📥 No context provided, fetching onboarding data for user: {user_id}")
+            
+            # Fetch user's business info from LeadBusinessInfo
+            business_info_response = await LeadBusinessInfoRepository.get_lead_business_info_by_filters(
+                db, user_id=user_id, skip=0, limit=1
+            )
+            
+            business_info_list = business_info_response.get("responseData", [])
+            if business_info_list and len(business_info_list) > 0:
+                business_context = business_info_list[0].get("business_summary")
+                source = "onboarding_data"
+                print(f"✅ Found onboarding data: {business_context[:100]}...")
+            else:
+                return UriResponse.custom_response(
+                    "No business context provided and no onboarding data found. Please provide a business description.",
+                    400,
+                    False
+                )
+        
+        print(f"🤖 Generating job keywords from context (source: {source})")
+        
+        # Generate job keywords using AI
+        result = await JobKeywordGenerationService.generate_job_keywords(business_context)
+        
+        # Validate and clean keywords
+        valid_keywords = JobKeywordGenerationService.validate_job_keywords(result.job_keywords)
+        
+        response_data = {
+            "job_keywords": valid_keywords,
+            "solution_context": business_context,
+            "source": source,
+            "reasoning": result.reasoning
+        }
+        
+        print(f"✅ Generated {len(valid_keywords)} job keywords: {', '.join(valid_keywords)}")
+        
+        return UriResponse.custom_response(
+            "Job keywords generated successfully",
+            200,
+            True,
+            response_data
+        )
+        
+    except Exception as e:
+        print(f"❌ Error generating job keywords: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        
+        return UriResponse.custom_response(
+            f"Error generating job keywords: {str(e)}",
+            500,
+            False
+        )
+
+
+
+@router.post("/find-decision-makers")
+async def find_decision_makers(
+    lead_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency)
+):
+    """
+    Find decision-makers for a job board signal
+    PRD Section 8: Decision-Maker Connection Feature
+    """
+    from app.repository.LeadRepository import LeadRepository
+    from app.services.DecisionMakerMappingService import DecisionMakerMappingService
+    from app.core.helpers.apollo_helper import ApolloHelper
+    from app.services.uri_microservices.UriBackendService import UriBackendService
+    
+    lead_response = await LeadRepository.get_lead_by_id(db, lead_id)
+    
+    if lead_response["responseCode"] != 200:
+        return UriResponse.custom_response("Lead not found", 404, False)
+    
+    lead = lead_response["responseData"]
+    
+    # PRD Section 16: Eligibility checks
+    hiring_company = lead.get("hiring_company")
+    company_confidence = lead.get("company_confidence", 0.0)
+    problem_solution_match = lead.get("problem_solution_match", 0.0)
+    job_title = lead.get("job_title_field")
+    
+    if not hiring_company:
+        return UriResponse.custom_response(
+            "Company name is missing",
+            400,
+            False,
+            {"reason": "missing_company_name"}
+        )
+    
+    if company_confidence < 0.5:
+        return UriResponse.custom_response(
+            "Company identity could not be verified",
+            400,
+            False,
+            {"reason": "low_company_confidence"}
+        )
+    
+    if problem_solution_match < 0.3:
+        return UriResponse.custom_response(
+            "Problem-solution match too low",
+            400,
+            False
+        )
+    
+    # Map job title to decision-maker titles
+    decision_maker_titles = await DecisionMakerMappingService.map_job_to_decision_makers(job_title)
+    
+    if not decision_maker_titles:
+        return UriResponse.custom_response("No decision-makers found", 404, False)
+    
+    # Search Apollo for decision-makers at this company
+    apollo_params = {
+        "person_titles": decision_maker_titles,
+        "q_organization_name": hiring_company,
+        "page": 1,
+        "per_page": 3
+    }
+    
+    try:
+        apollo_results = await UriBackendService.search_apollo_persons(apollo_params)
+        
+        if not apollo_results or apollo_results.get("responseCode") != 200:
+            return UriResponse.custom_response("No contacts found", 404, False)
+        
+        contacts = apollo_results.get("responseData", {}).get("people", [])
+        
+        # Filter out recruiters/HR
+        excluded = ["recruiter", "recruiting", "talent acquisition", "hr ", "human resources"]
+        filtered = [c for c in contacts if not any(k in c.get("title", "").lower() for k in excluded)]
+        
+        return UriResponse.custom_response(
+            "Decision-makers found",
+            200,
+            True,
+            {
+                "decision_makers": filtered[:3],
+                "searched_titles": decision_maker_titles,
+                "company": hiring_company
+            }
+        )
+    except Exception as e:
+        return UriResponse.custom_response(f"Error: {str(e)}", 500, False)
+
