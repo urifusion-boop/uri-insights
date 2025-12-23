@@ -25,6 +25,17 @@ class AzureServiceBusConsumer:
             self._consume_loop()
         )
 
+        # Add exception handler to catch task failures
+        def task_exception_handler(task):
+            try:
+                task.result()
+            except Exception as e:
+                print(f"❌ FATAL: Consumer task crashed with exception: {e}")
+                import traceback
+                traceback.print_exc()
+
+        AzureServiceBusConsumer.consumer_task.add_done_callback(task_exception_handler)
+
     async def setup(self):
         self.service_bus_client = ServiceBusClient.from_connection_string(
             settings.AZURE_SERVICE_BUS_CONNECTION_STRING
