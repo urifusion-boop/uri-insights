@@ -77,7 +77,7 @@ class AzureServiceBusConsumer:
                     async with self.service_bus_client:
                         async with self.service_bus_client.get_queue_receiver(
                             self.queue_name,
-                            prefetch_count=0  # Process one message at a time (prevents duplicates across workers)
+                            prefetch_count=1  # Fetch only 1 message at a time (prevents duplicates across workers)
                         ) as receiver:
                             print(f"👂 Listening for messages on {self.queue_name}...")
                             async for msg in receiver:
