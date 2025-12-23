@@ -45,21 +45,9 @@ class DataSenderService:
         data: Union[str, dict],
         message_type: Enum,
     ):
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(
-                send_message(
-                    queue_name,
-                    data,  # Convert dict to JSON string
-                    message_type.value,
-                )
-            )
-        except RuntimeError:
-            # If no running event loop, create a new one (for scripts)
-            asyncio.run(
-                send_message(
-                    queue_name,
-                    data,  # Convert dict to JSON string
-                    message_type.value,
-                )
-            )
+        # Await the send_message to ensure it completes and catch any errors
+        await send_message(
+            queue_name,
+            data,
+            message_type.value,
+        )
