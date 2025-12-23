@@ -69,14 +69,17 @@ class AzureServiceBusConsumer:
             print(f"Error creating queue: {e}")
 
     async def _consume_loop(self):
+        print(f"🔄 Starting consume loop for {self.queue_name}...")
         try:
             while True:
                 try:
+                    print(f"📡 Connecting to Service Bus for {self.queue_name}...")
                     async with self.service_bus_client:
                         async with self.service_bus_client.get_queue_receiver(
                             self.queue_name,
                             prefetch_count=0  # Process one message at a time (prevents duplicates across workers)
                         ) as receiver:
+                            print(f"👂 Listening for messages on {self.queue_name}...")
                             async for msg in receiver:
                                 message_type = msg.application_properties.get(
                                     b"messageType"
