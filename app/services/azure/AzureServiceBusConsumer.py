@@ -59,41 +59,18 @@ class AzureServiceBusConsumer:
 
     async def _consume_loop(self):
         try:
-            print(f"🔄 Starting consume loop for {self.queue_name}...")
-            async with self.service_bus_client:
-                print(f"✅ Service Bus client connected for {self.queue_name}")
-
-                # Keep worker alive and continuously reconnect to listen for messages
-                while True:
-                    try:
-                        # Create receiver with proper settings to prevent duplicate processing
+            while True:
+                try:
+                    async with self.service_bus_client:
                         async with self.service_bus_client.get_queue_receiver(
-                            queue_name=self.queue_name,
-                            max_wait_time=60,  # Wait up to 60 seconds for messages
-                            prefetch_count=0   # Process one message at a time (prevents duplicates across workers)
+                            self.queue_name,
+                            prefetch_count=0  # Process one message at a time (prevents duplicates across workers)
                         ) as receiver:
-                            print(f"📡 Receiver ready for {self.queue_name}, listening...")
-                            print(f"   Settings: max_wait_time=60s, prefetch_count=0 (ensures each worker gets unique messages)")
-
-                            # Try to peek at queue first to see if messages exist
-                            try:
-                                peeked = await receiver.peek_messages(max_message_count=1)
-                                if peeked:
-                                    print(f"   🔍 Peeked message in queue: {len(peeked)} message(s) available")
-                                else:
-                                    print(f"   🔍 No messages found when peeking")
-                            except Exception as peek_error:
-                                print(f"   ⚠️ Peek failed: {peek_error}")
-
-                            # Continuously listen for messages
-                            print(f"   👂 Starting to listen for messages...")
-                            message_count = 0
                             async for msg in receiver:
-                                message_count += 1
-                                print(f"   ✅ Message #{message_count} received!")
-                                message_type = msg.application_properties.get(b"messageType")
-                                print(f"\n📩 Received message from queue: {self.queue_name}")
-                                print(f"   Message Type: {message_type.decode('utf-8') if message_type else 'None'}")
+                                message_type = msg.application_properties.get(
+                                    b"messageType"
+                                )
+                                print(f"\n\nReceived from queue: {self.queue_name}")
 
                                 # Start lock renewal task for long-running jobs
                                 lock_renewal_task = None
@@ -114,13 +91,10 @@ class AzureServiceBusConsumer:
                                     await self.handle_message(
                                         msg, message_type.decode("utf-8")
                                     )
-
-                                    print(f"✅ Successfully processed message from {self.queue_name}")
-
                                 except Exception as e:
-                                    print(f"❌ Error handling message from {self.queue_name}: {e}")
-                                    import traceback
-                                    traceback.print_exc()
+                                    print(
+                                        f"Error handling message from {self.queue_name}: {e}"
+                                    )
                                 finally:
                                     # Cancel lock renewal
                                     if lock_renewal_task:
@@ -133,20 +107,13 @@ class AzureServiceBusConsumer:
                                     # Complete message to remove from queue
                                     try:
                                         await receiver.complete_message(msg)
-                                        print(f"✅ Message completed and removed from queue: {self.queue_name}")
                                     except Exception as complete_error:
                                         # If lock expired, message auto-returns to queue or completes
                                         # Don't crash the consumer
                                         print(f"⚠️ Could not complete message (likely lock expired): {complete_error}")
-
-                            # When async for exits (no more messages), log and reconnect
-                            print(f"⏸️ No messages available, reconnecting receiver in 5 seconds...")
-                            await asyncio.sleep(5)
-
-                    except Exception as receiver_error:
-                        print(f"❌ Receiver error for {self.queue_name}: {receiver_error}")
-                        await asyncio.sleep(5)  # Backoff before reconnecting
-
+                except Exception as e:
+                    print(f"Error in consuming from {self.queue_name}: {e}")
+                    await asyncio.sleep(5)  # backoff before retry
         except asyncio.CancelledError:
             print(f"Consumer loop for {self.queue_name} cancelled.")
             raise
