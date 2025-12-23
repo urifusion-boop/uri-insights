@@ -5,7 +5,7 @@ from app.core.cache.manager.redis_manager import redis_manager
 from app.domain.enums.datasenderservices_enum import DataSenderServicesEnum
 from app.domain.enums.queue_enum import QueueEnum
 from enum import Enum
-from app.services.azure.AzureServiceBusProducer import send_message
+from app.services.azure.AzureServiceBusProducer import producer
 
 
 class DataSenderService:
@@ -45,8 +45,8 @@ class DataSenderService:
         data: Union[str, dict],
         message_type: Enum,
     ):
-        # Await the send_message to ensure it completes and catch any errors
-        await send_message(
+        # Await the producer.send_message to ensure it completes and catch any errors
+        await producer.send_message(
             queue_name,
             data,
             message_type.value,

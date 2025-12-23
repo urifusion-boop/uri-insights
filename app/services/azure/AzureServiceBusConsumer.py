@@ -75,8 +75,22 @@ class AzureServiceBusConsumer:
                             print(f"📡 Receiver ready for {self.queue_name}, listening...")
                             print(f"   Settings: max_wait_time=60s, prefetch_count=0 (ensures each worker gets unique messages)")
 
+                            # Try to peek at queue first to see if messages exist
+                            try:
+                                peeked = await receiver.peek_messages(max_message_count=1)
+                                if peeked:
+                                    print(f"   🔍 Peeked message in queue: {len(peeked)} message(s) available")
+                                else:
+                                    print(f"   🔍 No messages found when peeking")
+                            except Exception as peek_error:
+                                print(f"   ⚠️ Peek failed: {peek_error}")
+
                             # Continuously listen for messages
+                            print(f"   👂 Starting to listen for messages...")
+                            message_count = 0
                             async for msg in receiver:
+                                message_count += 1
+                                print(f"   ✅ Message #{message_count} received!")
                                 message_type = msg.application_properties.get(b"messageType")
                                 print(f"\n📩 Received message from queue: {self.queue_name}")
                                 print(f"   Message Type: {message_type.decode('utf-8') if message_type else 'None'}")
