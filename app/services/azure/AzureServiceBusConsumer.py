@@ -62,61 +62,65 @@ class AzureServiceBusConsumer:
             print(f"🔄 Starting consume loop for {self.queue_name}...")
             async with self.service_bus_client:
                 print(f"✅ Service Bus client connected for {self.queue_name}")
-                while True:
-                    try:
-                        print(f"🔍 Waiting for messages from {self.queue_name}...")
-                        async with self.service_bus_client.get_queue_receiver(
-                            self.queue_name
-                        ) as receiver:
-                            print(f"📡 Receiver ready for {self.queue_name}, listening...")
-                            async for msg in receiver:
-                                message_type = msg.application_properties.get(
-                                    b"messageType"
-                                )
-                                print(f"\n\nReceived from queue: {self.queue_name}")
+                # Create receiver ONCE with proper settings to prevent duplicate processing
+                async with self.service_bus_client.get_queue_receiver(
+                    queue_name=self.queue_name,
+                    max_wait_time=60,  # Wait up to 60 seconds for messages
+                    prefetch_count=0   # Process one message at a time (prevents duplicates across workers)
+                ) as receiver:
+                    print(f"📡 Receiver ready for {self.queue_name}, listening...")
+                    print(f"   Settings: prefetch_count=0 (ensures each worker gets unique messages)")
 
-                                # Start lock renewal task for long-running jobs
-                                lock_renewal_task = None
-                                try:
-                                    # Renew lock every 30 seconds to prevent expiration during long jobs
-                                    async def renew_lock():
-                                        while True:
-                                            await asyncio.sleep(30)
-                                            try:
-                                                await receiver.renew_message_lock(msg)
-                                                print(f"🔄 Renewed message lock for {self.queue_name}")
-                                            except Exception as e:
-                                                print(f"⚠️ Failed to renew lock: {e}")
-                                                break
+                    # Continuously listen for messages
+                    async for msg in receiver:
+                        message_type = msg.application_properties.get(b"messageType")
+                        print(f"\n📩 Received message from queue: {self.queue_name}")
+                        print(f"   Message Type: {message_type.decode('utf-8') if message_type else 'None'}")
 
-                                    lock_renewal_task = asyncio.create_task(renew_lock())
-
-                                    await self.handle_message(
-                                        msg, message_type.decode("utf-8")
-                                    )
-                                except Exception as e:
-                                    print(
-                                        f"Error handling message from {self.queue_name}: {e}"
-                                    )
-                                finally:
-                                    # Cancel lock renewal
-                                    if lock_renewal_task:
-                                        lock_renewal_task.cancel()
-                                        try:
-                                            await lock_renewal_task
-                                        except asyncio.CancelledError:
-                                            pass
-
-                                    # Complete message to remove from queue
+                        # Start lock renewal task for long-running jobs
+                        lock_renewal_task = None
+                        try:
+                            # Renew lock every 30 seconds to prevent expiration during long jobs
+                            async def renew_lock():
+                                while True:
+                                    await asyncio.sleep(30)
                                     try:
-                                        await receiver.complete_message(msg)
-                                    except Exception as complete_error:
-                                        # If lock expired, message auto-returns to queue or completes
-                                        # Don't crash the consumer
-                                        print(f"⚠️ Could not complete message (likely lock expired): {complete_error}")
-                    except Exception as e:
-                        print(f"Error in consuming from {self.queue_name}: {e}")
-                        await asyncio.sleep(5)  # backoff before retry
+                                        await receiver.renew_message_lock(msg)
+                                        print(f"🔄 Renewed message lock for {self.queue_name}")
+                                    except Exception as e:
+                                        print(f"⚠️ Failed to renew lock: {e}")
+                                        break
+
+                            lock_renewal_task = asyncio.create_task(renew_lock())
+
+                            await self.handle_message(
+                                msg, message_type.decode("utf-8")
+                            )
+
+                            print(f"✅ Successfully processed message from {self.queue_name}")
+
+                        except Exception as e:
+                            print(f"❌ Error handling message from {self.queue_name}: {e}")
+                            import traceback
+                            traceback.print_exc()
+                        finally:
+                            # Cancel lock renewal
+                            if lock_renewal_task:
+                                lock_renewal_task.cancel()
+                                try:
+                                    await lock_renewal_task
+                                except asyncio.CancelledError:
+                                    pass
+
+                            # Complete message to remove from queue
+                            try:
+                                await receiver.complete_message(msg)
+                                print(f"✅ Message completed and removed from queue: {self.queue_name}")
+                            except Exception as complete_error:
+                                # If lock expired, message auto-returns to queue or completes
+                                # Don't crash the consumer
+                                print(f"⚠️ Could not complete message (likely lock expired): {complete_error}")
+
         except asyncio.CancelledError:
             print(f"Consumer loop for {self.queue_name} cancelled.")
             raise
