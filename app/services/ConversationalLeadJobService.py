@@ -37,7 +37,7 @@ class PlatformDistributionManager:
 
     def __init__(self, max_total_posts: int = 150):
         """
-        Initialize the distribution manager with fixed per-keyword limits.
+        Initialize the distribution manager with dynamic smart limits.
 
         Args:
             max_total_posts: Maximum total posts to fetch (default: 150)
@@ -47,12 +47,6 @@ class PlatformDistributionManager:
         self.facebook_target = int(max_total_posts * 0.20)  # 30 posts
         self.tiktok_target = int(max_total_posts * 0.10)   # 15 posts
 
-        # Fixed limits per keyword (8 keywords total: 4 direct + 4 implied)
-        self.total_keywords = 8
-        self.twitter_per_keyword = 13   # 13 × 8 = 104 ≈ 105
-        self.facebook_per_keyword = 4   # 4 × 8 = 32 ≈ 30
-        self.tiktok_per_keyword = 2     # 2 × 8 = 16 ≈ 15
-
         # Running counters
         self.twitter_collected = 0
         self.facebook_collected = 0
@@ -61,30 +55,63 @@ class PlatformDistributionManager:
 
         print(f"🎯 Platform Distribution Manager Initialized:")
         print(f"   Target: {self.max_total_posts} total posts")
-        print(f"   Twitter: {self.twitter_target} (70%) - {self.twitter_per_keyword} per keyword")
-        print(f"   Facebook: {self.facebook_target} (20%) - {self.facebook_per_keyword} per keyword")
-        print(f"   TikTok: {self.tiktok_target} (10%) - {self.tiktok_per_keyword} per keyword")
+        print(f"   Twitter: {self.twitter_target} (70%)")
+        print(f"   Facebook: {self.facebook_target} (20%)")
+        print(f"   TikTok: {self.tiktok_target} (10%)")
 
-    def get_keyword_limits(self, keyword_index: int, enabled_platforms: Dict) -> Dict[str, int]:
+    def get_keyword_limits(self, keyword_index: int, total_keywords: int, enabled_platforms: Dict) -> Dict[str, int]:
         """
-        Get fixed per-platform limits for this keyword.
-        Simple implementation: 13 Twitter, 4 Facebook, 2 TikTok per keyword.
+        Smart dynamic limits that:
+        1. Skip platforms that have reached their target
+        2. Calculate remaining budget for each platform
+        3. Distribute smartly across remaining keywords
+        4. Never exceed platform targets
 
         Args:
             keyword_index: Current keyword index (1-based)
+            total_keywords: Total number of keywords available
             enabled_platforms: Dict of enabled platforms
 
         Returns:
-            Dict with max_posts per platform: {twitter: 13, facebook: 4, tiktok: 2}
+            Dict with max_posts per platform, skipping platforms at target
         """
-        # Only include limits for enabled platforms
+        # Calculate remaining budget for each platform
+        twitter_remaining = max(0, self.twitter_target - self.twitter_collected)
+        facebook_remaining = max(0, self.facebook_target - self.facebook_collected)
+        tiktok_remaining = max(0, self.tiktok_target - self.tiktok_collected)
+
+        # Calculate remaining keywords (including current)
+        remaining_keywords = total_keywords - keyword_index + 1
+
+        # Smart distribution: divide remaining budget across remaining keywords
+        # Use ceiling to ensure we fetch enough, but cap at remaining budget
         limits = {}
+
+        # Twitter
         if BrowsercloudPlatformEnum.TWITTER.value in enabled_platforms:
-            limits["twitter"] = self.twitter_per_keyword
+            if twitter_remaining > 0:
+                # Distribute remaining evenly, minimum 1 if any budget left
+                twitter_limit = max(1, min(twitter_remaining, (twitter_remaining + remaining_keywords - 1) // remaining_keywords))
+                limits["twitter"] = twitter_limit
+            # else: skip Twitter (reached target)
+
+        # Facebook
         if BrowsercloudPlatformEnum.FACEBOOK.value in enabled_platforms:
-            limits["facebook"] = self.facebook_per_keyword
+            if facebook_remaining > 0:
+                facebook_limit = max(1, min(facebook_remaining, (facebook_remaining + remaining_keywords - 1) // remaining_keywords))
+                limits["facebook"] = facebook_limit
+            # else: skip Facebook (reached target)
+
+        # TikTok
         if BrowsercloudPlatformEnum.TIKTOK.value in enabled_platforms:
-            limits["tiktok"] = self.tiktok_per_keyword
+            if tiktok_remaining > 0:
+                tiktok_limit = max(1, min(tiktok_remaining, (tiktok_remaining + remaining_keywords - 1) // remaining_keywords))
+                limits["tiktok"] = tiktok_limit
+            # else: skip TikTok (reached target)
+
+        print(f"   💡 Smart limits for keyword {keyword_index}/{total_keywords}:")
+        print(f"      Remaining budget - Twitter: {twitter_remaining}, Facebook: {facebook_remaining}, TikTok: {tiktok_remaining}")
+        print(f"      This keyword limits: {limits}")
 
         return limits
 
@@ -523,22 +550,35 @@ class ConversationalLeadJobService:
 
                 return selected[:target_count]  # Ensure we don't exceed target
 
-            # Build prioritized keyword list (8 KEYWORDS: 4 direct + 4 implied)
-            # 1. Add 4 direct keywords (2 with 3+ words, 2 with 2 words)
+            # Build prioritized keyword list (ALL AVAILABLE KEYWORDS)
+            # Strategy: Start with best keywords, continue until 150 posts reached
+            # 1. Add first 4 direct keywords (2 with 3+ words, 2 with 2 words)
             if keywords and len(keywords) > 0:
                 direct_selected = select_keywords_by_word_count(keywords, target_count=4)
                 prioritized_keywords.extend(direct_selected)
-                print(f"   📝 Direct keywords selected: {direct_selected}")
+                print(f"   📝 Direct keywords selected (first 4): {direct_selected}")
 
-            # 2. Add 4 implied keywords (2 with 3+ words, 2 with 2 words)
+            # 2. Add first 4 implied keywords (2 with 3+ words, 2 with 2 words)
             if implied_keywords and len(implied_keywords) > 0:
                 implied_selected = select_keywords_by_word_count(implied_keywords, target_count=4)
                 prioritized_keywords.extend(implied_selected)
-                print(f"   📝 Implied keywords selected: {implied_selected}")
+                print(f"   📝 Implied keywords selected (first 4): {implied_selected}")
 
-            # 3. Fallback: If we still don't have 8 keywords, use buying signals
+            # 3. Add remaining direct keywords (5th, 6th, 7th... if available)
+            if keywords and len(keywords) > 4:
+                remaining_direct = select_keywords_by_word_count(keywords[4:], target_count=len(keywords) - 4)
+                prioritized_keywords.extend(remaining_direct)
+                print(f"   📝 Additional direct keywords: {remaining_direct}")
+
+            # 4. Add remaining implied keywords (5th, 6th, 7th... if available)
+            if implied_keywords and len(implied_keywords) > 4:
+                remaining_implied = select_keywords_by_word_count(implied_keywords[4:], target_count=len(implied_keywords) - 4)
+                prioritized_keywords.extend(remaining_implied)
+                print(f"   📝 Additional implied keywords: {remaining_implied}")
+
+            # 5. Fallback: If still low on keywords, use buying signals
             if len(prioritized_keywords) < 8 and buying_signals and len(buying_signals) > 0:
-                remaining_slots = 8 - len(prioritized_keywords)
+                remaining_slots = max(4, 12 - len(prioritized_keywords))  # Get at least 4 buying signals
                 signal_selected = select_keywords_by_word_count(buying_signals, target_count=remaining_slots)
                 prioritized_keywords.extend(signal_selected)
                 print(f"   📝 Buying signal keywords selected: {signal_selected}")
@@ -547,7 +587,7 @@ class ConversationalLeadJobService:
                 print(f"⚠️ No keywords available for search")
                 return stats
 
-            print(f"🎯 Prioritized keywords (8 total: 4 direct + 4 implied): {prioritized_keywords}")
+            print(f"🎯 Prioritized keywords ({len(prioritized_keywords)} total): {prioritized_keywords}")
 
             # Build category configuration once (used for intent analysis)
             category_config = ConversationalLeadJobService._build_category_config(lead_form)
@@ -577,17 +617,17 @@ class ConversationalLeadJobService:
                 progress_percent = 10 + (keyword_idx * 20)  # 10, 30, 50
                 await update_progress(progress_percent, f"Fetching from platforms with keyword '{keyword}'...")
 
-                # Get dynamic limits for this keyword based on remaining budget
-                keyword_limits = distribution_manager.get_keyword_limits(keyword_idx, enabled_platforms)
-                print(f"   📊 Per-platform limits for this keyword: {keyword_limits}")
+                # Get smart dynamic limits for this keyword based on remaining budget and remaining keywords
+                keyword_limits = distribution_manager.get_keyword_limits(keyword_idx, len(prioritized_keywords), enabled_platforms)
 
                 # CONCURRENT FETCHING: Optimize keywords per platform and fetch in parallel
                 fetch_tasks = []
                 platform_timeout = 45  # 45 seconds per platform
 
-                if BrowsercloudPlatformEnum.TWITTER.value in enabled_platforms:
+                # Twitter - only fetch if limit exists (not at target)
+                if BrowsercloudPlatformEnum.TWITTER.value in enabled_platforms and "twitter" in keyword_limits:
                     twitter_keyword = PlatformKeywordOptimizer.optimize_for_twitter(keyword)
-                    twitter_limit = keyword_limits.get("twitter", 13)  # Default to 13 if not specified
+                    twitter_limit = keyword_limits["twitter"]
                     print(f"   🐦 Twitter: '{twitter_keyword}' (max: {twitter_limit} posts)")
                     fetch_tasks.append(
                         asyncio.wait_for(
@@ -597,10 +637,13 @@ class ConversationalLeadJobService:
                             timeout=platform_timeout
                         )
                     )
+                elif BrowsercloudPlatformEnum.TWITTER.value in enabled_platforms:
+                    print(f"   🐦 Twitter: SKIPPED (target reached)")
 
-                if BrowsercloudPlatformEnum.FACEBOOK.value in enabled_platforms:
+                # Facebook - only fetch if limit exists (not at target)
+                if BrowsercloudPlatformEnum.FACEBOOK.value in enabled_platforms and "facebook" in keyword_limits:
                     facebook_keyword = PlatformKeywordOptimizer.optimize_for_facebook(keyword)
-                    facebook_limit = keyword_limits.get("facebook", 4)  # Default to 4 if not specified
+                    facebook_limit = keyword_limits["facebook"]
                     print(f"   📘 Facebook: '{facebook_keyword}' (max: {facebook_limit} posts)")
                     fetch_tasks.append(
                         asyncio.wait_for(
@@ -610,10 +653,13 @@ class ConversationalLeadJobService:
                             timeout=platform_timeout
                         )
                     )
+                elif BrowsercloudPlatformEnum.FACEBOOK.value in enabled_platforms:
+                    print(f"   📘 Facebook: SKIPPED (target reached)")
 
-                if BrowsercloudPlatformEnum.TIKTOK.value in enabled_platforms:
+                # TikTok - only fetch if limit exists (not at target)
+                if BrowsercloudPlatformEnum.TIKTOK.value in enabled_platforms and "tiktok" in keyword_limits:
                     tiktok_keyword = PlatformKeywordOptimizer.optimize_for_tiktok(keyword)
-                    tiktok_limit = keyword_limits.get("tiktok", 2)  # Default to 2 if not specified
+                    tiktok_limit = keyword_limits["tiktok"]
                     print(f"   🎵 TikTok: '{tiktok_keyword}' (max: {tiktok_limit} posts)")
                     fetch_tasks.append(
                         asyncio.wait_for(
@@ -623,6 +669,8 @@ class ConversationalLeadJobService:
                             timeout=platform_timeout
                         )
                     )
+                elif BrowsercloudPlatformEnum.TIKTOK.value in enabled_platforms:
+                    print(f"   🎵 TikTok: SKIPPED (target reached)")
 
                 # Execute all fetch tasks concurrently
                 keyword_leads = []
