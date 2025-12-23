@@ -37,7 +37,7 @@ class PlatformDistributionManager:
 
     def __init__(self, max_total_posts: int = 150):
         """
-        Initialize the distribution manager.
+        Initialize the distribution manager with fixed per-keyword limits.
 
         Args:
             max_total_posts: Maximum total posts to fetch (default: 150)
@@ -47,25 +47,28 @@ class PlatformDistributionManager:
         self.facebook_target = int(max_total_posts * 0.20)  # 30 posts
         self.tiktok_target = int(max_total_posts * 0.10)   # 15 posts
 
+        # Fixed limits per keyword (8 keywords total: 4 direct + 4 implied)
+        self.total_keywords = 8
+        self.twitter_per_keyword = 13   # 13 × 8 = 104 ≈ 105
+        self.facebook_per_keyword = 4   # 4 × 8 = 32 ≈ 30
+        self.tiktok_per_keyword = 2     # 2 × 8 = 16 ≈ 15
+
         # Running counters
         self.twitter_collected = 0
         self.facebook_collected = 0
         self.tiktok_collected = 0
         self.total_collected = 0
 
-        # Keywords expected (for dynamic budgeting)
-        self.total_keywords = 8
-
         print(f"🎯 Platform Distribution Manager Initialized:")
         print(f"   Target: {self.max_total_posts} total posts")
-        print(f"   Twitter: {self.twitter_target} (70%)")
-        print(f"   Facebook: {self.facebook_target} (20%)")
-        print(f"   TikTok: {self.tiktok_target} (10%)")
+        print(f"   Twitter: {self.twitter_target} (70%) - {self.twitter_per_keyword} per keyword")
+        print(f"   Facebook: {self.facebook_target} (20%) - {self.facebook_per_keyword} per keyword")
+        print(f"   TikTok: {self.tiktok_target} (10%) - {self.tiktok_per_keyword} per keyword")
 
     def get_keyword_limits(self, keyword_index: int, enabled_platforms: Dict) -> Dict[str, int]:
         """
-        Calculate how many posts to fetch per platform for this keyword.
-        Uses dynamic allocation based on remaining budget.
+        Get fixed per-platform limits for this keyword.
+        Simple implementation: 13 Twitter, 4 Facebook, 2 TikTok per keyword.
 
         Args:
             keyword_index: Current keyword index (1-based)
@@ -74,32 +77,14 @@ class PlatformDistributionManager:
         Returns:
             Dict with max_posts per platform: {twitter: 13, facebook: 4, tiktok: 2}
         """
-        remaining_keywords = self.total_keywords - keyword_index + 1
-
-        # Calculate remaining budget for each platform
-        twitter_remaining = max(0, self.twitter_target - self.twitter_collected)
-        facebook_remaining = max(0, self.facebook_target - self.facebook_collected)
-        tiktok_remaining = max(0, self.tiktok_target - self.tiktok_collected)
-
-        # Distribute remaining budget across remaining keywords
-        # Use at least 1 post per platform to avoid zero fetches
-        twitter_limit = max(1, twitter_remaining // remaining_keywords) if remaining_keywords > 0 else 0
-        facebook_limit = max(1, facebook_remaining // remaining_keywords) if remaining_keywords > 0 else 0
-        tiktok_limit = max(1, tiktok_remaining // remaining_keywords) if remaining_keywords > 0 else 0
-
-        # Ensure we don't exceed remaining budget
-        twitter_limit = min(twitter_limit, twitter_remaining)
-        facebook_limit = min(facebook_limit, facebook_remaining)
-        tiktok_limit = min(tiktok_limit, tiktok_remaining)
-
         # Only include limits for enabled platforms
         limits = {}
         if BrowsercloudPlatformEnum.TWITTER.value in enabled_platforms:
-            limits["twitter"] = twitter_limit
+            limits["twitter"] = self.twitter_per_keyword
         if BrowsercloudPlatformEnum.FACEBOOK.value in enabled_platforms:
-            limits["facebook"] = facebook_limit
+            limits["facebook"] = self.facebook_per_keyword
         if BrowsercloudPlatformEnum.TIKTOK.value in enabled_platforms:
-            limits["tiktok"] = tiktok_limit
+            limits["tiktok"] = self.tiktok_per_keyword
 
         return limits
 
@@ -602,45 +587,42 @@ class ConversationalLeadJobService:
 
                 if BrowsercloudPlatformEnum.TWITTER.value in enabled_platforms:
                     twitter_keyword = PlatformKeywordOptimizer.optimize_for_twitter(keyword)
-                    twitter_limit = keyword_limits.get("twitter", 0)
+                    twitter_limit = keyword_limits.get("twitter", 13)  # Default to 13 if not specified
                     print(f"   🐦 Twitter: '{twitter_keyword}' (max: {twitter_limit} posts)")
-                    if twitter_limit > 0:
-                        fetch_tasks.append(
-                            asyncio.wait_for(
-                                ConversationalLeadJobService._fetch_twitter_leads(
-                                    twitter_keyword, user_id, lead_form.get("lead_form_id"), max_posts=twitter_limit
-                                ),
+                    fetch_tasks.append(
+                        asyncio.wait_for(
+                            ConversationalLeadJobService._fetch_twitter_leads(
+                                twitter_keyword, user_id, lead_form.get("lead_form_id"), max_posts=twitter_limit
+                            ),
                             timeout=platform_timeout
                         )
                     )
 
                 if BrowsercloudPlatformEnum.FACEBOOK.value in enabled_platforms:
                     facebook_keyword = PlatformKeywordOptimizer.optimize_for_facebook(keyword)
-                    facebook_limit = keyword_limits.get("facebook", 0)
+                    facebook_limit = keyword_limits.get("facebook", 4)  # Default to 4 if not specified
                     print(f"   📘 Facebook: '{facebook_keyword}' (max: {facebook_limit} posts)")
-                    if facebook_limit > 0:
-                        fetch_tasks.append(
-                            asyncio.wait_for(
-                                ConversationalLeadJobService._fetch_facebook_leads(
-                                    facebook_keyword, user_id, lead_form.get("lead_form_id"), max_posts=facebook_limit
-                                ),
-                                timeout=platform_timeout
-                            )
+                    fetch_tasks.append(
+                        asyncio.wait_for(
+                            ConversationalLeadJobService._fetch_facebook_leads(
+                                facebook_keyword, user_id, lead_form.get("lead_form_id"), max_posts=facebook_limit
+                            ),
+                            timeout=platform_timeout
                         )
+                    )
 
                 if BrowsercloudPlatformEnum.TIKTOK.value in enabled_platforms:
                     tiktok_keyword = PlatformKeywordOptimizer.optimize_for_tiktok(keyword)
-                    tiktok_limit = keyword_limits.get("tiktok", 0)
+                    tiktok_limit = keyword_limits.get("tiktok", 2)  # Default to 2 if not specified
                     print(f"   🎵 TikTok: '{tiktok_keyword}' (max: {tiktok_limit} posts)")
-                    if tiktok_limit > 0:
-                        fetch_tasks.append(
-                            asyncio.wait_for(
-                                ConversationalLeadJobService._fetch_tiktok_leads(
-                                    tiktok_keyword, user_id, lead_form.get("lead_form_id"), max_posts=tiktok_limit
-                                ),
-                                timeout=platform_timeout
-                            )
+                    fetch_tasks.append(
+                        asyncio.wait_for(
+                            ConversationalLeadJobService._fetch_tiktok_leads(
+                                tiktok_keyword, user_id, lead_form.get("lead_form_id"), max_posts=tiktok_limit
+                            ),
+                            timeout=platform_timeout
                         )
+                    )
 
                 # Execute all fetch tasks concurrently
                 keyword_leads = []
