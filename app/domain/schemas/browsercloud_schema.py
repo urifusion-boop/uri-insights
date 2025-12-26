@@ -6,11 +6,12 @@ from uuid import uuid4
 
 
 class BrowsercloudPlatformEnum(str, Enum):
-    TWITTER = "twitter"
-    LINKEDIN = "linkedin"
-    FACEBOOK = "facebook"
-    THREADS = "threads"
-    TIKTOK = "tiktok"
+    TWITTER = "TWITTER"
+    LINKEDIN = "LINKEDIN"
+    FACEBOOK = "FACEBOOK"
+    THREADS = "THREADS"
+    TIKTOK = "TIKTOK"
+    JOB_BOARDS = "JOB_BOARDS"
 
 
 class BrowsercloudTaskStatus(str, Enum):

@@ -96,6 +96,17 @@ class LeadBase(BaseModel):
     intent_reasoning: Optional[str] = None  # Brief explanation of intent analysis
     content_hash: Optional[str] = None  # Hash of normalized content to detect retweets/shares
 
+    # Job Signal Fields (for leads from job boards)
+    job_posting_url: Optional[str] = None  # URL to the job posting
+    job_title_field: Optional[str] = None  # Job title from posting (renamed to avoid conflict with job_title)
+    hiring_company: Optional[str] = None  # Company posting the job
+    problem_solution_match: Optional[float] = None  # Score: How well user's solution addresses the hiring problem (0-1)
+    hiring_intent_score: Optional[float] = None  # Score: How urgent/serious is the hiring need (0-1)
+    commercial_relevance: Optional[float] = None  # Score: Calculated from problem_match + hiring_intent (0-1)
+    implied_problems: Optional[str] = None  # AI-generated description of business problems this hiring suggests
+    job_source: Optional[str] = None  # Source of job posting: "LinkedIn Jobs", "Jobberman"
+    company_confidence: Optional[float] = None  # PRD Sections 14-16: Confidence that company can be verified (0-1)
+
     class Config:
         json_encoders = {datetime: lambda v: DateHelper.to_iso8601_utc(v) if v else None}
 

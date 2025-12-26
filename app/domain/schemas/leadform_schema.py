@@ -109,6 +109,10 @@ class LeadFormBase(BaseModel):
     monitoring_platforms: Optional[List[str]] = None
     platform_configs: Optional[List[PlatformConfig]] = None
 
+    # Job Boards fields
+    solution_context: Optional[str] = None  # What problem does user's product/service solve? (for job board analysis)
+    job_keywords: Optional[List[str]] = None  # AI-generated job role keywords for job board scanning (PRD Section 5)
+
     # Pagination
     page: Optional[int] = 1
     per_page: Optional[int] = 10
@@ -206,6 +210,10 @@ class ConversationalLeadFormUpdate(BizConvLeadFormUpdateBase):
     enable_realtime: Optional[bool] = None
     monitoring_platforms: Optional[List[str]] = None
     platform_configs: Optional[List[PlatformConfig]] = None
+
+    # Job Boards fields
+    solution_context: Optional[str] = None  # What problem does user's product/service solve?
+    job_keywords: Optional[List[str]] = None  # AI-generated job role keywords (PRD Section 5)
 
 
 class LeadForm(LeadFormBase):

@@ -74,6 +74,8 @@ class ApolloHelper:
             "enable_realtime",
             "monitoring_platforms",
             "platform_configs",
+            "solution_context",
+            "job_keywords",
         ]
 
         lead_form.copy()
@@ -128,6 +130,8 @@ class ApolloHelper:
             "monitoring_platforms",
             "platform_configs",
             "post_age_filter",
+            "solution_context",
+            "job_keywords",
         ]
         organization_search_request_dict = DictHelper.remove_keys(
             lead_form.copy(), unwanted_keys
@@ -190,10 +194,10 @@ class ApolloHelper:
         url = f"https://api.apollo.io/api/v1/people/match"
 
         if not lead:
-            return UriResponse.custom_response("Lead not found for enrichment", 404)
+            raise ValueError("Lead not found for enrichment")
         if reveal_phone and not webhook_url:
-            return UriResponse.custom_response(
-                "A webhook url must be provided if reveal_phone is set to true.", 400
+            raise ValueError(
+                "A webhook url must be provided if reveal_phone is set to true."
             )
 
         # Helper function to extract Enrich Person params from lead.
@@ -256,9 +260,9 @@ class ApolloHelper:
                 # Only add TTL if provided
                 if ttl_seconds is not None:
                     ttl = timedelta(seconds=ttl_seconds)
+                    await CacheRepository.set_cache(db, cache_key, result, ttl)
                 else:
-                    ttl = None
-                await CacheRepository.set_cache(db, cache_key, result, ttl)
+                    await CacheRepository.set_cache(db, cache_key, result)
                 return result
 
             return wrapper

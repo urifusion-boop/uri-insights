@@ -54,6 +54,10 @@ class ConversationalSearchRequest(BaseBusinessAndConversationalSearchRequest):
     monitoring_platforms: Optional[List[str]] = None
     platform_configs: Optional[List[PlatformConfig]] = None
 
+    # Job Boards fields (PRD Section 5) - Only for Conversational forms
+    solution_context: Optional[str] = None  # What problem does user's product/service solve?
+    job_keywords: Optional[List[str]] = None  # AI-generated job role keywords for job board scanning
+
 
 # --- Base Form Input ---
 class BaseFormInput(BaseModel):

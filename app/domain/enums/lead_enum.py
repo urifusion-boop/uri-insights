@@ -11,6 +11,7 @@ class LeadSourceEnum(str, Enum):
     LINKEDIN = "LinkedIn"
     TIKTOK = "Tiktok"
     NAIRALAND = "Nairaland"
+    JOB_BOARDS = "Job Boards"
     OTHER = "Other"
 
 
