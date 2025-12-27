@@ -1397,15 +1397,18 @@ class ConversationalLeadJobService:
             # Import services
             from app.services.ApifyLinkedInJobsService import ApifyLinkedInJobsService
             from app.services.ApifyJobbermanService import ApifyJobbermanService
+            from app.services.ApifyIndeedService import ApifyIndeedService
             from app.services.JobSignalAnalysisService import JobSignalAnalysisService
 
             # Initialize services
             linkedin_service = ApifyLinkedInJobsService()
             jobberman_service = ApifyJobbermanService()
+            indeed_service = ApifyIndeedService()
 
-            # Fetch from LinkedIn Jobs and Jobberman concurrently
+            # PRD: Fetch from LinkedIn Jobs, Jobberman, and Indeed concurrently
             linkedin_result = await linkedin_service.fetch_job_postings(search_query, max_jobs=15)
             jobberman_result = await jobberman_service.fetch_job_postings(search_query, max_jobs=5)
+            indeed_result = await indeed_service.fetch_job_postings(search_query, max_jobs=10)
 
             # Collect all jobs with source attribution
             all_jobs = []
@@ -1417,8 +1420,12 @@ class ConversationalLeadJobService:
                 for job in jobberman_result.get("jobs", []):
                     job["source"] = "Jobberman"
                     all_jobs.append(job)
+            if indeed_result.get("success"):
+                for job in indeed_result.get("jobs", []):
+                    job["source"] = "Indeed"
+                    all_jobs.append(job)
 
-            print(f"   Found {len(all_jobs)} total job postings (LinkedIn: {len(linkedin_result.get('jobs', []))}, Jobberman: {len(jobberman_result.get('jobs', []))})")
+            print(f"   Found {len(all_jobs)} total job postings (LinkedIn: {len(linkedin_result.get('jobs', []))}, Jobberman: {len(jobberman_result.get('jobs', []))}, Indeed: {len(indeed_result.get('jobs', []))})")
 
             if not all_jobs:
                 print(f"   ⚠️ No jobs found for query '{search_query}'")
@@ -1507,6 +1514,7 @@ class ConversationalLeadJobService:
         Source priority order (for display metadata):
         1. LinkedIn Jobs
         2. Jobberman
+        3. Indeed
 
         Args:
             jobs: List of job dictionaries
@@ -1516,8 +1524,15 @@ class ConversationalLeadJobService:
         """
         from difflib import SequenceMatcher
 
-        # Source priority (LinkedIn Jobs > Jobberman)
-        source_priority = {"LinkedIn Jobs": 1, "Jobberman": 2, "linkedin jobs": 1, "jobberman": 2}
+        # PRD Section 13.1: Source priority (LinkedIn Jobs > Jobberman > Indeed)
+        source_priority = {
+            "LinkedIn Jobs": 1,
+            "Jobberman": 2,
+            "Indeed": 3,
+            "linkedin jobs": 1,
+            "jobberman": 2,
+            "indeed": 3
+        }
 
         unique_jobs = []
 

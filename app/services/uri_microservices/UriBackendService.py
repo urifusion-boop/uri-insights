@@ -50,3 +50,66 @@ class UriBackendService:
         except Exception as e:
             print(f"Exception occurred incrementing trial usage for {field}: ", e)
             return None
+
+    @staticmethod
+    async def search_apollo_persons(params: dict):
+        """
+        Search for people in Apollo using person_titles and organization name.
+
+        Args:
+            params: Dictionary containing:
+                - person_titles: List of job titles to search for
+                - q_organization_name: Organization name
+                - page: Page number (default 1)
+                - per_page: Results per page (default 3)
+
+        Returns:
+            Apollo API response with matched people
+        """
+        url = "https://api.apollo.io/api/v1/mixed_people/search"
+
+        try:
+            # Prepare Apollo API request headers
+            headers = {
+                "Content-Type": "application/json",
+                "Cache-Control": "no-cache",
+                "X-Api-Key": settings.APOLLO_API_KEY
+            }
+
+            # Prepare request body
+            body = {
+                "api_key": settings.APOLLO_API_KEY,
+                "person_titles": params.get("person_titles", []),
+                "q_organization_name": params.get("q_organization_name", ""),
+                "page": params.get("page", 1),
+                "per_page": params.get("per_page", 3)
+            }
+
+            # Make direct API call to Apollo
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=body, headers=headers) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        return {
+                            "responseCode": 200,
+                            "responseData": data,
+                            "status": True
+                        }
+                    else:
+                        error_text = await response.text()
+                        print(f"Apollo API error: {response.status} - {error_text}")
+                        return {
+                            "responseCode": response.status,
+                            "responseMessage": f"Apollo API error: {error_text}",
+                            "status": False
+                        }
+        except Exception as e:
+            print(f"Exception occurred searching Apollo persons: {e}")
+            import traceback
+            traceback.print_exc()
+            return {
+                "responseCode": 500,
+                "responseMessage": str(e),
+                "status": False
+            }

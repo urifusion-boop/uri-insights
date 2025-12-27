@@ -103,7 +103,7 @@ class LeadBase(BaseModel):
     problem_solution_match: Optional[float] = None  # Score: How well user's solution addresses the hiring problem (0-1)
     hiring_intent_score: Optional[float] = None  # Score: How urgent/serious is the hiring need (0-1)
     commercial_relevance: Optional[float] = None  # Score: Calculated from problem_match + hiring_intent (0-1)
-    implied_problems: Optional[str] = None  # AI-generated description of business problems this hiring suggests
+    implied_problems: Optional[List[str]] = None  # AI-generated list of business problems this hiring suggests
     job_source: Optional[str] = None  # Source of job posting: "LinkedIn Jobs", "Jobberman"
     company_confidence: Optional[float] = None  # PRD Sections 14-16: Confidence that company can be verified (0-1)
 
