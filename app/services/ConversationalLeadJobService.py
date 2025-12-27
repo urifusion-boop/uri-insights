@@ -88,7 +88,7 @@ class PlatformDistributionManager:
         limits = {}
 
         # Twitter
-        if BrowsercloudPlatformEnum.TWITTER.value in enabled_platforms:
+        if BrowsercloudPlatformEnum.TWITTER.value.lower() in enabled_platforms:
             if twitter_remaining > 0:
                 # Distribute remaining evenly, minimum 1 if any budget left
                 twitter_limit = max(1, min(twitter_remaining, (twitter_remaining + remaining_keywords - 1) // remaining_keywords))
@@ -96,14 +96,14 @@ class PlatformDistributionManager:
             # else: skip Twitter (reached target)
 
         # Facebook
-        if BrowsercloudPlatformEnum.FACEBOOK.value in enabled_platforms:
+        if BrowsercloudPlatformEnum.FACEBOOK.value.lower() in enabled_platforms:
             if facebook_remaining > 0:
                 facebook_limit = max(1, min(facebook_remaining, (facebook_remaining + remaining_keywords - 1) // remaining_keywords))
                 limits["facebook"] = facebook_limit
             # else: skip Facebook (reached target)
 
         # TikTok
-        if BrowsercloudPlatformEnum.TIKTOK.value in enabled_platforms:
+        if BrowsercloudPlatformEnum.TIKTOK.value.lower() in enabled_platforms:
             if tiktok_remaining > 0:
                 tiktok_limit = max(1, min(tiktok_remaining, (tiktok_remaining + remaining_keywords - 1) // remaining_keywords))
                 limits["tiktok"] = tiktok_limit
@@ -628,7 +628,7 @@ class ConversationalLeadJobService:
                 platform_timeout = 45  # 45 seconds per platform
 
                 # Twitter - only fetch if limit exists (not at target)
-                if BrowsercloudPlatformEnum.TWITTER.value in enabled_platforms and "twitter" in keyword_limits:
+                if BrowsercloudPlatformEnum.TWITTER.value.lower() in enabled_platforms and "twitter" in keyword_limits:
                     twitter_keyword = PlatformKeywordOptimizer.optimize_for_twitter(keyword)
                     twitter_limit = keyword_limits["twitter"]
                     print(f"   🐦 Twitter: '{twitter_keyword}' (max: {twitter_limit} posts)")
@@ -640,11 +640,11 @@ class ConversationalLeadJobService:
                             timeout=platform_timeout
                         )
                     )
-                elif BrowsercloudPlatformEnum.TWITTER.value in enabled_platforms:
+                elif BrowsercloudPlatformEnum.TWITTER.value.lower() in enabled_platforms:
                     print(f"   🐦 Twitter: SKIPPED (target reached)")
 
                 # Facebook - only fetch if limit exists (not at target)
-                if BrowsercloudPlatformEnum.FACEBOOK.value in enabled_platforms and "facebook" in keyword_limits:
+                if BrowsercloudPlatformEnum.FACEBOOK.value.lower() in enabled_platforms and "facebook" in keyword_limits:
                     facebook_keyword = PlatformKeywordOptimizer.optimize_for_facebook(keyword)
                     facebook_limit = keyword_limits["facebook"]
                     print(f"   📘 Facebook: '{facebook_keyword}' (max: {facebook_limit} posts)")
@@ -656,11 +656,11 @@ class ConversationalLeadJobService:
                             timeout=platform_timeout
                         )
                     )
-                elif BrowsercloudPlatformEnum.FACEBOOK.value in enabled_platforms:
+                elif BrowsercloudPlatformEnum.FACEBOOK.value.lower() in enabled_platforms:
                     print(f"   📘 Facebook: SKIPPED (target reached)")
 
                 # TikTok - only fetch if limit exists (not at target)
-                if BrowsercloudPlatformEnum.TIKTOK.value in enabled_platforms and "tiktok" in keyword_limits:
+                if BrowsercloudPlatformEnum.TIKTOK.value.lower() in enabled_platforms and "tiktok" in keyword_limits:
                     tiktok_keyword = PlatformKeywordOptimizer.optimize_for_tiktok(keyword)
                     tiktok_limit = keyword_limits["tiktok"]
                     print(f"   🎵 TikTok: '{tiktok_keyword}' (max: {tiktok_limit} posts)")
@@ -672,11 +672,11 @@ class ConversationalLeadJobService:
                             timeout=platform_timeout
                         )
                     )
-                elif BrowsercloudPlatformEnum.TIKTOK.value in enabled_platforms:
+                elif BrowsercloudPlatformEnum.TIKTOK.value.lower() in enabled_platforms:
                     print(f"   🎵 TikTok: SKIPPED (target reached)")
 
                 # PRD Section 5: Job Boards use job_keywords array (not regular keywords)
-                if BrowsercloudPlatformEnum.JOB_BOARDS.value in enabled_platforms:
+                if BrowsercloudPlatformEnum.JOB_BOARDS.value.lower() in enabled_platforms:
                     solution_context = lead_form.get("solution_context", "")
 
                     # PRD: Fetch from user onboarding if solution_context not provided
