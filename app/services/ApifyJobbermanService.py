@@ -157,7 +157,8 @@ class ApifyJobbermanService:
 
                 # Log the first item structure for debugging
                 if items:
-                    logger.debug(f"Sample Jobberman job item structure: {list(items[0].keys())}")
+                    logger.info(f"🔍 Sample Jobberman job item structure: {list(items[0].keys())}")
+                    logger.info(f"🔍 First Jobberman item: {items[0]}")
 
             except Exception as dataset_error:
                 logger.error(f"Error reading dataset: {str(dataset_error)}")
