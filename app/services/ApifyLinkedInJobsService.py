@@ -114,19 +114,21 @@ class ApifyLinkedInJobsService:
             Dictionary containing the fetched jobs
         """
         try:
-            # LinkedIn Jobs Scraper actor ID from Apify Store
-            # TODO: Replace with actual LinkedIn Jobs Scraper actor ID
-            # Popular options:
-            # - "hDLbWy3VWvpTEjtS8" (LinkedIn Jobs Scraper by Dwarves)
-            # - Search Apify Store for "linkedin jobs scraper"
-            actor_id = "hDLbWy3VWvpTEjtS8"  # LinkedIn Jobs Scraper
+            # LinkedIn Jobs Scraper actor from Apify Store
+            # Actor: bebity/linkedin-jobs-scraper
+            # Docs: https://apify.com/bebity/linkedin-jobs-scraper
+            actor_id = "bebity/linkedin-jobs-scraper"
 
             # Configure the input for the actor
+            # Note: bebity/linkedin-jobs-scraper uses keyword-based search
             run_input = {
-                "search": search_query,
+                "keyword": search_query,  # Search by keyword
                 "location": location,
                 "maxItems": max_jobs,
-                "sortBy": "mostRecent",  # Get latest jobs first
+                "proxy": {
+                    "useApifyProxy": True,
+                    "apifyProxyGroups": ["RESIDENTIAL"]
+                }
             }
 
             # Run the actor in a thread to avoid blocking
