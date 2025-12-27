@@ -29,12 +29,24 @@ class UriBackendService:
             Business details object containing whatYouSell, industry, etc.
         """
         try:
+            print(f"🔍 Fetching user details for user_id: {user_id}")
             user_data = await UriBackendService.get_user_details(user_id)
-            if user_data and "businessDetails" in user_data:
-                return user_data["businessDetails"]
+            print(f"📦 User data received: {user_data}")
+
+            if user_data:
+                if "businessDetails" in user_data:
+                    print(f"✅ Business details found: {user_data['businessDetails']}")
+                    return user_data["businessDetails"]
+                else:
+                    print(f"⚠️ No businessDetails key in user_data. Keys present: {list(user_data.keys())}")
+            else:
+                print("❌ user_data is None or empty")
+
             return None
         except Exception as e:
             print(f"Exception occurred getting user business details: {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
     @staticmethod
