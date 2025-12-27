@@ -78,12 +78,19 @@ async def create_conversational_lead_form(
     background_tasks: BackgroundTasks,
     db: AsyncIOMotorDatabase = Depends(get_db_dependency),
 ):
-    payload = LeadFormCreate(**data.model_dump())
-    result = await LeadFormService.create(db, payload, background_tasks)
+    try:
+        print(f"📥 Received conversational form data: {data.model_dump()}")
+        payload = LeadFormCreate(**data.model_dump())
+        result = await LeadFormService.create(db, payload, background_tasks)
 
-    return UriResponse.get_status_response(
-        response=jsonable_encoder(result), status_code=result["responseCode"]
-    )
+        return UriResponse.get_status_response(
+            response=jsonable_encoder(result), status_code=result["responseCode"]
+        )
+    except Exception as e:
+        print(f"❌ Validation error creating conversational form: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise
 
 
 @router.post("/conversation-search/fetch-leads")
