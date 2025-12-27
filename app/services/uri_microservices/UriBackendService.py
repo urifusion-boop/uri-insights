@@ -18,6 +18,26 @@ class UriBackendService:
             return None
 
     @staticmethod
+    async def get_user_business_details(user_id: str):
+        """
+        Get user's business details from uri-backend.
+
+        Args:
+            user_id: User ID
+
+        Returns:
+            Business details object containing whatYouSell, industry, etc.
+        """
+        try:
+            user_data = await UriBackendService.get_user_details(user_id)
+            if user_data and "businessDetails" in user_data:
+                return user_data["businessDetails"]
+            return None
+        except Exception as e:
+            print(f"Exception occurred getting user business details: {e}")
+            return None
+
+    @staticmethod
     async def get_trial_status(user_id: str):
         """Get trial status from uri-backend"""
         url = f"{UriBackendService.base_url}/trial/status/{user_id}"

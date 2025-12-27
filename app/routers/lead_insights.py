@@ -606,3 +606,41 @@ async def find_decision_makers(
     except Exception as e:
         return UriResponse.custom_response(f"Error: {str(e)}", 500, False)
 
+
+@router.get("/user-business-details/{user_id}")
+async def get_user_business_details(user_id: str):
+    """
+    Get user's business details from uri-backend for job keyword generation.
+
+    Returns businessDetails object containing:
+    - whatYouSell: What the user's business sells/does
+    - industry: User's industry
+    - businessName: Business name
+    - etc.
+    """
+    try:
+        business_details = await UriBackendService.get_user_business_details(user_id)
+
+        if business_details:
+            return UriResponse.custom_response(
+                "Business details retrieved successfully",
+                200,
+                True,
+                business_details
+            )
+        else:
+            return UriResponse.custom_response(
+                "Business details not found for user",
+                404,
+                False
+            )
+    except Exception as e:
+        print(f"Error getting user business details: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return UriResponse.custom_response(
+            f"Error retrieving business details: {str(e)}",
+            500,
+            False
+        )
+
