@@ -88,6 +88,25 @@ class LeadGenerationConsumer(AzureServiceBusConsumer):
         5. Update job status
         """
         try:
+            # CRITICAL: Check if job is already being processed by another worker
+            if job_id:
+                from app.repository.LeadGenerationJobRepository import LeadGenerationJobRepository
+                job = await LeadGenerationJobRepository.get_job_status(self.db, job_id)
+
+                if job and job.get("status") != "queued":
+                    print(f"⏭️ SKIPPING: Job {job_id} already being processed (status: {job.get('status')})")
+                    return
+
+                # Atomically update status to 'processing' to claim this job
+                await LeadGenerationJobRepository.update_job(
+                    db=self.db,
+                    job_id=job_id,
+                    status="processing",
+                    progress=1,
+                    message="Worker claimed this job, starting lead generation..."
+                )
+                print(f"✅ Worker claimed job {job_id}")
+
             print(f"🚀 Starting sales signal generation for form {lead_form_id}")
 
             # Run the full lead generation pipeline
