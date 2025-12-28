@@ -644,3 +644,108 @@ async def get_user_business_details(user_id: str):
             False
         )
 
+
+# PRD Section 8: Find decision-makers for job signal leads
+@router.post("/job-boards/{lead_id}/find-decision-makers")
+async def find_decision_makers_for_job_signal(
+    lead_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency)
+):
+    """
+    Find decision-makers at the company from a job signal
+    PRD Section 8: Decision-Maker Connection Feature
+
+    Returns 1-3 relevant decision-makers with contact details (name, title, email, phone, LinkedIn)
+    """
+    try:
+        # Get the job signal lead
+        lead = await LeadRepository.get_lead_by_id(db, lead_id)
+
+        if not lead:
+            return UriResponse.custom_response("Lead not found", 404, False)
+
+        # Verify this is a job board signal
+        if lead.get("lead_source") != LeadSourceEnum.JOB_BOARDS:
+            return UriResponse.custom_response(
+                "This endpoint only works for job board signals",
+                400,
+                False
+            )
+
+        # Extract company name and job title
+        company_name = lead.get("hiring_company") or lead.get("company_name")
+        job_title = lead.get("job_title_field") or lead.get("job_title")
+
+        if not company_name:
+            return UriResponse.custom_response(
+                "Company name not found in lead",
+                400,
+                False
+            )
+
+        # Check company confidence (PRD Section 16)
+        company_confidence = lead.get("company_confidence", 1.0)
+        if company_confidence < 0.5:
+            return UriResponse.custom_response(
+                "Company confidence too low for decision-maker lookup",
+                400,
+                False,
+                {"company_confidence": company_confidence}
+            )
+
+        # Get decision-maker titles from AI analysis (stored in lead)
+        # Or map from job title using JobSignalAnalysisService logic
+        from app.services.JobSignalAnalysisService import JobSignalAnalysisService
+
+        # Use AI-generated target_seniorities if available, otherwise map from job title
+        decision_maker_titles = []
+        if hasattr(lead, 'target_seniorities') and lead.target_seniorities:
+            decision_maker_titles = lead.target_seniorities
+        else:
+            # Fallback: map job title to decision-maker titles
+            # Basic mapping (can be enhanced)
+            job_title_lower = (job_title or "").lower()
+            if any(keyword in job_title_lower for keyword in ["devops", "engineer", "developer", "sre"]):
+                decision_maker_titles = ["CTO", "VP Engineering", "Head of Engineering", "Director of Engineering"]
+            elif any(keyword in job_title_lower for keyword in ["marketing", "growth"]):
+                decision_maker_titles = ["CMO", "VP Marketing", "Head of Marketing"]
+            elif any(keyword in job_title_lower for keyword in ["sales", "business development"]):
+                decision_maker_titles = ["VP Sales", "Head of Sales", "Chief Revenue Officer"]
+            elif any(keyword in job_title_lower for keyword in ["data", "analyst", "analytics"]):
+                decision_maker_titles = ["Head of Data", "VP Analytics", "Chief Data Officer"]
+            elif any(keyword in job_title_lower for keyword in ["operations", "office manager"]):
+                decision_maker_titles = ["COO", "Head of Operations", "VP Operations"]
+            else:
+                # Default fallback
+                decision_maker_titles = ["CEO", "COO", "Founder"]
+
+        print(f"🔍 Finding decision-makers at {company_name} with titles: {decision_maker_titles}")
+
+        # Call Apollo API
+        decision_makers = await ApolloService.find_decision_makers(
+            company_name=company_name,
+            job_titles=decision_maker_titles,
+            max_results=3
+        )
+
+        return UriResponse.custom_response(
+            f"Found {len(decision_makers)} decision-maker(s)",
+            200,
+            True,
+            {
+                "decision_makers": decision_makers,
+                "company_name": company_name,
+                "job_title": job_title
+            }
+        )
+
+    except Exception as e:
+        print(f"❌ Error finding decision-makers: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return UriResponse.custom_response(
+            f"Error finding decision-makers: {str(e)}",
+            500,
+            False
+        )
+

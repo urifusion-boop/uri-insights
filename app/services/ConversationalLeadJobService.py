@@ -437,6 +437,20 @@ class ConversationalLeadJobService:
         from app.repository.LeadGenerationJobRepository import LeadGenerationJobRepository
 
         stats = {
+            # Social platform stats
+            "social_total_fetched": 0,
+            "social_qualified": 0,
+            "social_new_leads": 0,
+            "social_duplicates": 0,
+
+            # Job board stats
+            "job_signals_found": 0,
+            "job_signals_saved": 0,
+            "job_signals_high_match": 0,
+            "job_signals_medium_match": 0,
+            "job_signals_low_match": 0,
+
+            # Combined totals (for backward compatibility)
             "total_fetched": 0,
             "total_qualified": 0,
             "new_leads_saved": 0,
@@ -731,8 +745,12 @@ class ConversationalLeadJobService:
                             keyword_leads.extend(result)
                             print(f"   ✅ Platform {idx+1} returned {len(result)} leads")
 
+                # Separate social vs job board leads for stats tracking
+                social_batch = [l for l in keyword_leads if l.lead_source != LeadSourceEnum.JOB_BOARDS]
+                job_board_batch = [l for l in keyword_leads if l.lead_source == LeadSourceEnum.JOB_BOARDS]
+
                 all_leads.extend(keyword_leads)
-                print(f"   📊 Fetched {len(keyword_leads)} raw leads for keyword '{keyword}'")
+                print(f"   📊 Fetched {len(keyword_leads)} raw leads for keyword '{keyword}' (Social: {len(social_batch)}, Job Boards: {len(job_board_batch)})")
 
                 # Update distribution manager counters
                 twitter_count = len([l for l in keyword_leads if l.lead_source == LeadSourceEnum.X])
@@ -783,10 +801,38 @@ class ConversationalLeadJobService:
 
                 # Continue with all keywords to maximize results (no early stopping)
 
-            # Update statistics
+            # Update statistics - Separate social vs job board leads
+            social_all = [l for l in all_leads if l.lead_source != LeadSourceEnum.JOB_BOARDS]
+            job_board_all = [l for l in all_leads if l.lead_source == LeadSourceEnum.JOB_BOARDS]
+
+            social_qualified = [l for l in qualified_leads if l.lead_source != LeadSourceEnum.JOB_BOARDS]
+            job_board_qualified = [l for l in qualified_leads if l.lead_source == LeadSourceEnum.JOB_BOARDS]
+
+            # Social stats
+            stats["social_total_fetched"] = len(social_all)
+            stats["social_qualified"] = len(social_qualified)
+
+            # Job board stats
+            stats["job_signals_found"] = len(job_board_all)
+            # Count by match strength
+            for job_lead in job_board_qualified:
+                commercial_relevance = job_lead.commercial_relevance or 0
+                if commercial_relevance >= 0.7:
+                    stats["job_signals_high_match"] += 1
+                elif commercial_relevance >= 0.5:
+                    stats["job_signals_medium_match"] += 1
+                else:
+                    stats["job_signals_low_match"] += 1
+
+            # Combined totals (for backward compatibility)
             stats["total_fetched"] = len(all_leads)
             stats["total_qualified"] = len(qualified_leads)
+
             print(f"\n✅ INTENT ANALYSIS COMPLETE: {len(qualified_leads)}/{len(all_leads)} leads qualified")
+            if len(social_all) > 0:
+                print(f"   🔵 Social: {len(social_qualified)}/{len(social_all)} qualified")
+            if len(job_board_all) > 0:
+                print(f"   💼 Job Boards: {len(job_board_qualified)}/{len(job_board_all)} qualified (High: {stats['job_signals_high_match']}, Medium: {stats['job_signals_medium_match']}, Low: {stats['job_signals_low_match']})")
 
             # Print final platform distribution summary
             print(distribution_manager.get_summary())
@@ -800,6 +846,20 @@ class ConversationalLeadJobService:
                 new_count = save_result.get("successful_count", 0)
                 duplicate_count = save_result.get("skipped_duplicates", 0)
 
+                # Separate social vs job board saves
+                saved_social = [l for l in qualified_leads if l.lead_source != LeadSourceEnum.JOB_BOARDS]
+                saved_job_boards = [l for l in qualified_leads if l.lead_source == LeadSourceEnum.JOB_BOARDS]
+
+                # Estimate breakdown (proportional to qualified counts)
+                if len(qualified_leads) > 0:
+                    social_ratio = len(saved_social) / len(qualified_leads)
+                    job_board_ratio = len(saved_job_boards) / len(qualified_leads)
+
+                    stats["social_new_leads"] = int(new_count * social_ratio)
+                    stats["social_duplicates"] = int(duplicate_count * social_ratio)
+                    stats["job_signals_saved"] = int(new_count * job_board_ratio)
+
+                # Combined totals
                 stats["new_leads_saved"] = new_count
                 stats["duplicates_skipped"] = duplicate_count
 

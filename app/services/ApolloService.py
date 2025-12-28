@@ -398,6 +398,83 @@ class ApolloService:
         return results
 
     @staticmethod
+    async def find_decision_makers(
+        company_name: str,
+        job_titles: List[str],
+        max_results: int = 3
+    ) -> List[Dict[str, Any]]:
+        """
+        Find decision-makers at a company for job signal opportunities
+        PRD Section 8: Decision-Maker Connection Feature
+
+        Args:
+            company_name: Company name from job posting
+            job_titles: List of decision-maker titles to search for (e.g., ["CTO", "VP Engineering"])
+            max_results: Maximum number of contacts to return (default: 3)
+
+        Returns:
+            List of decision-makers with contact details
+        """
+        url = f"{ApolloService.BASE_URL}/mixed_people/search"
+
+        # Build Apollo search payload
+        # Search for people at this company with these job titles
+        payload = {
+            "q_organization_name": company_name,
+            "person_titles": job_titles,
+            "page": 1,
+            "per_page": max_results,
+            "organization_num_employees_ranges": ["1,10", "11,50", "51,200", "201,500", "501,1000", "1001,5000", "5001,10000", "10001+"],
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    url,
+                    json=payload,
+                    headers=ApolloService.HEADERS
+                )
+
+                if response.status_code != 200:
+                    print(f"❌ Apollo API error: {response.status_code} - {response.text}")
+                    return []
+
+                result = response.json()
+                people = result.get("people", [])
+
+                # Format results to match PRD Section 8.4 requirements
+                decision_makers = []
+                for person in people[:max_results]:
+                    # Extract contact details
+                    name = person.get("name") or f"{person.get('first_name', '')} {person.get('last_name', '')}".strip()
+                    title = person.get("title") or person.get("headline", "")
+                    email = person.get("email")
+                    phone = person.get("phone_numbers", [{}])[0].get("raw_number") if person.get("phone_numbers") else None
+                    linkedin_url = person.get("linkedin_url")
+                    organization_name = person.get("organization", {}).get("name") or company_name
+
+                    # Only include if we have at least name and email
+                    if name and email:
+                        decision_makers.append({
+                            "name": name,
+                            "title": title,
+                            "email": email,
+                            "phone": phone,
+                            "linkedin_url": linkedin_url,
+                            "organization_name": organization_name,
+                            "id": person.get("id")
+                        })
+
+                print(f"✅ Found {len(decision_makers)} decision-makers at {company_name}")
+                return decision_makers
+
+        except Exception as e:
+            print(f"❌ Error finding decision-makers: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return []
+
+    @staticmethod
     async def enrich_organizations_bulk(domains: List[str]) -> dict:
         """
         Enrich a list of up to 10 organizations using Apollo's bulk enrich API.
