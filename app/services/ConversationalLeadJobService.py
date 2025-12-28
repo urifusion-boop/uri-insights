@@ -592,56 +592,81 @@ class ConversationalLeadJobService:
 
                 return selected[:target_count]  # Ensure we don't exceed target
 
-            # Build prioritized keyword list (ALL AVAILABLE KEYWORDS)
-            # Strategy: Start with best keywords, continue until 150 posts reached
-            # 1. Add first 4 direct keywords (2 with 3+ words, 2 with 2 words)
-            if keywords and len(keywords) > 0:
-                direct_selected = select_keywords_by_word_count(keywords, target_count=4)
-                prioritized_keywords.extend(direct_selected)
-                print(f"   📝 Direct keywords selected (first 4): {direct_selected}")
+            # Check if ONLY job boards are enabled (no social platforms)
+            has_social_platforms = any(p in enabled_platforms for p in [
+                BrowsercloudPlatformEnum.TWITTER.value.lower(),
+                BrowsercloudPlatformEnum.FACEBOOK.value.lower(),
+                BrowsercloudPlatformEnum.TIKTOK.value.lower()
+            ])
+            has_job_boards = BrowsercloudPlatformEnum.JOB_BOARDS.value.lower() in enabled_platforms
+            only_job_boards = has_job_boards and not has_social_platforms
 
-            # 2. Add first 4 implied keywords (2 with 3+ words, 2 with 2 words)
-            if implied_keywords and len(implied_keywords) > 0:
-                implied_selected = select_keywords_by_word_count(implied_keywords, target_count=4)
-                prioritized_keywords.extend(implied_selected)
-                print(f"   📝 Implied keywords selected (first 4): {implied_selected}")
+            # Build prioritized keyword list
+            # SCENARIO 3: If ONLY job boards enabled, use job_keywords directly
+            if only_job_boards:
+                if job_keywords and len(job_keywords) > 0:
+                    prioritized_keywords = list(job_keywords)
+                    print(f"🎯 Job boards ONLY mode: Using {len(prioritized_keywords)} job keywords: {prioritized_keywords}")
+                else:
+                    print(f"⚠️ Job boards enabled but no job_keywords available")
+                    return stats
+            else:
+                # SCENARIO 1 & 2: Social platforms enabled (alone or with job boards)
+                # Strategy: Start with best keywords, continue until 150 posts reached
+                # 1. Add first 4 direct keywords (2 with 3+ words, 2 with 2 words)
+                if keywords and len(keywords) > 0:
+                    direct_selected = select_keywords_by_word_count(keywords, target_count=4)
+                    prioritized_keywords.extend(direct_selected)
+                    print(f"   📝 Direct keywords selected (first 4): {direct_selected}")
 
-            # 3. Add remaining direct keywords (5th, 6th, 7th... if available)
-            if keywords and len(keywords) > 4:
-                remaining_direct = select_keywords_by_word_count(keywords[4:], target_count=len(keywords) - 4)
-                prioritized_keywords.extend(remaining_direct)
-                print(f"   📝 Additional direct keywords: {remaining_direct}")
+                # 2. Add first 4 implied keywords (2 with 3+ words, 2 with 2 words)
+                if implied_keywords and len(implied_keywords) > 0:
+                    implied_selected = select_keywords_by_word_count(implied_keywords, target_count=4)
+                    prioritized_keywords.extend(implied_selected)
+                    print(f"   📝 Implied keywords selected (first 4): {implied_selected}")
 
-            # 4. Add remaining implied keywords (5th, 6th, 7th... if available)
-            if implied_keywords and len(implied_keywords) > 4:
-                remaining_implied = select_keywords_by_word_count(implied_keywords[4:], target_count=len(implied_keywords) - 4)
-                prioritized_keywords.extend(remaining_implied)
-                print(f"   📝 Additional implied keywords: {remaining_implied}")
+                # 3. Add remaining direct keywords (5th, 6th, 7th... if available)
+                if keywords and len(keywords) > 4:
+                    remaining_direct = select_keywords_by_word_count(keywords[4:], target_count=len(keywords) - 4)
+                    prioritized_keywords.extend(remaining_direct)
+                    print(f"   📝 Additional direct keywords: {remaining_direct}")
 
-            # 5. Fallback: If still low on keywords, use buying signals
-            if len(prioritized_keywords) < 8 and buying_signals and len(buying_signals) > 0:
-                remaining_slots = max(4, 12 - len(prioritized_keywords))  # Get at least 4 buying signals
-                signal_selected = select_keywords_by_word_count(buying_signals, target_count=remaining_slots)
-                prioritized_keywords.extend(signal_selected)
-                print(f"   📝 Buying signal keywords selected: {signal_selected}")
+                # 4. Add remaining implied keywords (5th, 6th, 7th... if available)
+                if implied_keywords and len(implied_keywords) > 4:
+                    remaining_implied = select_keywords_by_word_count(implied_keywords[4:], target_count=len(implied_keywords) - 4)
+                    prioritized_keywords.extend(remaining_implied)
+                    print(f"   📝 Additional implied keywords: {remaining_implied}")
 
-            if not prioritized_keywords:
-                print(f"⚠️ No keywords available for search")
-                return stats
+                # 5. Fallback: If still low on keywords, use buying signals
+                if len(prioritized_keywords) < 8 and buying_signals and len(buying_signals) > 0:
+                    remaining_slots = max(4, 12 - len(prioritized_keywords))  # Get at least 4 buying signals
+                    signal_selected = select_keywords_by_word_count(buying_signals, target_count=remaining_slots)
+                    prioritized_keywords.extend(signal_selected)
+                    print(f"   📝 Buying signal keywords selected: {signal_selected}")
 
-            print(f"🎯 Prioritized keywords ({len(prioritized_keywords)} total): {prioritized_keywords}")
+                if not prioritized_keywords:
+                    print(f"⚠️ No keywords available for search")
+                    return stats
 
-            # For job boards: Select up to 4 random keywords to speed up execution
-            # (Job board scraping is slower, so we limit keyword usage)
+                print(f"🎯 Prioritized keywords ({len(prioritized_keywords)} total): {prioritized_keywords}")
+
+            # For job boards: Prepare keywords and counter
             import random
             job_board_keywords = []
-            if BrowsercloudPlatformEnum.JOB_BOARDS.value.lower() in enabled_platforms:
-                # Use job_keywords if available (for job-only searches), otherwise sample from prioritized_keywords
-                if job_keywords and len(job_keywords) > 0:
-                    job_board_keywords = random.sample(job_keywords, min(4, len(job_keywords)))
-                else:
+            job_keyword_index = 0  # Track which job keyword to use next (for SCENARIO 2)
+
+            if has_job_boards:
+                if only_job_boards:
+                    # SCENARIO 3: Only job boards - use all prioritized_keywords (which are job_keywords)
                     job_board_keywords = random.sample(prioritized_keywords, min(4, len(prioritized_keywords)))
-                print(f"💼 Job boards will use {len(job_board_keywords)} random keywords: {job_board_keywords}")
+                    print(f"💼 Job boards ONLY: Starting with {len(job_board_keywords)} keywords: {job_board_keywords}")
+                else:
+                    # SCENARIO 2: Both social + job boards - use job_keywords independently
+                    if job_keywords and len(job_keywords) > 0:
+                        job_board_keywords = random.sample(job_keywords, min(4, len(job_keywords)))
+                        print(f"💼 Job boards (parallel with social): Will use {len(job_board_keywords)} job keywords: {job_board_keywords}")
+                    else:
+                        print(f"⚠️ Job boards enabled but no job_keywords available - job boards will be skipped")
 
             # Build category configuration once (used for intent analysis)
             category_config = ConversationalLeadJobService._build_category_config(lead_form)
@@ -726,13 +751,30 @@ class ConversationalLeadJobService:
                 elif BrowsercloudPlatformEnum.TIKTOK.value.lower() in enabled_platforms:
                     print(f"   🎵 TikTok: SKIPPED (target reached)")
 
-                # PRD Section 5: Job Boards use selected keywords (up to 4 random)
-                if BrowsercloudPlatformEnum.JOB_BOARDS.value.lower() in enabled_platforms:
-                    # Check if current keyword is in job_board_keywords AND limit allows more fetching
+                # PRD Section 5: Job Boards - Use INDEPENDENT job keyword tracking
+                if has_job_boards:
                     job_boards_limit = keyword_limits.get("job_boards", 0)
 
-                    # Only fetch job boards if current keyword is in the selected subset
-                    if keyword in job_board_keywords and job_boards_limit > 0:
+                    # SCENARIO 3: Only job boards - current keyword IS the job keyword
+                    # SCENARIO 2: Both social + job - use independent job_keyword_index counter
+                    should_fetch_job_boards = False
+                    job_keyword_to_use = None
+
+                    if only_job_boards:
+                        # SCENARIO 3: Current keyword is a job keyword
+                        if keyword in job_board_keywords and job_boards_limit > 0:
+                            should_fetch_job_boards = True
+                            job_keyword_to_use = keyword
+                            job_keyword_attempt = job_board_keywords.index(keyword) + 1
+                    else:
+                        # SCENARIO 2: Use independent counter for job keywords
+                        if job_keyword_index < len(job_board_keywords) and job_boards_limit > 0:
+                            should_fetch_job_boards = True
+                            job_keyword_to_use = job_board_keywords[job_keyword_index]
+                            job_keyword_attempt = job_keyword_index + 1
+                            job_keyword_index += 1  # Increment for next iteration
+
+                    if should_fetch_job_boards:
                         solution_context = lead_form.get("solution_context", "")
 
                         # PRD: Fetch from user onboarding if solution_context not provided
@@ -747,11 +789,6 @@ class ConversationalLeadJobService:
                                     solution_context = what_you_sell
                                     print(f"   ✅ Using user onboarding whatYouSell: {solution_context[:50]}...")
 
-                        # Use the current keyword for job boards
-                        job_keyword_to_use = keyword
-
-                        # Check which attempt number this is (for logging)
-                        job_keyword_attempt = job_board_keywords.index(keyword) + 1
                         print(f"   💼 Job Boards: '{job_keyword_to_use}' (Attempt {job_keyword_attempt}/{len(job_board_keywords)}, max: {job_boards_limit} jobs)")
 
                         if solution_context and solution_context.strip():
@@ -765,9 +802,9 @@ class ConversationalLeadJobService:
                             )
                         else:
                             print(f"   ⚠️ Job Boards enabled but no solution_context available (not in form or user onboarding) - skipping")
-                    elif keyword in job_board_keywords and job_boards_limit == 0:
-                        print(f"   💼 Job Boards: SKIPPED (100 post target reached before this keyword)")
-                    # If keyword not in job_board_keywords, silently skip (normal behavior)
+                    elif has_job_boards and job_boards_limit == 0:
+                        print(f"   💼 Job Boards: SKIPPED (100 post target reached)")
+                    # If no more job keywords available, silently skip
 
                 # Execute all fetch tasks concurrently
                 keyword_leads = []
