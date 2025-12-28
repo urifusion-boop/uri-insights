@@ -749,3 +749,79 @@ async def find_decision_makers_for_job_signal(
             False
         )
 
+# Validate search context to detect business-keyword mismatch
+@router.post("/validate-search-context")
+async def validate_search_context(
+    request: Dict[str, Any]
+):
+    """
+    Validates if user's search keywords align with their business solution.
+    Prevents irrelevant lead generation by detecting mismatches like:
+    - Selling laptops but searching for "skin care"
+    - Selling marketing software but searching for "plumbing issues"
+
+    Request body:
+    {
+        "solution_context": "What user sells",
+        "category_context": "What people are complaining about (social platforms)",
+        "social_keywords": ["keyword1", "keyword2"],
+        "job_keywords": ["keyword1", "keyword2"],
+        "has_social_platforms": true,
+        "has_job_boards": true
+    }
+
+    Returns:
+    {
+        "is_valid": bool,
+        "match_score": 0.0-1.0,
+        "social_platform_match": 0.0-1.0,
+        "job_board_match": 0.0-1.0,
+        "recommendation": "proceed" | "use_only_social" | "use_only_job_boards" | "update_search",
+        "reasoning": "Explanation",
+        "suggested_social_keywords": ["better", "keywords"]
+    }
+    """
+    from app.services.SearchKeywordValidationService import SearchKeywordValidationService
+
+    try:
+        solution_context = request.get("solution_context", "")
+        category_context = request.get("category_context")
+        social_keywords = request.get("social_keywords", [])
+        job_keywords = request.get("job_keywords", [])
+        has_social_platforms = request.get("has_social_platforms", False)
+        has_job_boards = request.get("has_job_boards", False)
+
+        # Validate
+        validation_result = await SearchKeywordValidationService.validate_search_context(
+            solution_context=solution_context,
+            category_context=category_context,
+            social_keywords=social_keywords,
+            job_keywords=job_keywords,
+            has_social_platforms=has_social_platforms,
+            has_job_boards=has_job_boards
+        )
+
+        return UriResponse.custom_response(
+            "Search context validated",
+            200,
+            True,
+            validation_result
+        )
+
+    except Exception as e:
+        print(f"❌ Validation endpoint error: {e}")
+        # Fail open - allow search to proceed
+        return UriResponse.custom_response(
+            "Validation unavailable, proceeding with search",
+            200,
+            True,
+            {
+                "is_valid": True,
+                "match_score": 0.5,
+                "social_platform_match": 0.5,
+                "job_board_match": 0.8,
+                "recommendation": "proceed",
+                "reasoning": "Validation service unavailable",
+                "suggested_social_keywords": []
+            }
+        )
