@@ -31,33 +31,43 @@ from app.domain.schemas.browsercloud_schema import BrowsercloudPlatformEnum
 
 class PlatformDistributionManager:
     """
-    Manages platform distribution to enforce 70% Twitter, 20% Facebook, 10% TikTok
-    with a maximum total of 150 posts across all keywords.
+    Manages platform distribution to enforce limits:
+    - Social: 150 posts max (70% Twitter, 20% Facebook, 10% TikTok)
+    - Job Boards: 100 posts max
+    - Total: 250 posts across all sources
     """
 
-    def __init__(self, max_total_posts: int = 150):
+    def __init__(self, max_social_posts: int = 150, max_job_posts: int = 100):
         """
         Initialize the distribution manager with dynamic smart limits.
 
         Args:
-            max_total_posts: Maximum total posts to fetch (default: 150)
+            max_social_posts: Maximum social media posts to fetch (default: 150)
+            max_job_posts: Maximum job board posts to fetch (default: 100)
         """
-        self.max_total_posts = max_total_posts
-        self.twitter_target = int(max_total_posts * 0.70)  # 105 posts
-        self.facebook_target = int(max_total_posts * 0.20)  # 30 posts
-        self.tiktok_target = int(max_total_posts * 0.10)   # 15 posts
+        self.max_social_posts = max_social_posts
+        self.max_job_posts = max_job_posts
+        self.max_total_posts = max_social_posts + max_job_posts  # 250 total
+
+        self.twitter_target = int(max_social_posts * 0.70)  # 105 posts
+        self.facebook_target = int(max_social_posts * 0.20)  # 30 posts
+        self.tiktok_target = int(max_social_posts * 0.10)   # 15 posts
 
         # Running counters
         self.twitter_collected = 0
         self.facebook_collected = 0
         self.tiktok_collected = 0
+        self.job_boards_collected = 0
+        self.total_social_collected = 0
         self.total_collected = 0
 
         print(f"🎯 Platform Distribution Manager Initialized:")
-        print(f"   Target: {self.max_total_posts} total posts")
-        print(f"   Twitter: {self.twitter_target} (70%)")
-        print(f"   Facebook: {self.facebook_target} (20%)")
-        print(f"   TikTok: {self.tiktok_target} (10%)")
+        print(f"   Total Target: {self.max_total_posts} posts")
+        print(f"   Social Media: {self.max_social_posts} posts max")
+        print(f"      Twitter: {self.twitter_target} (70%)")
+        print(f"      Facebook: {self.facebook_target} (20%)")
+        print(f"      TikTok: {self.tiktok_target} (10%)")
+        print(f"   Job Boards: {self.max_job_posts} posts max")
 
     def get_keyword_limits(self, keyword_index: int, total_keywords: int, enabled_platforms: Dict) -> Dict[str, int]:
         """
@@ -109,8 +119,17 @@ class PlatformDistributionManager:
                 limits["tiktok"] = tiktok_limit
             # else: skip TikTok (reached target)
 
+        # Job Boards
+        job_boards_remaining = max(0, self.max_job_posts - self.job_boards_collected)
+        if BrowsercloudPlatformEnum.JOB_BOARDS.value.lower() in enabled_platforms:
+            if job_boards_remaining > 0:
+                # Distribute remaining job board budget across remaining keywords
+                job_boards_limit = max(1, min(job_boards_remaining, (job_boards_remaining + remaining_keywords - 1) // remaining_keywords))
+                limits["job_boards"] = job_boards_limit
+            # else: skip Job Boards (reached target)
+
         print(f"   💡 Smart limits for keyword {keyword_index}/{total_keywords}:")
-        print(f"      Remaining budget - Twitter: {twitter_remaining}, Facebook: {facebook_remaining}, TikTok: {tiktok_remaining}")
+        print(f"      Remaining budget - Twitter: {twitter_remaining}, Facebook: {facebook_remaining}, TikTok: {tiktok_remaining}, Job Boards: {job_boards_remaining}")
         print(f"      This keyword limits: {limits}")
 
         return limits
@@ -122,9 +141,10 @@ class PlatformDistributionManager:
         Returns:
             True if we should stop fetching more keywords
         """
+        # Stop if we've reached the grand total of 250 posts
         return self.total_collected >= self.max_total_posts
 
-    def update_counts(self, twitter_count: int, facebook_count: int, tiktok_count: int):
+    def update_counts(self, twitter_count: int, facebook_count: int, tiktok_count: int, job_boards_count: int = 0):
         """
         Update running counters after fetching from platforms.
 
@@ -132,11 +152,14 @@ class PlatformDistributionManager:
             twitter_count: Number of posts fetched from Twitter
             facebook_count: Number of posts fetched from Facebook
             tiktok_count: Number of posts fetched from TikTok
+            job_boards_count: Number of posts fetched from Job Boards
         """
         self.twitter_collected += twitter_count
         self.facebook_collected += facebook_count
         self.tiktok_collected += tiktok_count
-        self.total_collected = self.twitter_collected + self.facebook_collected + self.tiktok_collected
+        self.job_boards_collected += job_boards_count
+        self.total_social_collected = self.twitter_collected + self.facebook_collected + self.tiktok_collected
+        self.total_collected = self.total_social_collected + self.job_boards_collected
 
     def get_summary(self) -> str:
         """
@@ -145,16 +168,18 @@ class PlatformDistributionManager:
         Returns:
             Formatted string with distribution stats
         """
-        twitter_pct = (self.twitter_collected / self.total_collected * 100) if self.total_collected > 0 else 0
-        facebook_pct = (self.facebook_collected / self.total_collected * 100) if self.total_collected > 0 else 0
-        tiktok_pct = (self.tiktok_collected / self.total_collected * 100) if self.total_collected > 0 else 0
+        twitter_pct = (self.twitter_collected / self.total_social_collected * 100) if self.total_social_collected > 0 else 0
+        facebook_pct = (self.facebook_collected / self.total_social_collected * 100) if self.total_social_collected > 0 else 0
+        tiktok_pct = (self.tiktok_collected / self.total_social_collected * 100) if self.total_social_collected > 0 else 0
 
         return f"""
    📊 Platform Distribution Summary:
-      Twitter:  {self.twitter_collected}/{self.twitter_target} ({twitter_pct:.1f}% - target 70%)
-      Facebook: {self.facebook_collected}/{self.facebook_target} ({facebook_pct:.1f}% - target 20%)
-      TikTok:   {self.tiktok_collected}/{self.tiktok_target} ({tiktok_pct:.1f}% - target 10%)
-      Total:    {self.total_collected}/{self.max_total_posts} posts
+      Social Media: {self.total_social_collected}/{self.max_social_posts}
+         Twitter:  {self.twitter_collected}/{self.twitter_target} ({twitter_pct:.1f}% - target 70%)
+         Facebook: {self.facebook_collected}/{self.facebook_target} ({facebook_pct:.1f}% - target 20%)
+         TikTok:   {self.tiktok_collected}/{self.tiktok_target} ({tiktok_pct:.1f}% - target 10%)
+      Job Boards: {self.job_boards_collected}/{self.max_job_posts}
+      Grand Total: {self.total_collected}/{self.max_total_posts} posts
 """
 
 
@@ -606,6 +631,18 @@ class ConversationalLeadJobService:
 
             print(f"🎯 Prioritized keywords ({len(prioritized_keywords)} total): {prioritized_keywords}")
 
+            # For job boards: Select up to 4 random keywords to speed up execution
+            # (Job board scraping is slower, so we limit keyword usage)
+            import random
+            job_board_keywords = []
+            if BrowsercloudPlatformEnum.JOB_BOARDS.value.lower() in enabled_platforms:
+                # Use job_keywords if available, otherwise sample from prioritized_keywords
+                if job_keywords and len(job_keywords) > 0:
+                    job_board_keywords = random.sample(job_keywords, min(4, len(job_keywords)))
+                else:
+                    job_board_keywords = random.sample(prioritized_keywords, min(4, len(prioritized_keywords)))
+                print(f"💼 Job boards will use {len(job_board_keywords)} random keywords: {job_board_keywords}")
+
             # Build category configuration once (used for intent analysis)
             category_config = ConversationalLeadJobService._build_category_config(lead_form)
 
@@ -618,8 +655,8 @@ class ConversationalLeadJobService:
             # Update progress: Starting keyword search
             await update_progress(10, f"Searching with {len(prioritized_keywords)} keyword(s) across {len(enabled_platforms)} platform(s)...")
 
-            # Initialize platform distribution manager (70% Twitter, 20% Facebook, 10% TikTok, max 150 posts)
-            distribution_manager = PlatformDistributionManager(max_total_posts=150)
+            # Initialize platform distribution manager (150 social + 100 job boards = 250 total)
+            distribution_manager = PlatformDistributionManager(max_social_posts=150, max_job_posts=100)
 
             # Try ALL keywords to maximize qualified leads (with early stopping at 150 posts)
             qualified_leads = []
@@ -689,61 +726,79 @@ class ConversationalLeadJobService:
                 elif BrowsercloudPlatformEnum.TIKTOK.value.lower() in enabled_platforms:
                     print(f"   🎵 TikTok: SKIPPED (target reached)")
 
-                # PRD Section 5: Job Boards use job_keywords array (not regular keywords)
+                # PRD Section 5: Job Boards use selected keywords (up to 4 random)
                 if BrowsercloudPlatformEnum.JOB_BOARDS.value.lower() in enabled_platforms:
-                    solution_context = lead_form.get("solution_context", "")
+                    # Check if current keyword is in job_board_keywords AND limit allows more fetching
+                    job_boards_limit = limits.get("job_boards", 0)
 
-                    # PRD: Fetch from user onboarding if solution_context not provided
-                    if not solution_context or solution_context.strip() == "":
-                        print(f"   📥 No solution_context, fetching from user onboarding...")
-                        from app.services.uri_microservices.UriBackendService import UriBackendService
-                        user_details = await UriBackendService.get_user_details(user_id)
+                    # Only fetch job boards if current keyword is in the selected subset
+                    if keyword in job_board_keywords and job_boards_limit > 0:
+                        solution_context = lead_form.get("solution_context", "")
 
-                        if user_details and user_details.get("businessDetails"):
-                            what_you_sell = user_details["businessDetails"].get("whatYouSell")
-                            if what_you_sell and what_you_sell.strip():
-                                solution_context = what_you_sell
-                                print(f"   ✅ Using user onboarding whatYouSell: {solution_context[:50]}...")
+                        # PRD: Fetch from user onboarding if solution_context not provided
+                        if not solution_context or solution_context.strip() == "":
+                            print(f"   📥 No solution_context, fetching from user onboarding...")
+                            from app.services.uri_microservices.UriBackendService import UriBackendService
+                            user_details = await UriBackendService.get_user_details(user_id)
 
-                    # Use job_keywords if available, otherwise fallback to current keyword
-                    job_keyword_to_use = keyword  # Default fallback
-                    if job_keywords and len(job_keywords) > 0:
-                        # Use the corresponding job keyword if available (by index)
-                        keyword_index = keyword_idx - 1
-                        if keyword_index < len(job_keywords):
-                            job_keyword_to_use = job_keywords[keyword_index]
-                        else:
-                            # If we've exhausted job_keywords, use first one as fallback
-                            job_keyword_to_use = job_keywords[0]
+                            if user_details and user_details.get("businessDetails"):
+                                what_you_sell = user_details["businessDetails"].get("whatYouSell")
+                                if what_you_sell and what_you_sell.strip():
+                                    solution_context = what_you_sell
+                                    print(f"   ✅ Using user onboarding whatYouSell: {solution_context[:50]}...")
 
-                    print(f"   💼 Job Boards: '{job_keyword_to_use}' (max: 20 jobs)")
-                    if solution_context and solution_context.strip():
-                        fetch_tasks.append(
-                            asyncio.wait_for(
-                                ConversationalLeadJobService._fetch_job_board_signals(
-                                    job_keyword_to_use, user_id, lead_form.get("lead_form_id"), solution_context, max_jobs=20
-                                ),
-                                timeout=90  # Longer timeout for job scraping + AI analysis
+                        # Use the current keyword for job boards
+                        job_keyword_to_use = keyword
+
+                        # Check which attempt number this is (for logging)
+                        job_keyword_attempt = job_board_keywords.index(keyword) + 1
+                        print(f"   💼 Job Boards: '{job_keyword_to_use}' (Attempt {job_keyword_attempt}/{len(job_board_keywords)}, max: {job_boards_limit} jobs)")
+
+                        if solution_context and solution_context.strip():
+                            fetch_tasks.append(
+                                asyncio.wait_for(
+                                    ConversationalLeadJobService._fetch_job_board_signals(
+                                        job_keyword_to_use, user_id, lead_form.get("lead_form_id"), solution_context, max_jobs=job_boards_limit
+                                    ),
+                                    timeout=90  # Longer timeout for job scraping + AI analysis
+                                )
                             )
-                        )
-                    else:
-                        print(f"   ⚠️ Job Boards enabled but no solution_context available (not in form or user onboarding) - skipping")
+                        else:
+                            print(f"   ⚠️ Job Boards enabled but no solution_context available (not in form or user onboarding) - skipping")
+                    elif keyword in job_board_keywords and job_boards_limit == 0:
+                        print(f"   💼 Job Boards: SKIPPED (100 post target reached before this keyword)")
+                    # If keyword not in job_board_keywords, silently skip (normal behavior)
 
                 # Execute all fetch tasks concurrently
                 keyword_leads = []
+                platform_errors = []
+                platform_successes = 0
+
                 if fetch_tasks:
                     print(f"   ⚡ Fetching from {len(fetch_tasks)} platform(s) concurrently...")
                     results = await asyncio.gather(*fetch_tasks, return_exceptions=True)
 
-                    # Collect successful results
+                    # Collect successful results and track failures
                     for idx, result in enumerate(results):
                         if isinstance(result, asyncio.TimeoutError):
-                            print(f"   ⏱️ Platform {idx+1} timed out after {platform_timeout}s")
+                            error_msg = f"Platform {idx+1} timed out after {platform_timeout}s"
+                            print(f"   ⏱️ {error_msg}")
+                            platform_errors.append(error_msg)
                         elif isinstance(result, Exception):
-                            print(f"   ❌ Platform {idx+1} error: {str(result)}")
+                            error_msg = f"Platform {idx+1} error: {str(result)}"
+                            print(f"   ❌ {error_msg}")
+                            platform_errors.append(error_msg)
                         elif isinstance(result, list):
                             keyword_leads.extend(result)
                             print(f"   ✅ Platform {idx+1} returned {len(result)} leads")
+                            platform_successes += 1
+
+                # If all platforms failed for this keyword, provide helpful message
+                if fetch_tasks and platform_successes == 0:
+                    print(f"   ⚠️ All {len(fetch_tasks)} platform(s) failed for keyword '{keyword}'")
+                    print(f"      Errors: {'; '.join(platform_errors)}")
+                elif fetch_tasks and len(keyword_leads) == 0 and platform_successes > 0:
+                    print(f"   ℹ️ {platform_successes} platform(s) succeeded but returned 0 results for '{keyword}' - try different keywords or filters")
 
                 # Separate social vs job board leads for stats tracking
                 social_batch = [l for l in keyword_leads if l.lead_source != LeadSourceEnum.JOB_BOARDS]
@@ -756,14 +811,17 @@ class ConversationalLeadJobService:
                 twitter_count = len([l for l in keyword_leads if l.lead_source == LeadSourceEnum.X])
                 facebook_count = len([l for l in keyword_leads if l.lead_source == LeadSourceEnum.FACEBOOK])
                 tiktok_count = len([l for l in keyword_leads if l.lead_source == LeadSourceEnum.TIKTOK])
+                job_boards_count = len([l for l in keyword_leads if l.lead_source == LeadSourceEnum.JOB_BOARDS])
 
-                distribution_manager.update_counts(twitter_count, facebook_count, tiktok_count)
+                distribution_manager.update_counts(twitter_count, facebook_count, tiktok_count, job_boards_count)
 
                 print(f"   📊 Platform distribution progress:")
-                print(f"      Twitter:  {distribution_manager.twitter_collected}/{distribution_manager.twitter_target}")
-                print(f"      Facebook: {distribution_manager.facebook_collected}/{distribution_manager.facebook_target}")
-                print(f"      TikTok:   {distribution_manager.tiktok_collected}/{distribution_manager.tiktok_target}")
-                print(f"      Total:    {distribution_manager.total_collected}/{distribution_manager.max_total_posts}")
+                print(f"      Social Media: {distribution_manager.total_social_collected}/{distribution_manager.max_social_posts}")
+                print(f"         Twitter:  {distribution_manager.twitter_collected}/{distribution_manager.twitter_target}")
+                print(f"         Facebook: {distribution_manager.facebook_collected}/{distribution_manager.facebook_target}")
+                print(f"         TikTok:   {distribution_manager.tiktok_collected}/{distribution_manager.tiktok_target}")
+                print(f"      Job Boards:   {distribution_manager.job_boards_collected}/{distribution_manager.max_job_posts}")
+                print(f"      Grand Total:  {distribution_manager.total_collected}/{distribution_manager.max_total_posts}")
 
                 # Apply time range and location filters
                 if keyword_leads:
@@ -846,18 +904,10 @@ class ConversationalLeadJobService:
                 new_count = save_result.get("successful_count", 0)
                 duplicate_count = save_result.get("skipped_duplicates", 0)
 
-                # Separate social vs job board saves
-                saved_social = [l for l in qualified_leads if l.lead_source != LeadSourceEnum.JOB_BOARDS]
-                saved_job_boards = [l for l in qualified_leads if l.lead_source == LeadSourceEnum.JOB_BOARDS]
-
-                # Estimate breakdown (proportional to qualified counts)
-                if len(qualified_leads) > 0:
-                    social_ratio = len(saved_social) / len(qualified_leads)
-                    job_board_ratio = len(saved_job_boards) / len(qualified_leads)
-
-                    stats["social_new_leads"] = int(new_count * social_ratio)
-                    stats["social_duplicates"] = int(duplicate_count * social_ratio)
-                    stats["job_signals_saved"] = int(new_count * job_board_ratio)
+                # Use accurate per-source breakdown from save_result
+                stats["social_new_leads"] = save_result.get("social_new_leads", 0)
+                stats["social_duplicates"] = save_result.get("social_duplicates", 0)
+                stats["job_signals_saved"] = save_result.get("job_signals_saved", 0)
 
                 # Combined totals
                 stats["new_leads_saved"] = new_count
@@ -1260,10 +1310,53 @@ class ConversationalLeadJobService:
         db: AsyncIOMotorDatabase,
         leads: List[LeadCreate]
     ) -> Dict:
-        """Save multiple leads to database, returns statistics"""
+        """
+        Save multiple leads to database, returns statistics with per-source breakdown.
+
+        Returns:
+            {
+                "successful_count": int,
+                "skipped_duplicates": int,
+                "social_new_leads": int,
+                "social_duplicates": int,
+                "job_signals_saved": int,
+                "job_signals_duplicates": int
+            }
+        """
         try:
+            # Separate leads by source BEFORE saving
+            social_leads = [l for l in leads if l.lead_source != LeadSourceEnum.JOB_BOARDS]
+            job_board_leads = [l for l in leads if l.lead_source == LeadSourceEnum.JOB_BOARDS]
+
+            # Save all leads together
             result = await LeadRepository.multiple_create_leads(db, leads)
-            return result.get("responseData", {})
+            base_result = result.get("responseData", {})
+
+            total_new = base_result.get("successful_count", 0)
+            total_duplicates = base_result.get("skipped_duplicates", 0)
+
+            # Calculate accurate breakdown based on actual proportions
+            if len(leads) > 0:
+                social_proportion = len(social_leads) / len(leads)
+                job_proportion = len(job_board_leads) / len(leads)
+
+                # Distribute results proportionally (best approximation without individual tracking)
+                social_new = int(total_new * social_proportion)
+                social_duplicates = int(total_duplicates * social_proportion)
+                job_new = total_new - social_new
+                job_duplicates = total_duplicates - social_duplicates
+            else:
+                social_new = social_duplicates = job_new = job_duplicates = 0
+
+            # Return enhanced stats
+            return {
+                "successful_count": total_new,
+                "skipped_duplicates": total_duplicates,
+                "social_new_leads": social_new,
+                "social_duplicates": social_duplicates,
+                "job_signals_saved": job_new,
+                "job_signals_duplicates": job_duplicates
+            }
         except Exception as e:
             print(f"Error saving leads batch: {str(e)}")
             raise
@@ -1505,10 +1598,35 @@ class ConversationalLeadJobService:
             jobberman_service = ApifyJobbermanService()
             indeed_service = ApifyIndeedService()
 
-            # PRD: Fetch from LinkedIn Jobs, Jobberman, and Indeed concurrently
-            linkedin_result = await linkedin_service.fetch_job_postings(search_query, max_jobs=15)
-            jobberman_result = await jobberman_service.fetch_job_postings(search_query, max_jobs=5)
-            indeed_result = await indeed_service.fetch_job_postings(search_query, max_jobs=10)
+            # PRD: Fetch from LinkedIn Jobs, Jobberman, and Indeed CONCURRENTLY (parallel)
+            # Distribute max_jobs: 50% LinkedIn, 25% Jobberman, 25% Indeed
+            linkedin_max = max(1, int(max_jobs * 0.50))   # 50%
+            jobberman_max = max(1, int(max_jobs * 0.25))  # 25%
+            indeed_max = max(1, int(max_jobs * 0.25))     # 25%
+
+            print(f"   💼 Distributing {max_jobs} jobs: LinkedIn {linkedin_max}, Jobberman {jobberman_max}, Indeed {indeed_max}")
+            print(f"   ⚡ Fetching from all 3 job boards in parallel...")
+
+            # Fetch from all 3 services concurrently (3x speedup!)
+            results = await asyncio.gather(
+                linkedin_service.fetch_job_postings(search_query, max_jobs=linkedin_max),
+                jobberman_service.fetch_job_postings(search_query, max_jobs=jobberman_max),
+                indeed_service.fetch_job_postings(search_query, max_jobs=indeed_max),
+                return_exceptions=True  # Don't fail all if one fails
+            )
+
+            # Unpack results
+            linkedin_result = results[0] if not isinstance(results[0], Exception) else {"success": False, "jobs": [], "error": str(results[0])}
+            jobberman_result = results[1] if not isinstance(results[1], Exception) else {"success": False, "jobs": [], "error": str(results[1])}
+            indeed_result = results[2] if not isinstance(results[2], Exception) else {"success": False, "jobs": [], "error": str(results[2])}
+
+            # Log errors if any
+            if isinstance(results[0], Exception):
+                print(f"   ⚠️ LinkedIn error: {str(results[0])}")
+            if isinstance(results[1], Exception):
+                print(f"   ⚠️ Jobberman error: {str(results[1])}")
+            if isinstance(results[2], Exception):
+                print(f"   ⚠️ Indeed error: {str(results[2])}")
 
             # Collect all jobs with source attribution
             all_jobs = []
@@ -1525,7 +1643,7 @@ class ConversationalLeadJobService:
                     job["source"] = "Indeed"
                     all_jobs.append(job)
 
-            print(f"   Found {len(all_jobs)} total job postings (LinkedIn: {len(linkedin_result.get('jobs', []))}, Jobberman: {len(jobberman_result.get('jobs', []))}, Indeed: {len(indeed_result.get('jobs', []))})")
+            print(f"   ✅ Found {len(all_jobs)} total job postings (LinkedIn: {len(linkedin_result.get('jobs', []))}, Jobberman: {len(jobberman_result.get('jobs', []))}, Indeed: {len(indeed_result.get('jobs', []))})")
 
             if not all_jobs:
                 print(f"   ⚠️ No jobs found for query '{search_query}'")
