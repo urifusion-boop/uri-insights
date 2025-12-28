@@ -53,6 +53,7 @@ class ConversationalSearchRequest(BaseBusinessAndConversationalSearchRequest):
     enable_realtime: Optional[bool] = False
     monitoring_platforms: Optional[List[str]] = None
     platform_configs: Optional[List[PlatformConfig]] = None
+    monitoring_interval_hours: Optional[int] = 0  # 0 = one-time only, >0 = recurring interval in hours
 
     # Job Boards fields (PRD Section 5) - Only for Conversational forms
     solution_context: Optional[str] = None  # What problem does user's product/service solve?

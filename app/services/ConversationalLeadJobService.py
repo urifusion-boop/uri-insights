@@ -902,6 +902,46 @@ class ConversationalLeadJobService:
                     stats=stats
                 )
                 print(f"✅ Job {job_id} completed: {message}")
+
+                # Check if this is a recurring monitoring job (ONLY for conversational leads)
+                monitoring_interval_hours = lead_form.get("monitoring_interval_hours", 0)
+
+                if monitoring_interval_hours and monitoring_interval_hours > 0:
+                    # Re-queue the job for next monitoring cycle
+                    try:
+                        from app.services.azure.producers.LeadGenerationProducer import LeadGenerationProducer
+                        from app.repository.LeadGenerationJobRepository import LeadGenerationJobRepository
+
+                        print(f"🔄 Recurring monitoring enabled: scheduling next run in {monitoring_interval_hours} hour(s)")
+
+                        # Create a NEW job_id for the next monitoring cycle
+                        # CRITICAL: Don't reuse the old job_id - workers will skip it as "completed"
+                        next_job_id = await LeadGenerationJobRepository.create_job(
+                            db=db,
+                            lead_form_id=lead_form_id,
+                            user_id=user_id,
+                            status="queued",
+                            progress=0,
+                            message=f"Scheduled recurring monitoring (every {monitoring_interval_hours}h)"
+                        )
+
+                        # Create a fresh lead_form copy with the NEW job_id
+                        next_lead_form = {**lead_form, "job_id": next_job_id}
+
+                        # Schedule the next job execution using Azure Service Bus scheduled messages
+                        await LeadGenerationProducer.schedule_lead_generation_job(
+                            lead_form_id=lead_form_id,
+                            user_id=user_id,
+                            lead_form=next_lead_form,  # Use fresh copy with new job_id
+                            delay_hours=monitoring_interval_hours
+                        )
+                        print(f"✅ Next monitoring job {next_job_id} scheduled for {monitoring_interval_hours} hour(s) from now")
+                    except Exception as schedule_error:
+                        # Don't fail the entire job if scheduling fails
+                        print(f"⚠️ Failed to schedule next monitoring job: {schedule_error}")
+                        print(f"   Current job completed successfully, but recurring monitoring stopped.")
+                else:
+                    print(f"✨ One-time execution completed. No recurring monitoring scheduled (monitoring_interval_hours={monitoring_interval_hours}).")
             else:
                 print(f"❌ Job {job_id} failed with error: {error_msg}")
 

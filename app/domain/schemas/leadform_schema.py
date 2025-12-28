@@ -108,6 +108,7 @@ class LeadFormBase(BaseModel):
     enable_realtime: Optional[bool] = False
     monitoring_platforms: Optional[List[str]] = None
     platform_configs: Optional[List[PlatformConfig]] = None
+    monitoring_interval_hours: Optional[int] = 0  # 0 = one-time only, >0 = recurring interval in hours (e.g., 1, 2, 3, 6, 12, 24, 48, 72, 120, 168)
 
     # Job Boards fields
     solution_context: Optional[str] = None  # What problem does user's product/service solve? (for job board analysis)
@@ -210,6 +211,7 @@ class ConversationalLeadFormUpdate(BizConvLeadFormUpdateBase):
     enable_realtime: Optional[bool] = None
     monitoring_platforms: Optional[List[str]] = None
     platform_configs: Optional[List[PlatformConfig]] = None
+    monitoring_interval_hours: Optional[int] = None  # 0 = one-time only, >0 = recurring interval in hours
 
     # Job Boards fields
     solution_context: Optional[str] = None  # What problem does user's product/service solve?
