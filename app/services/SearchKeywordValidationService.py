@@ -6,7 +6,7 @@ Prevents irrelevant lead generation by warning users when category_context doesn
 
 from typing import Dict, Any, Optional
 import json
-from app.services.OpenAIService import OpenAIService
+from app.services.AIService import AIService
 
 
 class SearchKeywordValidationService:
@@ -119,16 +119,34 @@ Note: Job boards almost always match because they're hiring signals (any busines
 Focus primarily on validating if social platform search makes sense."""
 
         try:
-            # Call OpenAI
-            response = await OpenAIService.get_completion(
-                prompt=prompt,
+            # Call OpenAI using same approach as AIService
+            from openai import OpenAI
+            from app.core.config import settings
+
+            client = OpenAI(api_key=settings.OPENAI_API_KEY)
+
+            messages = [
+                {"role": "system", "content": "You are a business context validator. Always respond with valid JSON only, no markdown."},
+                {"role": "user", "content": prompt}
+            ]
+
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",  # Same model as auto-populate uses
+                messages=messages,
                 temperature=0.3,
-                max_tokens=500,
-                model="gpt-4o-mini"  # Fast model for validation
+                max_tokens=500
             )
 
+            response_text = response.choices[0].message.content.strip()
+
+            # Remove markdown code blocks if present
+            if response_text.startswith("```json"):
+                response_text = response_text.replace("```json", "").replace("```", "").strip()
+            elif response_text.startswith("```"):
+                response_text = response_text.replace("```", "").strip()
+
             # Parse JSON response
-            result = json.loads(response.strip())
+            result = json.loads(response_text)
 
             # Calculate overall match score (weighted toward social since job boards always match)
             overall_match = (

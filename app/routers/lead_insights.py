@@ -21,7 +21,7 @@ from app.domain.schemas.lead_schema import (
     LeadUpdate,
 )
 from app.domain.responses.uri_response import UriResponse
-from typing import Optional, List, Union
+from typing import Optional, List, Union, Dict, Any
 from fastapi.encoders import jsonable_encoder
 from app.services.ApolloService import ApolloService
 from app.services.LeadBusinessInfoService import LeadBusinessInfoService
