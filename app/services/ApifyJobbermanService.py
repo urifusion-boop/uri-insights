@@ -152,13 +152,19 @@ class ApifyJobbermanService:
             items = []
             try:
                 dataset_id = run["defaultDatasetId"]
+                logger.info(f"📊 Jobberman dataset ID: {dataset_id}")
+
                 for item in self.apify_client.dataset(dataset_id).iterate_items():
                     items.append(item)
+
+                logger.info(f"📊 Jobberman total items fetched: {len(items)}")
 
                 # Log the first item structure for debugging
                 if items:
                     logger.info(f"🔍 Sample Jobberman job item structure: {list(items[0].keys())}")
                     logger.info(f"🔍 First Jobberman item: {items[0]}")
+                else:
+                    logger.warning(f"⚠️ Jobberman returned 0 items from dataset {dataset_id}")
 
             except Exception as dataset_error:
                 logger.error(f"Error reading dataset: {str(dataset_error)}")
