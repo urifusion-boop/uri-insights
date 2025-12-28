@@ -636,7 +636,7 @@ class ConversationalLeadJobService:
             import random
             job_board_keywords = []
             if BrowsercloudPlatformEnum.JOB_BOARDS.value.lower() in enabled_platforms:
-                # Use job_keywords if available, otherwise sample from prioritized_keywords
+                # Use job_keywords if available (for job-only searches), otherwise sample from prioritized_keywords
                 if job_keywords and len(job_keywords) > 0:
                     job_board_keywords = random.sample(job_keywords, min(4, len(job_keywords)))
                 else:
@@ -729,7 +729,7 @@ class ConversationalLeadJobService:
                 # PRD Section 5: Job Boards use selected keywords (up to 4 random)
                 if BrowsercloudPlatformEnum.JOB_BOARDS.value.lower() in enabled_platforms:
                     # Check if current keyword is in job_board_keywords AND limit allows more fetching
-                    job_boards_limit = limits.get("job_boards", 0)
+                    job_boards_limit = keyword_limits.get("job_boards", 0)
 
                     # Only fetch job boards if current keyword is in the selected subset
                     if keyword in job_board_keywords and job_boards_limit > 0:
