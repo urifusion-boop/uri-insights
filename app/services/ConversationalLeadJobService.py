@@ -469,7 +469,8 @@ class ConversationalLeadJobService:
             "social_duplicates": 0,
 
             # Job board stats
-            "job_signals_found": 0,
+            "job_boards_total_fetched": 0,  # Total jobs fetched (before AI filtering)
+            "job_signals_found": 0,  # Qualified job signals (after AI filtering)
             "job_signals_saved": 0,
             "job_signals_high_match": 0,
             "job_signals_medium_match": 0,
@@ -683,6 +684,9 @@ class ConversationalLeadJobService:
             # Initialize platform distribution manager (150 social + 100 job boards = 250 total)
             distribution_manager = PlatformDistributionManager(max_social_posts=150, max_job_posts=100)
 
+            # Track total job posts fetched across all keywords (before AI filtering)
+            job_boards_total_fetched = 0
+
             # Try ALL keywords to maximize qualified leads (with early stopping at 150 posts)
             qualified_leads = []
             for keyword_idx, keyword in enumerate(prioritized_keywords, 1):
@@ -816,7 +820,6 @@ class ConversationalLeadJobService:
                 keyword_leads = []
                 platform_errors = []
                 platform_successes = 0
-                job_boards_total_fetched = 0  # Track total job posts fetched (before AI filtering)
 
                 if fetch_tasks:
                     print(f"   ⚡ Fetching from {len(fetch_tasks)} platform(s) concurrently...")
@@ -960,6 +963,9 @@ class ConversationalLeadJobService:
                         if extra_total_fetched > 0:
                             print(f"   ✅ Got {len(extra_qualified_leads)} qualified job leads from expansion ({extra_total_fetched} total fetched)")
 
+                            # Track total fetched count
+                            job_boards_total_fetched += extra_total_fetched
+
                             # Apply filters to qualified leads
                             post_age_filter = lead_form.get("post_age_filter", "all")
                             location_filter = lead_form.get("location") or []
@@ -995,7 +1001,8 @@ class ConversationalLeadJobService:
             stats["social_qualified"] = len(social_qualified)
 
             # Job board stats
-            stats["job_signals_found"] = len(job_board_all)
+            stats["job_boards_total_fetched"] = job_boards_total_fetched  # Use tracked raw count
+            stats["job_signals_found"] = len(job_board_qualified)  # Qualified count after AI
             # Count by match strength
             for job_lead in job_board_qualified:
                 commercial_relevance = job_lead.commercial_relevance or 0
@@ -1007,7 +1014,7 @@ class ConversationalLeadJobService:
                     stats["job_signals_low_match"] += 1
 
             # Combined totals (for backward compatibility)
-            stats["total_fetched"] = len(all_leads)
+            stats["total_fetched"] = stats["social_total_fetched"] + stats["job_boards_total_fetched"]
             stats["total_qualified"] = len(qualified_leads)
 
             print(f"\n✅ INTENT ANALYSIS COMPLETE: {len(qualified_leads)}/{len(all_leads)} leads qualified")
