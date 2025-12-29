@@ -178,6 +178,17 @@ class LeadUpdate(BaseModel):
     final_score: Optional[float] = None
     intent_reasoning: Optional[str] = None
 
+    # Job Signal Fields (for updates)
+    job_posting_url: Optional[str] = None
+    job_title_field: Optional[str] = None
+    hiring_company: Optional[str] = None
+    problem_solution_match: Optional[float] = None
+    hiring_intent_score: Optional[float] = None
+    commercial_relevance: Optional[float] = None
+    implied_problems: Optional[List[str]] = None
+    job_source: Optional[str] = None
+    company_confidence: Optional[float] = None
+
     last_updated: datetime = Field(default_factory=datetime.utcnow)
 
     class Config:

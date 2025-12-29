@@ -322,6 +322,14 @@ class LeadRepository:
         for lead in leads:
             lead_data = lead.dict()
 
+            # DEBUG: Print job board lead data
+            if lead.lead_source == "Job Boards":
+                print(f"🔍 DEBUG - Saving Job Board Lead:")
+                print(f"   lead_source: {lead_data.get('lead_source')}")
+                print(f"   hiring_company: {lead_data.get('hiring_company')}")
+                print(f"   job_source: {lead_data.get('job_source')}")
+                print(f"   job_title_field: {lead_data.get('job_title_field')}")
+
             # Check if this lead already exists for this user (URL-based)
             if lead.lead_link and lead.assigned_to:
                 if lead.lead_link in existing_leads_by_user.get(lead.assigned_to, set()):
