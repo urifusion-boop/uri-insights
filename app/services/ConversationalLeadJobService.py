@@ -701,7 +701,9 @@ class ConversationalLeadJobService:
 
                 # CONCURRENT FETCHING: Optimize keywords per platform and fetch in parallel
                 fetch_tasks = []
-                platform_timeout = 45  # 45 seconds per platform
+                fetch_task_timeouts = []  # Track timeout for each task for accurate error reporting
+                social_platform_timeout = 45  # 45 seconds for social platforms
+                job_board_timeout = 90  # 90 seconds for job boards (includes scraping + AI analysis)
 
                 # Twitter - only fetch if limit exists (not at target)
                 if BrowsercloudPlatformEnum.TWITTER.value.lower() in enabled_platforms and "twitter" in keyword_limits:
@@ -713,9 +715,10 @@ class ConversationalLeadJobService:
                             ConversationalLeadJobService._fetch_twitter_leads(
                                 twitter_keyword, user_id, lead_form.get("lead_form_id"), max_posts=twitter_limit
                             ),
-                            timeout=platform_timeout
+                            timeout=social_platform_timeout
                         )
                     )
+                    fetch_task_timeouts.append(social_platform_timeout)
                 elif BrowsercloudPlatformEnum.TWITTER.value.lower() in enabled_platforms:
                     print(f"   🐦 Twitter: SKIPPED (target reached)")
 
@@ -729,9 +732,10 @@ class ConversationalLeadJobService:
                             ConversationalLeadJobService._fetch_facebook_leads(
                                 facebook_keyword, user_id, lead_form.get("lead_form_id"), max_posts=facebook_limit
                             ),
-                            timeout=platform_timeout
+                            timeout=social_platform_timeout
                         )
                     )
+                    fetch_task_timeouts.append(social_platform_timeout)
                 elif BrowsercloudPlatformEnum.FACEBOOK.value.lower() in enabled_platforms:
                     print(f"   📘 Facebook: SKIPPED (target reached)")
 
@@ -745,9 +749,10 @@ class ConversationalLeadJobService:
                             ConversationalLeadJobService._fetch_tiktok_leads(
                                 tiktok_keyword, user_id, lead_form.get("lead_form_id"), max_posts=tiktok_limit
                             ),
-                            timeout=platform_timeout
+                            timeout=social_platform_timeout
                         )
                     )
+                    fetch_task_timeouts.append(social_platform_timeout)
                 elif BrowsercloudPlatformEnum.TIKTOK.value.lower() in enabled_platforms:
                     print(f"   🎵 TikTok: SKIPPED (target reached)")
 
@@ -797,9 +802,10 @@ class ConversationalLeadJobService:
                                     ConversationalLeadJobService._fetch_job_board_signals(
                                         job_keyword_to_use, user_id, lead_form.get("lead_form_id"), solution_context, max_jobs=job_boards_limit
                                     ),
-                                    timeout=90  # Longer timeout for job scraping + AI analysis
+                                    timeout=job_board_timeout  # Longer timeout for job scraping + AI analysis
                                 )
                             )
+                            fetch_task_timeouts.append(job_board_timeout)
                         else:
                             print(f"   ⚠️ Job Boards enabled but no solution_context available (not in form or user onboarding) - skipping")
                     elif has_job_boards and job_boards_limit == 0:
@@ -818,7 +824,7 @@ class ConversationalLeadJobService:
                     # Collect successful results and track failures
                     for idx, result in enumerate(results):
                         if isinstance(result, asyncio.TimeoutError):
-                            error_msg = f"Platform {idx+1} timed out after {platform_timeout}s"
+                            error_msg = f"Platform {idx+1} timed out after {fetch_task_timeouts[idx]}s"
                             print(f"   ⏱️ {error_msg}")
                             platform_errors.append(error_msg)
                         elif isinstance(result, Exception):

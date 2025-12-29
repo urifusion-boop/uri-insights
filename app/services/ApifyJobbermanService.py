@@ -176,21 +176,48 @@ class ApifyJobbermanService:
 
             # Process the results
             jobs = []
-            for item in items[:max_jobs]:
+            for idx, item in enumerate(items[:max_jobs]):
                 try:
+                    # Debug: Log actual field names for first item
+                    if idx == 0:
+                        logger.info(f"🔍 Jobberman item fields: {list(item.keys())}")
+                        logger.info(f"🔍 Full item content: {item}")
+
                     # Extract job information from Jobberman actor output
-                    # The shahidirfan/jobberman-job-scraper returns fields like:
-                    # title, company, location, description, url, salary, etc.
+                    # Try multiple possible field name variations
+                    title = (item.get("title") or item.get("jobTitle") or item.get("job_title") or
+                            item.get("position") or item.get("role") or "Unknown Title")
+
+                    company = (item.get("company") or item.get("companyName") or item.get("company_name") or
+                              item.get("employer") or "Unknown Company")
+
+                    location_field = (item.get("location") or item.get("jobLocation") or item.get("job_location") or
+                                     item.get("city") or location)
+
+                    # Description - try various field names
+                    description = (item.get("description") or item.get("jobDescription") or
+                                  item.get("job_description") or item.get("details") or
+                                  item.get("summary") or item.get("responsibilities") or "")
+
+                    # URL - try various field names
+                    url = (item.get("url") or item.get("link") or item.get("jobUrl") or
+                          item.get("job_url") or item.get("detailUrl") or item.get("applyUrl") or "")
+
                     job_data = {
-                        "title": item.get("title") or item.get("jobTitle") or item.get("job_title") or "Unknown Title",
-                        "company": item.get("company") or item.get("companyName") or item.get("company_name") or "Unknown Company",
-                        "location": item.get("location") or item.get("jobLocation") or item.get("job_location") or location,
-                        "description": item.get("description") or item.get("jobDescription") or item.get("job_description") or "",
-                        "url": item.get("url") or item.get("link") or item.get("jobUrl") or item.get("job_url") or "",
-                        "posted_date": self._parse_posted_date(item.get("postedDate") or item.get("posted_date") or item.get("publishedAt")),
+                        "title": title,
+                        "company": company,
+                        "location": location_field,
+                        "description": description,
+                        "url": url,
+                        "posted_date": self._parse_posted_date(item.get("postedDate") or item.get("posted_date") or item.get("publishedAt") or item.get("date")),
                         "salary": item.get("salary") or item.get("salaryRange") or item.get("salary_range"),
                         "source": "Jobberman"
                     }
+
+                    # Debug log for missing fields
+                    if not url or not description:
+                        logger.warning(f"⚠️ Jobberman job '{title}': URL={'present' if url else 'MISSING'}, Description={'present' if description else 'MISSING'}")
+                        logger.warning(f"   Available fields in item: {list(item.keys())}")
 
                     # Only add jobs with valid URLs and descriptions
                     if job_data["url"] and job_data["description"]:
@@ -200,6 +227,8 @@ class ApifyJobbermanService:
 
                 except Exception as item_error:
                     logger.warning(f"Error processing Jobberman job item: {str(item_error)}")
+                    import traceback
+                    traceback.print_exc()
                     continue
 
             logger.info(f"Successfully fetched {len(jobs)} Jobberman jobs")
