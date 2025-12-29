@@ -8,7 +8,7 @@ import time
 import re
 import hashlib
 from concurrent.futures import ThreadPoolExecutor
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta, timezone
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.core.helpers.text_helper import TextHelper
