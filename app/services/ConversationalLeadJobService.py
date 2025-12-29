@@ -816,6 +816,7 @@ class ConversationalLeadJobService:
                 keyword_leads = []
                 platform_errors = []
                 platform_successes = 0
+                job_boards_total_fetched = 0  # Track total job posts fetched (before AI filtering)
 
                 if fetch_tasks:
                     print(f"   ⚡ Fetching from {len(fetch_tasks)} platform(s) concurrently...")
@@ -831,7 +832,16 @@ class ConversationalLeadJobService:
                             error_msg = f"Platform {idx+1} error: {str(result)}"
                             print(f"   ❌ {error_msg}")
                             platform_errors.append(error_msg)
+                        elif isinstance(result, dict):
+                            # Job boards return dict with qualified_leads and total_fetched
+                            qualified = result.get("qualified_leads", [])
+                            total_fetched = result.get("total_fetched", 0)
+                            keyword_leads.extend(qualified)
+                            job_boards_total_fetched += total_fetched  # Track raw count
+                            print(f"   ✅ Platform {idx+1} returned {len(qualified)} qualified leads ({total_fetched} total fetched)")
+                            platform_successes += 1
                         elif isinstance(result, list):
+                            # Social media returns list of leads
                             keyword_leads.extend(result)
                             print(f"   ✅ Platform {idx+1} returned {len(result)} leads")
                             platform_successes += 1
@@ -854,7 +864,8 @@ class ConversationalLeadJobService:
                 twitter_count = len([l for l in keyword_leads if l.lead_source == LeadSourceEnum.X])
                 facebook_count = len([l for l in keyword_leads if l.lead_source == LeadSourceEnum.FACEBOOK])
                 tiktok_count = len([l for l in keyword_leads if l.lead_source == LeadSourceEnum.TIKTOK])
-                job_boards_count = len([l for l in keyword_leads if l.lead_source == LeadSourceEnum.JOB_BOARDS])
+                # For job boards: use total_fetched (raw count) not qualified count
+                job_boards_count = job_boards_total_fetched if job_boards_total_fetched > 0 else len([l for l in keyword_leads if l.lead_source == LeadSourceEnum.JOB_BOARDS])
 
                 distribution_manager.update_counts(twitter_count, facebook_count, tiktok_count, job_boards_count)
 
@@ -934,7 +945,7 @@ class ConversationalLeadJobService:
                         job_boards_remaining = distribution_manager.max_job_posts - distribution_manager.job_boards_collected
 
                         # Fetch from job boards
-                        extra_job_leads = await ConversationalLeadJobService._fetch_job_board_signals(
+                        extra_result = await ConversationalLeadJobService._fetch_job_board_signals(
                             extra_keyword,
                             user_id,
                             lead_form.get("lead_form_id"),
@@ -942,33 +953,29 @@ class ConversationalLeadJobService:
                             max_jobs=job_boards_remaining
                         )
 
-                        if extra_job_leads:
-                            print(f"   ✅ Got {len(extra_job_leads)} job board leads from expansion keyword")
+                        # Extract qualified leads and total fetched from result dict
+                        extra_qualified_leads = extra_result.get("qualified_leads", [])
+                        extra_total_fetched = extra_result.get("total_fetched", 0)
 
-                            # Apply filters
+                        if extra_total_fetched > 0:
+                            print(f"   ✅ Got {len(extra_qualified_leads)} qualified job leads from expansion ({extra_total_fetched} total fetched)")
+
+                            # Apply filters to qualified leads
                             post_age_filter = lead_form.get("post_age_filter", "all")
                             location_filter = lead_form.get("location") or []
                             cutoff_date = LeadFilter.calculate_cutoff_date(post_age_filter)
 
-                            filtered_leads = LeadFilter.filter_by_time_range(extra_job_leads, cutoff_date)
+                            filtered_leads = LeadFilter.filter_by_time_range(extra_qualified_leads, cutoff_date)
                             filtered_leads = LeadFilter.filter_by_location(filtered_leads, location_filter)
 
                             if filtered_leads:
-                                # Analyze filtered leads
-                                extra_qualified = await ConversationalLeadJobService._analyze_and_filter_leads(
-                                    filtered_leads, category_config, intent_min, relevance_min, final_min
-                                )
+                                all_leads.extend(filtered_leads)
+                                qualified_leads.extend(filtered_leads)
+                                print(f"   ✅ {len(filtered_leads)} leads passed filters from expansion keyword")
 
-                                if extra_qualified:
-                                    all_leads.extend(filtered_leads)
-                                    qualified_leads.extend(extra_qualified)
-                                    print(f"   ✅ {len(extra_qualified)} qualified from expansion keyword")
-
-                                    # Update distribution manager counts
-                                    job_boards_count = len([l for l in filtered_leads if l.lead_source == LeadSourceEnum.JOB_BOARDS])
-                                    distribution_manager.update_counts(0, 0, 0, job_boards_count)
-
-                                    print(f"   📊 Job Boards: {distribution_manager.job_boards_collected}/{distribution_manager.max_job_posts}")
+                            # Update distribution manager with TOTAL FETCHED count (not qualified)
+                            distribution_manager.update_counts(0, 0, 0, extra_total_fetched)
+                            print(f"   📊 Job Boards: {distribution_manager.job_boards_collected}/{distribution_manager.max_job_posts}")
                         else:
                             print(f"   ⚠️ No leads from expansion keyword '{extra_keyword}'")
 
@@ -1686,7 +1693,7 @@ class ConversationalLeadJobService:
         lead_form_id: Optional[str] = None,
         solution_context: str = "",
         max_jobs: int = 20
-    ) -> List[LeadCreate]:
+    ) -> Dict[str, Any]:
         """
         Fetch and analyze job postings from LinkedIn Jobs and Jobberman
         Pattern: Same as _fetch_twitter_leads() but for job boards
@@ -1699,7 +1706,9 @@ class ConversationalLeadJobService:
             max_jobs: Maximum number of jobs to fetch
 
         Returns:
-            List of LeadCreate objects from qualified job postings
+            Dict with:
+                - "qualified_leads": List of LeadCreate objects from qualified job postings
+                - "total_fetched": Total number of job postings fetched (before AI filtering)
         """
         try:
             print(f"💼 Fetching job board signals with query: '{search_query}'")
@@ -1827,13 +1836,19 @@ class ConversationalLeadJobService:
                     continue
 
             print(f"   ✅ {len(qualified_signals)} qualified job signals (from {len(deduplicated_jobs)} analyzed)")
-            return qualified_signals
+
+            # Return both total fetched and qualified leads
+            # Counter will use total_fetched to track raw posts (like social media)
+            return {
+                "qualified_leads": qualified_signals,
+                "total_fetched": len(deduplicated_jobs)
+            }
 
         except Exception as e:
             print(f"❌ Error fetching job board signals: {str(e)}")
             import traceback
             traceback.print_exc()
-            return []
+            return {"qualified_leads": [], "total_fetched": 0}
 
     @staticmethod
     def _deduplicate_jobs(jobs: List[Dict]) -> List[Dict]:
