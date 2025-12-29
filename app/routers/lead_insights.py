@@ -658,14 +658,27 @@ async def find_decision_makers_for_job_signal(
     Returns 1-3 relevant decision-makers with contact details (name, title, email, phone, LinkedIn)
     """
     try:
+        print(f"🔍 DECISION MAKER REQUEST - Lead ID: {lead_id}")
+
         # Get the job signal lead
         lead = await LeadRepository.get_lead_by_id(db, lead_id)
 
+        print(f"📋 Lead found: {lead is not None}")
+        if lead:
+            print(f"   lead_source: {lead.get('lead_source')}")
+            print(f"   hiring_company: {lead.get('hiring_company')}")
+            print(f"   job_source: {lead.get('job_source')}")
+
         if not lead:
+            print("❌ Lead not found")
             return UriResponse.custom_response("Lead not found", 404, False)
 
         # Verify this is a job board signal
-        if lead.get("lead_source") != LeadSourceEnum.JOB_BOARDS:
+        lead_source = lead.get("lead_source")
+        print(f"🔎 Checking lead_source: '{lead_source}' == '{LeadSourceEnum.JOB_BOARDS}' ?")
+
+        if lead_source != LeadSourceEnum.JOB_BOARDS:
+            print(f"❌ Not a job board lead! lead_source='{lead_source}'")
             return UriResponse.custom_response(
                 "This endpoint only works for job board signals",
                 400,
