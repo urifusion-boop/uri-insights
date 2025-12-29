@@ -703,7 +703,7 @@ class ConversationalLeadJobService:
                 fetch_tasks = []
                 fetch_task_timeouts = []  # Track timeout for each task for accurate error reporting
                 social_platform_timeout = 45  # 45 seconds for social platforms
-                job_board_timeout = 90  # 90 seconds for job boards (includes scraping + AI analysis)
+                job_board_timeout = 150  # 150 seconds for job boards (includes scraping + AI analysis for multiple jobs)
 
                 # Twitter - only fetch if limit exists (not at target)
                 if BrowsercloudPlatformEnum.TWITTER.value.lower() in enabled_platforms and "twitter" in keyword_limits:

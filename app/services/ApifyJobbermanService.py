@@ -194,10 +194,11 @@ class ApifyJobbermanService:
                     location_field = (item.get("location") or item.get("jobLocation") or item.get("job_location") or
                                      item.get("city") or location)
 
-                    # Description - try various field names
-                    description = (item.get("description") or item.get("jobDescription") or
-                                  item.get("job_description") or item.get("details") or
-                                  item.get("summary") or item.get("responsibilities") or "")
+                    # Description - try various field names (Jobberman uses description_text)
+                    description = (item.get("description_text") or item.get("description") or
+                                  item.get("jobDescription") or item.get("job_description") or
+                                  item.get("details") or item.get("summary") or
+                                  item.get("responsibilities") or "")
 
                     # URL - try various field names
                     url = (item.get("url") or item.get("link") or item.get("jobUrl") or
@@ -209,8 +210,8 @@ class ApifyJobbermanService:
                         "location": location_field,
                         "description": description,
                         "url": url,
-                        "posted_date": self._parse_posted_date(item.get("postedDate") or item.get("posted_date") or item.get("publishedAt") or item.get("date")),
-                        "salary": item.get("salary") or item.get("salaryRange") or item.get("salary_range"),
+                        "posted_date": self._parse_posted_date(item.get("date_posted") or item.get("postedDate") or item.get("posted_date") or item.get("publishedAt") or item.get("date")),
+                        "salary": item.get("salary_range") or item.get("salary") or item.get("salaryRange"),
                         "source": "Jobberman"
                     }
 

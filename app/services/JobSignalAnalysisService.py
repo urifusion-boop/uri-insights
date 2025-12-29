@@ -22,7 +22,7 @@ class JobSignalResult(BaseModel):
     problem_solution_match: float = Field(ge=0, le=1, description="How well user's solution addresses the hiring problem (0-1)")
     hiring_intent_score: float = Field(ge=0, le=1, description="How urgent/serious is the hiring need (0-1)")
     commercial_relevance: float = Field(ge=0, le=1, description="Likelihood company will buy user's solution (0-1)")
-    implied_problems: str = Field(description="Business problems this hiring suggests")
+    implied_problems: List[str] = Field(description="List of business problems this hiring suggests")
     target_seniorities: List[str] = Field(description="Job titles to contact (e.g., ['CTO', 'VP Engineering'])")
     reasoning: str = Field(description="Why this is a sales signal")
     company_confidence: float = Field(ge=0, le=1, description="Confidence that company can be verified/contacted (0-1, PRD Sections 14-16)")
@@ -208,7 +208,7 @@ Remember:
                 problem_solution_match=0.0,
                 hiring_intent_score=0.0,
                 commercial_relevance=0.0,
-                implied_problems="Analysis failed due to an error",
+                implied_problems=["Analysis failed due to an error"],
                 target_seniorities=[],
                 reasoning=f"Error analyzing job posting: {str(e)}",
                 company_confidence=0.0
