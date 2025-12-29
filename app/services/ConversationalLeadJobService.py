@@ -902,6 +902,80 @@ class ConversationalLeadJobService:
 
                 # Continue with all keywords to maximize results (no early stopping)
 
+            # DYNAMIC KEYWORD EXPANSION: If job boards didn't reach 100 posts, try more keywords
+            if has_job_boards and distribution_manager.job_boards_collected < distribution_manager.max_job_posts:
+                remaining_needed = distribution_manager.max_job_posts - distribution_manager.job_boards_collected
+                print(f"\n💼 Job boards collected {distribution_manager.job_boards_collected}/{distribution_manager.max_job_posts} posts")
+                print(f"   📈 Need {remaining_needed} more posts - trying additional keywords...")
+
+                # Get unused keywords (keywords not in the initial 4)
+                source_keywords = job_keywords if job_keywords else []
+                if only_job_boards:
+                    source_keywords = prioritized_keywords  # Use same source as initial selection
+
+                unused_keywords = [k for k in source_keywords if k not in job_board_keywords]
+
+                if unused_keywords and len(unused_keywords) > 0:
+                    # Select up to 4 more keywords, but don't exceed total available
+                    additional_count = min(4, len(unused_keywords))
+                    additional_keywords = random.sample(unused_keywords, additional_count)
+                    print(f"   🔑 Trying {len(additional_keywords)} additional keywords: {additional_keywords}")
+
+                    # Fetch from job boards with additional keywords
+                    for extra_idx, extra_keyword in enumerate(additional_keywords):
+                        # Check if we've already reached target
+                        if distribution_manager.job_boards_collected >= distribution_manager.max_job_posts:
+                            print(f"   ✅ Reached job boards target during expansion - stopping")
+                            break
+
+                        print(f"\n🔍 EXPANSION KEYWORD {extra_idx + 1}/{len(additional_keywords)}: '{extra_keyword}'")
+
+                        # Calculate how many more we need
+                        job_boards_remaining = distribution_manager.max_job_posts - distribution_manager.job_boards_collected
+
+                        # Fetch from job boards
+                        extra_job_leads = await ConversationalLeadJobService._fetch_job_board_signals(
+                            extra_keyword,
+                            user_id,
+                            lead_form.get("lead_form_id"),
+                            solution_context,
+                            max_jobs=job_boards_remaining
+                        )
+
+                        if extra_job_leads:
+                            print(f"   ✅ Got {len(extra_job_leads)} job board leads from expansion keyword")
+
+                            # Apply filters
+                            post_age_filter = lead_form.get("post_age_filter", "all")
+                            location_filter = lead_form.get("location") or []
+                            cutoff_date = LeadFilter.calculate_cutoff_date(post_age_filter)
+
+                            filtered_leads = LeadFilter.filter_by_time_range(extra_job_leads, cutoff_date)
+                            filtered_leads = LeadFilter.filter_by_location(filtered_leads, location_filter)
+
+                            if filtered_leads:
+                                # Analyze filtered leads
+                                extra_qualified = await ConversationalLeadJobService._analyze_and_filter_leads(
+                                    filtered_leads, category_config, intent_min, relevance_min, final_min
+                                )
+
+                                if extra_qualified:
+                                    all_leads.extend(filtered_leads)
+                                    qualified_leads.extend(extra_qualified)
+                                    print(f"   ✅ {len(extra_qualified)} qualified from expansion keyword")
+
+                                    # Update distribution manager counts
+                                    job_boards_count = len([l for l in filtered_leads if l.lead_source == LeadSourceEnum.JOB_BOARDS])
+                                    distribution_manager.update_counts(0, 0, 0, job_boards_count)
+
+                                    print(f"   📊 Job Boards: {distribution_manager.job_boards_collected}/{distribution_manager.max_job_posts}")
+                        else:
+                            print(f"   ⚠️ No leads from expansion keyword '{extra_keyword}'")
+
+                    print(f"\n✅ Expansion complete: Job boards now at {distribution_manager.job_boards_collected}/{distribution_manager.max_job_posts}")
+                else:
+                    print(f"   ⚠️ No unused keywords available for expansion (used all {len(source_keywords)} keywords)")
+
             # Update statistics - Separate social vs job board leads
             social_all = [l for l in all_leads if l.lead_source != LeadSourceEnum.JOB_BOARDS]
             job_board_all = [l for l in all_leads if l.lead_source == LeadSourceEnum.JOB_BOARDS]
