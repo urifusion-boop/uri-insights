@@ -738,29 +738,47 @@ async def find_decision_makers_for_job_signal(
         print(f"🔍 Finding decision-makers at {company_name} with titles: {decision_maker_titles}")
 
         # Call Apollo API
-        decision_makers = await ApolloService.find_decision_makers(
-            company_name=company_name,
-            job_titles=decision_maker_titles,
-            max_results=3
-        )
+        try:
+            decision_makers = await ApolloService.find_decision_makers(
+                company_name=company_name,
+                job_titles=decision_maker_titles,
+                max_results=3
+            )
 
-        return UriResponse.custom_response(
-            f"Found {len(decision_makers)} decision-maker(s)",
-            200,
-            True,
-            {
-                "decision_makers": decision_makers,
-                "company_name": company_name,
-                "job_title": job_title
-            }
-        )
+            # Success - return the decision-makers
+            return UriResponse.custom_response(
+                f"Found {len(decision_makers)} decision-maker(s)",
+                200,
+                True,
+                {
+                    "decision_makers": decision_makers,
+                    "company_name": company_name,
+                    "job_title": job_title
+                }
+            )
+
+        except Exception as apollo_error:
+            # Apollo API failed - return user-friendly error
+            error_message = str(apollo_error)
+            print(f"❌ Apollo API error: {error_message}")
+
+            # Return user-friendly message (don't expose internal API issues)
+            return UriResponse.custom_response(
+                "Decision-maker search is temporarily unavailable. Please try again later.",
+                503,  # Service Unavailable
+                False,
+                {
+                    "company_name": company_name,
+                    "suggestion": f"You can manually search for contacts at {company_name} on LinkedIn."
+                }
+            )
 
     except Exception as e:
         print(f"❌ Error finding decision-makers: {str(e)}")
         import traceback
         traceback.print_exc()
         return UriResponse.custom_response(
-            f"Error finding decision-makers: {str(e)}",
+            "An error occurred while processing your request. Please try again later.",
             500,
             False
         )

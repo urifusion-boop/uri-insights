@@ -436,8 +436,16 @@ class ApolloService:
                 )
 
                 if response.status_code != 200:
-                    print(f"❌ Apollo API error: {response.status_code} - {response.text}")
-                    return []
+                    error_message = f"Apollo API error: {response.status_code}"
+                    print(f"❌ {error_message} - {response.text}")
+
+                    # Raise exception for API errors so endpoint can handle gracefully
+                    if response.status_code == 403:
+                        raise Exception("Apollo API service temporarily unavailable")
+                    elif response.status_code == 429:
+                        raise Exception("Rate limit exceeded, please try again later")
+                    else:
+                        raise Exception("Decision-maker lookup service unavailable")
 
                 result = response.json()
                 people = result.get("people", [])
@@ -472,7 +480,8 @@ class ApolloService:
             print(f"❌ Error finding decision-makers: {str(e)}")
             import traceback
             traceback.print_exc()
-            return []
+            # Re-raise the exception so endpoint can handle it properly
+            raise
 
     @staticmethod
     async def enrich_organizations_bulk(domains: List[str]) -> dict:
