@@ -820,6 +820,7 @@ class ConversationalLeadJobService:
                 keyword_leads = []
                 platform_errors = []
                 platform_successes = 0
+                keyword_job_boards_fetched = 0  # Track job boards fetched for THIS keyword only
 
                 if fetch_tasks:
                     print(f"   ⚡ Fetching from {len(fetch_tasks)} platform(s) concurrently...")
@@ -840,7 +841,8 @@ class ConversationalLeadJobService:
                             qualified = result.get("qualified_leads", [])
                             total_fetched = result.get("total_fetched", 0)
                             keyword_leads.extend(qualified)
-                            job_boards_total_fetched += total_fetched  # Track raw count
+                            job_boards_total_fetched += total_fetched  # Accumulate across all keywords
+                            keyword_job_boards_fetched += total_fetched  # Track for THIS keyword only
                             print(f"   ✅ Platform {idx+1} returned {len(qualified)} qualified leads ({total_fetched} total fetched)")
                             platform_successes += 1
                         elif isinstance(result, list):
@@ -867,8 +869,8 @@ class ConversationalLeadJobService:
                 twitter_count = len([l for l in keyword_leads if l.lead_source == LeadSourceEnum.X])
                 facebook_count = len([l for l in keyword_leads if l.lead_source == LeadSourceEnum.FACEBOOK])
                 tiktok_count = len([l for l in keyword_leads if l.lead_source == LeadSourceEnum.TIKTOK])
-                # For job boards: use total_fetched (raw count) not qualified count
-                job_boards_count = job_boards_total_fetched if job_boards_total_fetched > 0 else len([l for l in keyword_leads if l.lead_source == LeadSourceEnum.JOB_BOARDS])
+                # For job boards: use keyword-specific total_fetched (raw count for THIS keyword only)
+                job_boards_count = keyword_job_boards_fetched
 
                 distribution_manager.update_counts(twitter_count, facebook_count, tiktok_count, job_boards_count)
 
@@ -1002,9 +1004,9 @@ class ConversationalLeadJobService:
 
             # Job board stats
             stats["job_boards_total_fetched"] = job_boards_total_fetched  # Use tracked raw count
-            stats["job_signals_found"] = len(job_board_qualified)  # Qualified count after AI
-            # Count by match strength
-            for job_lead in job_board_qualified:
+            stats["job_signals_found"] = len(job_board_all)  # Job signals after job board AI filter (Stage 1)
+            # Count by match strength (from job_board_all, not job_board_qualified)
+            for job_lead in job_board_all:
                 commercial_relevance = job_lead.commercial_relevance or 0
                 if commercial_relevance >= 0.7:
                     stats["job_signals_high_match"] += 1
