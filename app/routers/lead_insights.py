@@ -899,13 +899,14 @@ async def get_spam_leads(
             db, user_id, lead_form_snapshot_id, filter_stage, page, page_size
         )
 
-        return UriResponse.success("Spam leads retrieved", {
-            "spam_leads": spam_leads,
-            "total": total,
-            "page": page,
-            "page_size": page_size,
-            "has_more": (page * page_size) < total
-        })
+        return UriResponse.get_paged_data_response(
+            entity_name="Spam lead",
+            data=spam_leads,
+            total=total,
+            page=page,
+            page_size=page_size,
+            message="Spam leads retrieved successfully"
+        )
 
     except Exception as e:
         print(f"Error retrieving spam leads: {str(e)}")
@@ -1061,7 +1062,11 @@ async def get_spam_stats(
     try:
         stats = await SpamLeadRepository.get_spam_stats(db, user_id, lead_form_snapshot_id)
 
-        return UriResponse.success("Spam statistics retrieved", stats)
+        return UriResponse.get_single_data_response(
+            entity_name="Spam statistics",
+            data=stats,
+            message="Spam statistics retrieved successfully"
+        )
 
     except Exception as e:
         print(f"Error retrieving spam stats: {str(e)}")
