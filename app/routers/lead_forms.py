@@ -424,3 +424,60 @@ async def delete(
     return UriResponse.get_status_response(
         response=jsonable_encoder(result), status_code=result["responseCode"]
     )
+
+
+# ========== Multi-Form Support Endpoints (PRD Section 4.1) ==========
+
+@router.get("/getByUserAndType")
+async def get_forms_by_user_and_type(
+    user_id: str,
+    form_type: LeadFormTypeEnum,
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Get all lead forms for a specific user and form type.
+    Supports multiple forms per user per type (PRD 4.1).
+    """
+    forms = await LeadFormRepository.get_forms_by_user_and_type(db, user_id, form_type)
+
+    return UriResponse.get_status_response(
+        response=UriResponse.get_list_data_response("Lead forms", forms),
+        status_code=200
+    )
+
+
+@router.post("/setDefault")
+async def set_default_form(
+    user_id: str,
+    form_type: LeadFormTypeEnum,
+    lead_form_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Mark a specific form as the default for a user and form type.
+    All other forms of the same type will be unmarked as default.
+    """
+    result = await LeadFormRepository.set_default_form(db, user_id, form_type, lead_form_id)
+
+    return UriResponse.get_status_response(
+        response=jsonable_encoder(result),
+        status_code=result.get("responseCode", 200)
+    )
+
+
+@router.get("/getDefault")
+async def get_default_form(
+    user_id: str,
+    form_type: LeadFormTypeEnum,
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Get the default form for a user and form type.
+    Falls back to most recent form if no default is set.
+    """
+    result = await LeadFormRepository.get_default_form(db, user_id, form_type)
+
+    return UriResponse.get_status_response(
+        response=jsonable_encoder(result),
+        status_code=result.get("responseCode", 200)
+    )

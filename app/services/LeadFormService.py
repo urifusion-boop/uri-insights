@@ -107,18 +107,8 @@ class LeadFormService:
                 "Invalid data: user_id is required.", 400
             )
 
-        existing_forms = (
-            await LeadFormRepository.get_by_filters(
-                db,
-                {
-                    "user_id": user_id,
-                    "form_type": LeadFormTypeEnum.BUSINESS.value,
-                },
-            )
-        ).get("responseData", [])
-
-        if existing_forms:
-            return UriResponse.conflict_response("Business lead form")
+        # Multi-form support: Allow multiple business forms per user
+        # No conflict check - users can create as many forms as needed
 
         # Enrich with AI if needed
         summary = lead_form_data.get("business_summary")

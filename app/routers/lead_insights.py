@@ -859,3 +859,253 @@ async def validate_search_context(
                 "suggested_social_keywords": []
             }
         )
+
+
+# ============================================
+# SPAM LEAD ENDPOINTS (NEW - Spam Visibility Feature)
+# PRD: Lead Gen Enhancement - Spam Visibility & Lead Reclassification
+# These endpoints allow users to view and manage filtered leads
+# ============================================
+
+@router.get("/spam-leads", tags=["Spam Leads"])
+async def get_spam_leads(
+    user_id: str,
+    lead_form_snapshot_id: Optional[str] = None,
+    filter_stage: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 50,
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency)
+):
+    """
+    Get spam leads for a user (PRD Section 3.4)
+
+    Spam = Analyzed but Unqualified Items
+    These are posts/jobs that were fetched and analyzed but did not meet qualification criteria.
+
+    Args:
+        user_id: User ID
+        lead_form_snapshot_id: Filter by specific lead form (PRD 4.7: Spam scoped per form)
+        filter_stage: Optional filter by stage ("job_board_ai", "intent_analysis", etc.)
+        page: Page number (1-indexed)
+        page_size: Items per page (default 50)
+
+    Returns:
+        Paginated list of spam leads with reasons for disqualification
+    """
+    from app.repository.SpamLeadRepository import SpamLeadRepository
+
+    try:
+        spam_leads, total = await SpamLeadRepository.get_spam_leads_by_user(
+            db, user_id, lead_form_snapshot_id, filter_stage, page, page_size
+        )
+
+        return UriResponse.success("Spam leads retrieved", {
+            "spam_leads": spam_leads,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "has_more": (page * page_size) < total
+        })
+
+    except Exception as e:
+        print(f"Error retrieving spam leads: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return UriResponse.custom_response(
+            f"Error retrieving spam leads: {str(e)}",
+            500,
+            False
+        )
+
+
+@router.post("/spam-leads/{spam_id}/promote", tags=["Spam Leads"])
+async def promote_spam_to_lead(
+    spam_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency)
+):
+    """
+    Promote spam lead to qualified leads (PRD Section 3.5 - "Add to Leads")
+
+    Allows users to recover false negatives by manually promoting spam items to active leads.
+
+    Args:
+        spam_id: Spam lead ID
+
+    Returns:
+        Success response with promoted lead data
+    """
+    from app.repository.SpamLeadRepository import SpamLeadRepository
+    from app.repository.LeadRepository import LeadRepository
+    from app.domain.schemas.lead_schema import LeadCreate
+
+    try:
+        # Get spam lead
+        spam_lead = await SpamLeadRepository.get_spam_lead_by_id(db, spam_id)
+
+        if not spam_lead:
+            return UriResponse.custom_response("Spam lead not found", 404, False)
+
+        # Extract original lead data
+        original_data = spam_lead.get("original_lead_data")
+        if not original_data:
+            return UriResponse.custom_response("Original lead data not found in spam entry", 400, False)
+
+        # Recreate LeadCreate object from original data
+        lead = LeadCreate(**original_data)
+
+        # Save to main leads collection
+        save_result = await LeadRepository.create_lead(db, lead)
+
+        # Mark spam as promoted (keeps record for analytics)
+        await SpamLeadRepository.promote_spam_to_lead(db, spam_id)
+
+        return UriResponse.success("Lead promoted from spam to qualified leads", {
+            "promoted_lead": save_result,
+            "spam_id": spam_id
+        })
+
+    except Exception as e:
+        print(f"Error promoting spam lead: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return UriResponse.custom_response(
+            f"Error promoting spam lead: {str(e)}",
+            500,
+            False
+        )
+
+
+@router.post("/leads/{lead_id}/move-to-spam", tags=["Spam Leads"])
+async def move_lead_to_spam(
+    lead_id: str,
+    spam_reason: str = "Manually moved by user",
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency)
+):
+    """
+    Move qualified lead to spam (PRD Section 3.6 - Reverse action)
+
+    Allows users to demote active leads that turn out to be false positives.
+
+    Args:
+        lead_id: Lead ID to move to spam
+        spam_reason: Reason for moving to spam
+
+    Returns:
+        Success response
+    """
+    from app.repository.SpamLeadRepository import SpamLeadRepository
+    from app.repository.LeadRepository import LeadRepository
+
+    try:
+        # Get existing lead
+        lead_response = await LeadRepository.get_lead_by_id(db, lead_id)
+
+        if lead_response["responseCode"] != 200:
+            return UriResponse.custom_response("Lead not found", 404, False)
+
+        lead_data = lead_response["responseData"]
+
+        # Extract user_id from lead
+        user_id = lead_data.get("assigned_to") or lead_data.get("user_id", "")
+
+        # Create spam entry from lead
+        spam_entry = await SpamLeadRepository.move_lead_to_spam(
+            db=db,
+            lead_data=lead_data,
+            spam_reason=spam_reason,
+            user_id=user_id
+        )
+
+        # Delete from leads collection
+        delete_result = await LeadRepository.delete_lead(db, lead_id)
+
+        if delete_result["responseCode"] == 200:
+            return UriResponse.success("Lead moved to spam", {
+                "spam_id": spam_entry.get("spam_id"),
+                "deleted_lead_id": lead_id
+            })
+        else:
+            return UriResponse.custom_response("Failed to delete lead after moving to spam", 500, False)
+
+    except Exception as e:
+        print(f"Error moving lead to spam: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return UriResponse.custom_response(
+            f"Error moving lead to spam: {str(e)}",
+            500,
+            False
+        )
+
+
+@router.get("/spam-leads/stats", tags=["Spam Leads"])
+async def get_spam_stats(
+    user_id: str,
+    lead_form_snapshot_id: Optional[str] = None,
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency)
+):
+    """
+    Get spam statistics for user/form
+
+    Returns counts by filter stage, spam reason, and user actions.
+
+    Args:
+        user_id: User ID
+        lead_form_snapshot_id: Optional form filter
+
+    Returns:
+        Statistics about spam leads
+    """
+    from app.repository.SpamLeadRepository import SpamLeadRepository
+
+    try:
+        stats = await SpamLeadRepository.get_spam_stats(db, user_id, lead_form_snapshot_id)
+
+        return UriResponse.success("Spam statistics retrieved", stats)
+
+    except Exception as e:
+        print(f"Error retrieving spam stats: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return UriResponse.custom_response(
+            f"Error retrieving spam stats: {str(e)}",
+            500,
+            False
+        )
+
+
+@router.patch("/spam-leads/{spam_id}/notes", tags=["Spam Leads"])
+async def update_spam_notes(
+    spam_id: str,
+    user_notes: str,
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency)
+):
+    """
+    Add or update user notes on spam lead
+
+    Allows users to document why they reviewed/promoted/dismissed an item.
+
+    Args:
+        spam_id: Spam lead ID
+        user_notes: User's notes
+
+    Returns:
+        Success response
+    """
+    from app.repository.SpamLeadRepository import SpamLeadRepository
+
+    try:
+        success = await SpamLeadRepository.update_spam_notes(db, spam_id, user_notes)
+
+        if success:
+            return UriResponse.success("Spam notes updated")
+        else:
+            return UriResponse.custom_response("Spam lead not found", 404, False)
+
+    except Exception as e:
+        print(f"Error updating spam notes: {str(e)}")
+        return UriResponse.custom_response(
+            f"Error updating spam notes: {str(e)}",
+            500,
+            False
+        )

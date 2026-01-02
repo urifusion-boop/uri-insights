@@ -274,6 +274,31 @@ class LeadRepository:
         return UriResponse.delete_response("lead", True)
 
     @staticmethod
+    async def delete_leads_by_snapshot_ids(
+        db: AsyncIOMotorDatabase, snapshot_ids: List[str]
+    ) -> int:
+        """
+        Delete all leads associated with specific form snapshots.
+
+        PRD Section 4.6: Deleting a form deletes associated leads
+
+        Args:
+            db: Database connection
+            snapshot_ids: List of lead_form_snapshot_id values
+
+        Returns:
+            Number of leads deleted
+        """
+        if not snapshot_ids:
+            return 0
+
+        result = await db["leads"].delete_many({
+            "lead_form_snapshot_id": {"$in": snapshot_ids}
+        })
+
+        return result.deleted_count
+
+    @staticmethod
     async def multiple_create_leads(
         db: AsyncIOMotorDatabase, leads: List[LeadCreate]
     ) -> Dict[str, Any]:

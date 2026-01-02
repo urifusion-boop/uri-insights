@@ -151,3 +151,51 @@ class LeadFormSnapshotRepository:
         return UriResponse.delete_response(
             "Lead form snapshot", result.deleted_count > 0
         )
+
+    @staticmethod
+    async def get_snapshot_ids_by_form_id(
+        db: AsyncIOMotorDatabase,
+        lead_form_id: str
+    ) -> list:
+        """
+        Get all snapshot IDs for a given lead form.
+
+        PRD Section 4.6: Needed for cascade delete
+
+        Args:
+            db: Database connection
+            lead_form_id: Lead form ID
+
+        Returns:
+            List of lead_form_snapshot_id values
+        """
+        cursor = db[LeadFormSnapshotRepository.COLLECTION_NAME].find(
+            {"lead_form_id": lead_form_id},
+            {"lead_form_snapshot_id": 1, "_id": 0}
+        )
+
+        snapshots = await cursor.to_list(length=None)
+        return [snap["lead_form_snapshot_id"] for snap in snapshots if "lead_form_snapshot_id" in snap]
+
+    @staticmethod
+    async def delete_snapshots_by_form_id(
+        db: AsyncIOMotorDatabase,
+        lead_form_id: str
+    ) -> int:
+        """
+        Delete all snapshots for a given lead form.
+
+        PRD Section 4.6: Deleting a form deletes associated snapshots
+
+        Args:
+            db: Database connection
+            lead_form_id: Lead form ID
+
+        Returns:
+            Number of snapshots deleted
+        """
+        result = await db[LeadFormSnapshotRepository.COLLECTION_NAME].delete_many(
+            {"lead_form_id": lead_form_id}
+        )
+
+        return result.deleted_count

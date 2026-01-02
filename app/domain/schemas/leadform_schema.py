@@ -49,6 +49,7 @@ class LeadFormBase(BaseModel):
     form_type: LeadFormTypeEnum
     form_title: str
     user_id: str
+    is_default: Optional[bool] = False  # Multi-form support: Mark one form as default per user per type
     disabled: bool = False
     disabled_reason: Optional[LeadFormDisabledReasonEnum] = None
     ai_response_guide: Optional[str] = None

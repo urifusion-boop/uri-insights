@@ -28,6 +28,11 @@ from app.domain.enums.lead_enum import LeadSourceEnum, LeadStatusEnum, LeadOppor
 from app.domain.enums.leadform_enum import LeadFormTypeEnum
 from app.domain.schemas.browsercloud_schema import BrowsercloudPlatformEnum
 
+# === SPAM FEATURE IMPORTS (NEW - for spam visibility feature) ===
+from app.repository.SpamLeadRepository import SpamLeadRepository
+from app.domain.schemas.spam_lead_schema import SpamLeadCreate
+from app.domain.enums.spam_enum import SpamReasonEnum, SpamFilterStageEnum
+
 
 class PlatformDistributionManager:
     """
@@ -827,6 +832,8 @@ class ConversationalLeadJobService:
                     results = await asyncio.gather(*fetch_tasks, return_exceptions=True)
 
                     # Collect successful results and track failures
+                    keyword_filtered_leads = []  # NEW: Track filtered leads for spam
+
                     for idx, result in enumerate(results):
                         if isinstance(result, asyncio.TimeoutError):
                             error_msg = f"Platform {idx+1} timed out after {fetch_task_timeouts[idx]}s"
@@ -837,13 +844,15 @@ class ConversationalLeadJobService:
                             print(f"   ❌ {error_msg}")
                             platform_errors.append(error_msg)
                         elif isinstance(result, dict):
-                            # Job boards return dict with qualified_leads and total_fetched
+                            # Job boards return dict with qualified_leads, filtered_leads, and total_fetched
                             qualified = result.get("qualified_leads", [])
+                            filtered = result.get("filtered_leads", [])  # NEW: Get filtered leads
                             total_fetched = result.get("total_fetched", 0)
                             keyword_leads.extend(qualified)
+                            keyword_filtered_leads.extend(filtered)  # NEW: Collect filtered
                             job_boards_total_fetched += total_fetched  # Accumulate across all keywords
                             keyword_job_boards_fetched += total_fetched  # Track for THIS keyword only
-                            print(f"   ✅ Platform {idx+1} returned {len(qualified)} qualified leads ({total_fetched} total fetched)")
+                            print(f"   ✅ Platform {idx+1} returned {len(qualified)} qualified leads ({total_fetched} total fetched, {len(filtered)} filtered)")
                             platform_successes += 1
                         elif isinstance(result, list):
                             # Social media returns list of leads
@@ -905,16 +914,52 @@ class ConversationalLeadJobService:
 
                     print(f"   ✅ {len(leads_after_location_filter)} leads passed filters (from {len(keyword_leads)} raw)")
 
-                    # Analyze filtered leads
+                    # Analyze filtered leads (NEW: Use spam-aware method)
                     if leads_after_location_filter:
-                        keyword_qualified = await ConversationalLeadJobService._analyze_and_filter_leads(
+                        keyword_qualified, keyword_intent_filtered = await ConversationalLeadJobService._analyze_and_filter_leads_with_spam(
                             leads_after_location_filter, category_config, intent_min, relevance_min, final_min
                         )
                         qualified_leads.extend(keyword_qualified)
-                        print(f"   ✅ {len(keyword_qualified)} qualified from this keyword")
+                        print(f"   ✅ {len(keyword_qualified)} qualified from this keyword ({len(keyword_intent_filtered)} filtered by intent)")
                         print(f"   📈 TOTAL QUALIFIED SO FAR: {len(qualified_leads)}")
+
+                        # === NEW: Save intent-filtered social posts to spam ===
+                        if keyword_intent_filtered:
+                            try:
+                                await ConversationalLeadJobService._save_filtered_to_spam(
+                                    db=db,
+                                    filtered_leads=keyword_intent_filtered,
+                                    user_id=user_id,
+                                    lead_form_id=lead_form.get("lead_form_id", ""),
+                                    search_keyword=keyword,
+                                    filter_stage=SpamFilterStageEnum.INTENT_ANALYSIS.value,
+                                    spam_reason=SpamReasonEnum.FAILED_INTENT_ANALYSIS.value,
+                                    intent_min=intent_min,
+                                    relevance_min=relevance_min,
+                                    final_min=final_min,
+                                    category_config=category_config
+                                )
+                            except Exception as spam_error:
+                                print(f"   ⚠️ Error saving intent-filtered posts to spam: {str(spam_error)}")
                     else:
                         print(f"   ⚠️ No leads passed filters for this keyword")
+
+                # === NEW: Save filtered job board leads to spam ===
+                if keyword_filtered_leads:
+                    try:
+                        await ConversationalLeadJobService._save_filtered_to_spam(
+                            db=db,
+                            filtered_leads=keyword_filtered_leads,
+                            user_id=user_id,
+                            lead_form_id=lead_form.get("lead_form_id", ""),
+                            search_keyword=keyword,
+                            filter_stage=SpamFilterStageEnum.JOB_BOARD_AI.value,
+                            spam_reason=SpamReasonEnum.LOW_COMMERCIAL_RELEVANCE.value,
+                            commercial_relevance_threshold=0.3,
+                            solution_context=solution_context
+                        )
+                    except Exception as spam_error:
+                        print(f"   ⚠️ Error saving filtered job boards to spam: {str(spam_error)}")
 
                 # Continue with all keywords to maximize results (no early stopping)
 
@@ -1790,6 +1835,8 @@ class ConversationalLeadJobService:
 
             # Analyze each job posting with AI
             qualified_signals = []
+            filtered_signals = []  # NEW: Collect filtered jobs for spam
+
             for job in deduplicated_jobs[:max_jobs]:  # Limit to max_jobs
                 try:
                     # Run AI analysis
@@ -1800,45 +1847,49 @@ class ConversationalLeadJobService:
                         solution_context=solution_context
                     )
 
-                    # Filter by problem-solution match threshold (PRD requirement: >= 0.3)
-                    if analysis.problem_solution_match >= 0.3:
-                        # Create lead object (same pattern as Twitter/Facebook leads)
-                        lead = LeadCreate(
-                            first_name=job.get("company", "Unknown Company"),
-                            last_name="",
-                            username="",
-                            mention=job.get("description", ""),
-                            lead_reason=analysis.reasoning,  # AI explanation of why this is a sales signal
-                            lead_status=LeadStatusEnum.NEW,
-                            opportunity_type=LeadOpportunityTypeEnum.OTHER,
-                            tags=[],
-                            lead_link=job.get("url", ""),
-                            website_url=job.get("url", ""),
-                            created_date=datetime.now(timezone.utc),
-                            last_updated=datetime.now(timezone.utc),
-                            lead_type=LeadFormTypeEnum.CONVERSATIONAL,
-                            lead_source=LeadSourceEnum.JOB_BOARDS,
-                            assigned_to=user_id,
-                            starred=False,
-                            lead_form_snapshot_id=lead_form_id,
-                            # Job-specific fields
-                            job_posting_url=job.get("url", ""),
-                            job_title_field=job.get("title", ""),
-                            hiring_company=job.get("company", ""),
-                            problem_solution_match=analysis.problem_solution_match,
-                            hiring_intent_score=analysis.hiring_intent_score,
-                            commercial_relevance=analysis.commercial_relevance,
-                            implied_problems=analysis.implied_problems,
-                            job_source=job.get("source", "Unknown"),
-                            company_confidence=analysis.company_confidence,  # PRD Sections 14-16
-                            # Intent analysis fields (for consistency with social media leads)
-                            final_score=analysis.commercial_relevance,
-                            intent_reasoning=analysis.reasoning,
-                        )
+                    # Create lead object (same for both qualified and filtered)
+                    lead = LeadCreate(
+                        first_name=job.get("company", "Unknown Company"),
+                        last_name="",
+                        username="",
+                        mention=job.get("description", ""),
+                        lead_reason=analysis.reasoning,  # AI explanation of why this is a sales signal
+                        lead_status=LeadStatusEnum.NEW,
+                        opportunity_type=LeadOpportunityTypeEnum.OTHER,
+                        tags=[],
+                        lead_link=job.get("url", ""),
+                        website_url=job.get("url", ""),
+                        created_date=datetime.now(timezone.utc),
+                        last_updated=datetime.now(timezone.utc),
+                        lead_type=LeadFormTypeEnum.CONVERSATIONAL,
+                        lead_source=LeadSourceEnum.JOB_BOARDS,
+                        assigned_to=user_id,
+                        starred=False,
+                        lead_form_snapshot_id=lead_form_id,
+                        # Job-specific fields
+                        job_posting_url=job.get("url", ""),
+                        job_title_field=job.get("title", ""),
+                        hiring_company=job.get("company", ""),
+                        problem_solution_match=analysis.problem_solution_match,
+                        hiring_intent_score=analysis.hiring_intent_score,
+                        commercial_relevance=analysis.commercial_relevance,
+                        implied_problems=analysis.implied_problems,
+                        job_source=job.get("source", "Unknown"),
+                        company_confidence=analysis.company_confidence,  # PRD Sections 14-16
+                        # Intent analysis fields (for consistency with social media leads)
+                        final_score=analysis.commercial_relevance,
+                        intent_reasoning=analysis.reasoning,
+                        location=job.get("location", ""),  # Add location
+                    )
+
+                    # Filter by commercial_relevance threshold (PRD requirement: >= 0.3)
+                    if analysis.commercial_relevance >= 0.3:
                         qualified_signals.append(lead)
                         print(f"   ✅ QUALIFIED: {job.get('company')} - {job.get('title')} | Match:{analysis.problem_solution_match:.2f} Relevance:{analysis.commercial_relevance:.2f}")
                     else:
-                        print(f"   ❌ FILTERED: {job.get('company')} - {job.get('title')} | Match:{analysis.problem_solution_match:.2f} (below 0.3 threshold)")
+                        # NEW: Collect filtered job for spam
+                        filtered_signals.append(lead)
+                        print(f"   ❌ FILTERED: {job.get('company')} - {job.get('title')} | Relevance:{analysis.commercial_relevance:.2f} (below 0.3 threshold)")
 
                 except Exception as analysis_error:
                     print(f"   ⚠️ Error analyzing job {job.get('title')}: {str(analysis_error)}")
@@ -1846,10 +1897,14 @@ class ConversationalLeadJobService:
 
             print(f"   ✅ {len(qualified_signals)} qualified job signals (from {len(deduplicated_jobs)} analyzed)")
 
+            # NEW: Return filtered signals for spam saving
+            # This will be passed back to the caller
+
             # Return both total fetched and qualified leads
             # Counter will use total_fetched to track raw posts (like social media)
             return {
                 "qualified_leads": qualified_signals,
+                "filtered_leads": filtered_signals,  # NEW: Include filtered for spam
                 "total_fetched": len(deduplicated_jobs)
             }
 
@@ -1857,7 +1912,7 @@ class ConversationalLeadJobService:
             print(f"❌ Error fetching job board signals: {str(e)}")
             import traceback
             traceback.print_exc()
-            return {"qualified_leads": [], "total_fetched": 0}
+            return {"qualified_leads": [], "filtered_leads": [], "total_fetched": 0}
 
     @staticmethod
     def _deduplicate_jobs(jobs: List[Dict]) -> List[Dict]:
@@ -1964,3 +2019,343 @@ class ConversationalLeadJobService:
         except Exception as e:
             print(f"Error converting Twitter date '{twitter_date}': {str(e)}")
             return datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+    # ============================================
+    # SPAM FEATURE METHODS (NEW - for spam visibility)
+    # PRD: Lead Gen Enhancement - Spam Visibility Feature
+    # These methods DO NOT modify existing lead generation logic
+    # ============================================
+
+    @staticmethod
+    async def _save_filtered_to_spam(
+        db: AsyncIOMotorDatabase,
+        filtered_leads: List[LeadCreate],
+        user_id: str,
+        lead_form_id: str,
+        search_keyword: str,
+        filter_stage: str,
+        spam_reason: str,
+        **context
+    ) -> None:
+        """
+        NEW METHOD - Save filtered leads to spam collection
+
+        PRD Section 3.4: Each spam item must display reason for disqualification
+        PRD Section 4.7: Spam scoped per lead form
+
+        This method does NOT interfere with existing qualified lead logic.
+        It only saves filtered-out items to a separate spam collection.
+
+        Args:
+            db: Database connection
+            filtered_leads: List of LeadCreate objects that failed filters
+            user_id: User ID
+            lead_form_id: Lead form snapshot ID (for scoping per form)
+            search_keyword: Keyword that fetched these leads
+            filter_stage: "job_board_ai" | "intent_analysis" | "time_filter" | "location_filter"
+            spam_reason: Primary spam reason (from SpamReasonEnum)
+            **context: Additional context (scores, thresholds, category_config, etc.)
+
+        Returns:
+            None (saves to spam collection)
+        """
+        if not filtered_leads:
+            return
+
+        spam_leads = []
+
+        for lead in filtered_leads:
+            # Build spam lead based on filter stage
+            spam_lead_data = {
+                "user_id": user_id,
+                "original_lead_data": lead.dict(),
+                "spam_reason": spam_reason,
+                "filter_stage": filter_stage,
+                "search_keyword": search_keyword,
+                "lead_form_snapshot_id": lead_form_id,
+                "lead_source": lead.lead_source,
+                "content_full": lead.mention,
+                "content_preview": lead.mention[:300] if lead.mention else None,
+            }
+
+            # === JOB BOARD SPECIFIC FIELDS ===
+            if lead.lead_source == LeadSourceEnum.JOB_BOARDS:
+                spam_lead_data.update({
+                    "platform_detail": lead.job_source,
+                    "problem_solution_match": lead.problem_solution_match,
+                    "hiring_intent_score": lead.hiring_intent_score,
+                    "commercial_relevance": lead.commercial_relevance,
+                    "company_confidence": lead.company_confidence,
+                    "implied_problems": lead.implied_problems,
+                    "job_board_reasoning": getattr(lead, "reasoning", None),
+                    "job_posting_url": lead.job_posting_url,
+                    "job_title": lead.job_title_field,
+                    "hiring_company": lead.hiring_company,
+                    "job_source": lead.job_source,
+                    "display_title": lead.job_title_field,
+                    "display_company": lead.hiring_company,
+                    "display_username": lead.hiring_company,
+                    "display_link": lead.job_posting_url,
+                    "display_source": lead.job_source or "Job Boards",
+                    "display_location": lead.location,
+                })
+
+                # Add thresholds from context
+                if "commercial_relevance_threshold" in context:
+                    spam_lead_data["commercial_relevance_threshold"] = context["commercial_relevance_threshold"]
+
+                # Add solution context
+                if "solution_context" in context:
+                    spam_lead_data["solution_context"] = context["solution_context"]
+
+                # Build detailed reason for job boards
+                spam_lead_data["spam_reason_detail"] = (
+                    f"Commercial relevance ({lead.commercial_relevance:.2f}) "
+                    f"below threshold ({context.get('commercial_relevance_threshold', 0.3)})"
+                )
+
+            # === SOCIAL POST SPECIFIC FIELDS ===
+            else:
+                spam_lead_data.update({
+                    "intent_score": lead.intent_score,
+                    "relevance_score": lead.relevance_score,
+                    "final_score": lead.final_score,
+                    "urgency_flag": lead.urgency_flag,
+                    "sentiment": lead.sentiment.value if lead.sentiment else None,
+                    "intent_category": lead.intent_category.value if lead.intent_category else None,
+                    "intent_reasoning": lead.intent_reasoning,
+                    "post_author": lead.username,
+                    "post_url": lead.lead_link,
+                    "social_profile": lead.social_profile_link,
+                    "display_title": lead.mention[:100] if lead.mention else "No content",
+                    "display_username": lead.username,
+                    "display_link": lead.lead_link,
+                    "display_source": lead.lead_source,
+                    "display_location": lead.location,
+                })
+
+                # Add thresholds from context
+                if "intent_min" in context:
+                    spam_lead_data["intent_min_threshold"] = context["intent_min"]
+                if "relevance_min" in context:
+                    spam_lead_data["relevance_min_threshold"] = context["relevance_min"]
+                if "final_min" in context:
+                    spam_lead_data["final_min_threshold"] = context["final_min"]
+
+                # Add category config from context
+                if "category_config" in context:
+                    cat_config = context["category_config"]
+                    spam_lead_data.update({
+                        "search_category": cat_config.category_context,
+                        "category_keywords": cat_config.keywords,
+                        "buying_signals": cat_config.buying_signals,
+                        "excluded_keywords": cat_config.excluded_keywords,
+                    })
+
+                # Build detailed reason for social posts
+                failed_criteria = []
+                if lead.intent_score and lead.intent_score < context.get("intent_min", 0.5):
+                    failed_criteria.append(f"intent ({lead.intent_score:.2f} < {context.get('intent_min', 0.5)})")
+                if lead.relevance_score and lead.relevance_score < context.get("relevance_min", 0.45):
+                    failed_criteria.append(f"relevance ({lead.relevance_score:.2f} < {context.get('relevance_min', 0.45)})")
+                if lead.final_score and lead.final_score < context.get("final_min", 0.55):
+                    failed_criteria.append(f"final ({lead.final_score:.2f} < {context.get('final_min', 0.55)})")
+
+                spam_lead_data["spam_reason_detail"] = f"Failed: {', '.join(failed_criteria)}" if failed_criteria else "Failed intent qualification"
+
+            # Add time filter context if provided
+            if "post_created_date" in context:
+                spam_lead_data["post_created_date"] = lead.created_date
+            if "cutoff_date" in context:
+                spam_lead_data["cutoff_date"] = context["cutoff_date"]
+            if "post_age_filter" in context:
+                spam_lead_data["post_age_filter"] = context["post_age_filter"]
+
+            # Add location filter context if provided
+            if "target_locations" in context:
+                spam_lead_data["target_locations"] = context["target_locations"]
+                spam_lead_data["post_location"] = lead.location
+
+            # Create spam lead object
+            spam_lead = SpamLeadCreate(**spam_lead_data)
+            spam_leads.append(spam_lead)
+
+        # Save to spam collection
+        await SpamLeadRepository.save_spam_leads_batch(db, spam_leads)
+        print(f"💾 SPAM: Saved {len(spam_leads)} filtered leads to spam collection (reason: {spam_reason})")
+
+    @staticmethod
+    async def _analyze_single_lead_with_spam(
+        lead: LeadCreate,
+        category_config: CategoryConfig,
+        intent_min: float,
+        relevance_min: float,
+        final_min: float
+    ) -> tuple[LeadCreate, bool, str]:
+        """
+        NEW METHOD - Analyze lead and return it WITH scores regardless of qualification
+
+        Unlike _analyze_single_lead which returns None for filtered leads,
+        this method ALWAYS returns the lead with scores populated.
+
+        Args:
+            lead: LeadCreate object
+            category_config: Category configuration
+            intent_min, relevance_min, final_min: Thresholds
+
+        Returns:
+            Tuple of (lead_with_scores, is_qualified, status_message)
+        """
+        try:
+            # Get post text from mention field
+            post_text = lead.mention or lead.lead_reason or ""
+            if not post_text.strip():
+                return lead, False, f"Skipping {lead.username}: no text content"
+
+            # Run intent analysis
+            intent_result = await IntentAnalysisService.analyze_post(
+                text=post_text,
+                config=category_config,
+                model="gpt-4o-mini"
+            )
+
+            # Calculate final score
+            final_score = IntentAnalysisService.calculate_final_score(
+                intent_result.intent_score,
+                intent_result.relevance_score,
+                intent_result.urgency_flag
+            )
+
+            # Map enums
+            intent_category_map = {
+                "direct": IntentCategoryEnum.DIRECT,
+                "implied": IntentCategoryEnum.IMPLIED,
+                "problem": IntentCategoryEnum.PROBLEM,
+                "comparison": IntentCategoryEnum.COMPARISON,
+                "competitor_negative": IntentCategoryEnum.COMPETITOR_NEGATIVE,
+                "unknown": IntentCategoryEnum.UNKNOWN
+            }
+
+            sentiment_map = {
+                "positive": SentimentTypeEnum.POSITIVE,
+                "negative": SentimentTypeEnum.NEGATIVE,
+                "neutral": SentimentTypeEnum.NEUTRAL
+            }
+
+            # Populate intent fields in lead (ALWAYS, even if filtered)
+            lead.intent_score = intent_result.intent_score
+            lead.relevance_score = intent_result.relevance_score
+            lead.urgency_flag = intent_result.urgency_flag
+            lead.sentiment = sentiment_map.get(intent_result.sentiment.value, SentimentTypeEnum.NEUTRAL)
+            lead.intent_category = intent_category_map.get(intent_result.intent_category.value, IntentCategoryEnum.UNKNOWN)
+            lead.final_score = final_score
+            lead.intent_reasoning = intent_result.reasoning
+
+            # Check if meets qualification thresholds
+            is_qualified = (
+                intent_result.intent_score >= intent_min and
+                intent_result.relevance_score >= relevance_min and
+                final_score >= final_min
+            )
+
+            if is_qualified:
+                status = f"✅ QUALIFIED: {lead.username} | Intent:{intent_result.intent_score:.2f} Relevance:{intent_result.relevance_score:.2f} Final:{final_score:.2f}"
+            else:
+                status = f"❌ FILTERED: {lead.username} | Intent:{intent_result.intent_score:.2f} Relevance:{intent_result.relevance_score:.2f} Final:{final_score:.2f}"
+
+            return lead, is_qualified, status
+
+        except Exception as e:
+            error_msg = f"Error analyzing lead {lead.username}: {str(e)}"
+            return lead, False, error_msg
+
+    @staticmethod
+    async def _analyze_and_filter_leads_with_spam(
+        leads: List[LeadCreate],
+        category_config: CategoryConfig,
+        intent_min: float = 0.50,
+        relevance_min: float = 0.45,
+        final_min: float = 0.55
+    ) -> tuple[List[LeadCreate], List[LeadCreate]]:
+        """
+        NEW METHOD - Analyze leads and return BOTH qualified and filtered lists
+
+        Uses _analyze_single_lead_with_spam to get all leads with scores.
+
+        Args:
+            leads: List of LeadCreate objects
+            category_config: Category configuration for intent analysis
+            intent_min, relevance_min, final_min: Qualification thresholds
+
+        Returns:
+            Tuple of (qualified_leads, filtered_leads)
+            Both lists have intent scores populated
+        """
+        if not leads:
+            return [], []
+
+        print(f"📊 INTENT ANALYSIS (with spam): Analyzing {len(leads)} posts in parallel...")
+
+        # Process all leads in parallel
+        loop = asyncio.get_event_loop()
+        tasks = [
+            loop.run_in_executor(
+                ConversationalLeadJobService._llm_executor,
+                lambda l=lead: asyncio.run(
+                    ConversationalLeadJobService._analyze_single_lead_with_spam(
+                        l, category_config, intent_min, relevance_min, final_min
+                    )
+                )
+            )
+            for lead in leads
+        ]
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Separate qualified and filtered
+        qualified_leads = []
+        filtered_leads = []
+
+        for result in results:
+            if isinstance(result, Exception):
+                print(f"Exception during analysis: {str(result)}")
+                continue
+
+            lead, is_qualified, status = result
+            print(status)
+
+            if is_qualified:
+                qualified_leads.append(lead)
+            else:
+                # NEW: Collect filtered lead with scores
+                filtered_leads.append(lead)
+
+        # Handle adaptive thresholds (same as existing method)
+        if len(qualified_leads) == 0 and len(leads) > 0:
+            print(f"⚠️ Zero leads qualified with default thresholds. Trying relaxed thresholds...")
+
+            relaxed_intent = intent_min - 0.10
+            relaxed_relevance = relevance_min - 0.10
+            relaxed_final = final_min - 0.10
+
+            print(f"   Default: intent>={intent_min}, relevance>={relevance_min}, final>={final_min}")
+            print(f"   Relaxed: intent>={relaxed_intent}, relevance>={relaxed_relevance}, final>={relaxed_final}")
+
+            # Re-check filtered leads with relaxed thresholds
+            # Leads that pass relaxed get promoted to qualified
+            relaxed_qualified = []
+            still_filtered = []
+            for lead in filtered_leads:
+                if (lead.intent_score >= relaxed_intent and
+                    lead.relevance_score >= relaxed_relevance and
+                    lead.final_score >= relaxed_final):
+                    relaxed_qualified.append(lead)
+                else:
+                    still_filtered.append(lead)
+
+            if len(relaxed_qualified) > 0:
+                print(f"✅ Found {len(relaxed_qualified)} leads with relaxed thresholds")
+                qualified_leads = relaxed_qualified
+                filtered_leads = still_filtered
+
+        return qualified_leads, filtered_leads
