@@ -974,10 +974,8 @@ async def promote_spam_to_lead(
         # Mark spam as promoted (keeps record for analytics)
         await SpamLeadRepository.promote_spam_to_lead(db, spam_id)
 
-        return UriResponse.success("Lead promoted from spam to qualified leads", {
-            "promoted_lead": save_result,
-            "spam_id": spam_id
-        })
+        # save_result is already a formatted dict from LeadRepository.create_lead
+        return save_result
 
     except Exception as e:
         print(f"Error promoting spam lead: {str(e)}")
@@ -1035,10 +1033,11 @@ async def move_lead_to_spam(
         delete_result = await LeadRepository.delete_lead(db, lead_id)
 
         if delete_result["responseCode"] == 200:
-            return UriResponse.success("Lead moved to spam", {
-                "spam_id": spam_entry.get("spam_id"),
-                "deleted_lead_id": lead_id
-            })
+            return UriResponse.update_response(
+                entity_name="Lead",
+                data={"spam_id": spam_entry.get("spam_id"), "deleted_lead_id": lead_id},
+                message="Lead moved to spam"
+            )
         else:
             return UriResponse.custom_response("Failed to delete lead after moving to spam", 500, False)
 
@@ -1117,7 +1116,11 @@ async def update_spam_notes(
         success = await SpamLeadRepository.update_spam_notes(db, spam_id, user_notes)
 
         if success:
-            return UriResponse.success("Spam notes updated")
+            return UriResponse.update_response(
+                entity_name="Spam notes",
+                data={"spam_id": spam_id},
+                message="Spam notes updated"
+            )
         else:
             return UriResponse.custom_response("Spam lead not found", 404, False)
 
