@@ -113,11 +113,11 @@ class SpamLeadRepository:
         query = {"user_id": user_id}
 
         # PRD Section 4.7: Scope by lead form
-        if lead_form_snapshot_id:
+        if lead_form_snapshot_id and lead_form_snapshot_id != "undefined":
             query["lead_form_snapshot_id"] = lead_form_snapshot_id
 
         # Optional filter by stage
-        if filter_stage:
+        if filter_stage and filter_stage != "undefined":
             query["filter_stage"] = filter_stage
 
         # Calculate pagination
@@ -385,7 +385,7 @@ class SpamLeadRepository:
         collection = db[SpamLeadRepository.COLLECTION_NAME]
 
         query = {"user_id": user_id}
-        if lead_form_snapshot_id:
+        if lead_form_snapshot_id and lead_form_snapshot_id != "undefined":
             query["lead_form_snapshot_id"] = lead_form_snapshot_id
 
         # Total spam count
@@ -405,6 +405,13 @@ class SpamLeadRepository:
         ]
         by_reason = {doc["_id"]: doc["count"] async for doc in collection.aggregate(pipeline)}
 
+        # Count by lead source
+        pipeline = [
+            {"$match": query},
+            {"$group": {"_id": "$lead_source", "count": {"$sum": 1}}}
+        ]
+        by_source = {doc["_id"]: doc["count"] async for doc in collection.aggregate(pipeline)}
+
         # Count promoted
         promoted_count = await collection.count_documents({**query, "promoted_to_leads": True})
 
@@ -415,6 +422,7 @@ class SpamLeadRepository:
             "total_spam": total,
             "by_filter_stage": by_stage,
             "by_spam_reason": by_reason,
+            "by_source": by_source,
             "promoted_count": promoted_count,
             "reviewed_count": reviewed_count,
             "unreviewed_count": total - reviewed_count

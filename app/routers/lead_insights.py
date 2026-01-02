@@ -895,11 +895,21 @@ async def get_spam_leads(
     from app.repository.SpamLeadRepository import SpamLeadRepository
 
     try:
+        # Filter out "undefined" strings from frontend
+        clean_snapshot_id = None if lead_form_snapshot_id == "undefined" else lead_form_snapshot_id
+        clean_filter_stage = None if filter_stage == "undefined" else filter_stage
+
+        print(f"🔍 [get_spam_leads] Request params: user_id={user_id}, lead_form_snapshot_id={clean_snapshot_id}, filter_stage={clean_filter_stage}, page={page}, page_size={page_size}")
+
         spam_leads, total = await SpamLeadRepository.get_spam_leads_by_user(
-            db, user_id, lead_form_snapshot_id, filter_stage, page, page_size
+            db, user_id, clean_snapshot_id, clean_filter_stage, page, page_size
         )
 
-        return UriResponse.get_paged_data_response(
+        print(f"✅ [get_spam_leads] Retrieved {len(spam_leads)} spam leads out of {total} total")
+        if len(spam_leads) > 0:
+            print(f"📋 [get_spam_leads] First spam lead sample: {spam_leads[0].get('spam_id', 'no_id')}, spam_reason: {spam_leads[0].get('spam_reason', 'no_reason')}")
+
+        response = UriResponse.get_paged_data_response(
             entity_name="Spam lead",
             data=spam_leads,
             total=total,
@@ -907,6 +917,10 @@ async def get_spam_leads(
             page_size=page_size,
             message="Spam leads retrieved successfully"
         )
+
+        print(f"📦 [get_spam_leads] Response structure: status={response.get('status')}, responseCode={response.get('responseCode')}, data_count={len(response.get('responseData', {}).get('data', []))}")
+
+        return response
 
     except Exception as e:
         print(f"Error retrieving spam leads: {str(e)}")
