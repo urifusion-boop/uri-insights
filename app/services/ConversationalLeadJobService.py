@@ -2346,6 +2346,8 @@ class ConversationalLeadJobService:
             relaxed_qualified = []
             still_filtered = []
             for lead in filtered_leads:
+                if lead is None:
+                    continue
                 if ((lead.intent_score or 0) >= relaxed_intent and
                     (lead.relevance_score or 0) >= relaxed_relevance and
                     (lead.final_score or 0) >= relaxed_final):
