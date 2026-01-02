@@ -88,6 +88,9 @@ class SpamLeadRepository:
         user_id: str,
         lead_form_snapshot_id: Optional[str] = None,
         filter_stage: Optional[str] = None,
+        lead_source: Optional[str] = None,
+        spam_reason: Optional[str] = None,
+        search: Optional[str] = None,
         page: int = 1,
         page_size: int = 50
     ) -> tuple[List[Dict[str, Any]], int]:
@@ -101,6 +104,9 @@ class SpamLeadRepository:
             user_id: User ID
             lead_form_snapshot_id: Filter by specific lead form (PRD 4.7)
             filter_stage: Filter by stage ("job_board_ai", "intent_analysis", etc.)
+            lead_source: Filter by lead source (X, Facebook, etc.)
+            spam_reason: Filter by spam reason
+            search: Search in display_title, display_company, search_keyword
             page: Page number (1-indexed)
             page_size: Items per page
 
@@ -119,6 +125,22 @@ class SpamLeadRepository:
         # Optional filter by stage
         if filter_stage and filter_stage != "undefined":
             query["filter_stage"] = filter_stage
+
+        # Filter by lead source
+        if lead_source and lead_source != "undefined":
+            query["lead_source"] = lead_source
+
+        # Filter by spam reason
+        if spam_reason and spam_reason != "undefined":
+            query["spam_reason"] = spam_reason
+
+        # Search filter
+        if search and search != "undefined":
+            query["$or"] = [
+                {"display_title": {"$regex": search, "$options": "i"}},
+                {"display_company": {"$regex": search, "$options": "i"}},
+                {"search_keyword": {"$regex": search, "$options": "i"}}
+            ]
 
         # Calculate pagination
         skip = (page - 1) * page_size
@@ -362,6 +384,57 @@ class SpamLeadRepository:
         )
 
         return result.modified_count > 0
+
+    @staticmethod
+    async def delete_spam_lead(
+        db: AsyncIOMotorDatabase,
+        spam_id: str
+    ) -> bool:
+        """
+        Delete a single spam lead permanently
+
+        Enhanced UX: Allow users to remove individual spam items
+
+        Args:
+            db: Database connection
+            spam_id: Spam lead ID to delete
+
+        Returns:
+            True if deleted successfully
+        """
+        collection = db[SpamLeadRepository.COLLECTION_NAME]
+
+        result = await collection.delete_one({"spam_id": spam_id})
+
+        return result.deleted_count > 0
+
+    @staticmethod
+    async def bulk_delete_spam_leads(
+        db: AsyncIOMotorDatabase,
+        spam_ids: List[str]
+    ) -> int:
+        """
+        Bulk delete multiple spam leads
+
+        Enhanced UX: Allow users to remove multiple spam items at once
+
+        Args:
+            db: Database connection
+            spam_ids: List of spam lead IDs to delete
+
+        Returns:
+            Number of spam leads deleted
+        """
+        if not spam_ids:
+            return 0
+
+        collection = db[SpamLeadRepository.COLLECTION_NAME]
+
+        result = await collection.delete_many({
+            "spam_id": {"$in": spam_ids}
+        })
+
+        return result.deleted_count
 
     @staticmethod
     async def get_spam_stats(

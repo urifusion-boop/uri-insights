@@ -872,6 +872,9 @@ async def get_spam_leads(
     user_id: str,
     lead_form_snapshot_id: Optional[str] = None,
     filter_stage: Optional[str] = None,
+    lead_source: Optional[str] = None,
+    spam_reason: Optional[str] = None,
+    search: Optional[str] = None,
     page: int = 1,
     page_size: int = 50,
     db: AsyncIOMotorDatabase = Depends(get_db_dependency)
@@ -898,11 +901,14 @@ async def get_spam_leads(
         # Filter out "undefined" strings from frontend
         clean_snapshot_id = None if lead_form_snapshot_id == "undefined" else lead_form_snapshot_id
         clean_filter_stage = None if filter_stage == "undefined" else filter_stage
+        clean_lead_source = None if lead_source == "undefined" else lead_source
+        clean_spam_reason = None if spam_reason == "undefined" else spam_reason
+        clean_search = None if search == "undefined" else search
 
-        print(f"🔍 [get_spam_leads] Request params: user_id={user_id}, lead_form_snapshot_id={clean_snapshot_id}, filter_stage={clean_filter_stage}, page={page}, page_size={page_size}")
+        print(f"🔍 [get_spam_leads] Request params: user_id={user_id}, lead_form_snapshot_id={clean_snapshot_id}, filter_stage={clean_filter_stage}, lead_source={clean_lead_source}, spam_reason={clean_spam_reason}, search={clean_search}, page={page}, page_size={page_size}")
 
         spam_leads, total = await SpamLeadRepository.get_spam_leads_by_user(
-            db, user_id, clean_snapshot_id, clean_filter_stage, page, page_size
+            db, user_id, clean_snapshot_id, clean_filter_stage, clean_lead_source, clean_spam_reason, clean_search, page, page_size
         )
 
         print(f"✅ [get_spam_leads] Retrieved {len(spam_leads)} spam leads out of {total} total")
@@ -1047,6 +1053,98 @@ async def move_lead_to_spam(
         traceback.print_exc()
         return UriResponse.custom_response(
             f"Error moving lead to spam: {str(e)}",
+            500,
+            False
+        )
+
+
+@router.delete("/spam-leads/{spam_id}", tags=["Spam Leads"])
+async def delete_spam_lead(
+    spam_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency)
+):
+    """
+    Delete a single spam lead permanently
+
+    Enhanced UX: Allow users to remove individual spam items
+
+    Args:
+        spam_id: Spam lead ID to delete
+
+    Returns:
+        Success message
+    """
+    from app.repository.SpamLeadRepository import SpamLeadRepository
+
+    try:
+        deleted = await SpamLeadRepository.delete_spam_lead(db, spam_id)
+
+        if deleted:
+            return UriResponse.get_single_data_response(
+                entity_name="Spam lead",
+                data={"spam_id": spam_id},
+                message="Spam lead deleted successfully"
+            )
+        else:
+            return UriResponse.custom_response(
+                "Spam lead not found",
+                404,
+                False
+            )
+
+    except Exception as e:
+        print(f"Error deleting spam lead: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return UriResponse.custom_response(
+            f"Error deleting spam lead: {str(e)}",
+            500,
+            False
+        )
+
+
+@router.post("/spam-leads/bulk-delete", tags=["Spam Leads"])
+async def bulk_delete_spam_leads(
+    request: dict,
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency)
+):
+    """
+    Bulk delete multiple spam leads
+
+    Enhanced UX: Allow users to remove multiple spam items at once
+
+    Args:
+        request: { spam_ids: List[str] }
+
+    Returns:
+        Count of deleted items
+    """
+    from app.repository.SpamLeadRepository import SpamLeadRepository
+
+    try:
+        spam_ids = request.get("spam_ids", [])
+
+        if not spam_ids:
+            return UriResponse.custom_response(
+                "No spam IDs provided",
+                400,
+                False
+            )
+
+        deleted_count = await SpamLeadRepository.bulk_delete_spam_leads(db, spam_ids)
+
+        return UriResponse.get_single_data_response(
+            entity_name="Spam leads",
+            data={"deleted_count": deleted_count, "requested_count": len(spam_ids)},
+            message=f"Successfully deleted {deleted_count} spam lead(s)"
+        )
+
+    except Exception as e:
+        print(f"Error bulk deleting spam leads: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return UriResponse.custom_response(
+            f"Error bulk deleting spam leads: {str(e)}",
             500,
             False
         )
