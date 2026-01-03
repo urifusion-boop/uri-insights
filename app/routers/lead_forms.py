@@ -481,3 +481,64 @@ async def get_default_form(
         response=jsonable_encoder(result),
         status_code=result.get("responseCode", 200)
     )
+
+
+@router.patch("/toggle-pause/{lead_form_id}")
+async def toggle_pause_form(
+    lead_form_id: str,
+    disabled: bool,
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Toggle pause/resume for a lead form.
+    When paused (disabled=True), form stops auto-generating leads.
+
+    Args:
+        lead_form_id: ID of the form to toggle
+        disabled: True to pause, False to resume
+
+    Returns:
+        Success response with updated form
+    """
+    result = await LeadFormRepository.update(
+        db,
+        lead_form_id,
+        LeadFormUpdateBase(
+            disabled=disabled,
+            disabled_reason="User paused" if disabled else None
+        )
+    )
+
+    return UriResponse.get_status_response(
+        response=jsonable_encoder(result),
+        status_code=result.get("responseCode", 200)
+    )
+
+
+@router.patch("/toggle-auto-generate/{lead_form_id}")
+async def toggle_auto_generate(
+    lead_form_id: str,
+    auto_generate: bool,
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Toggle auto-generate for a lead form.
+    When enabled, form automatically generates leads on schedule.
+
+    Args:
+        lead_form_id: ID of the form to toggle
+        auto_generate: True to enable, False to disable
+
+    Returns:
+        Success response with updated form
+    """
+    result = await LeadFormRepository.update(
+        db,
+        lead_form_id,
+        LeadFormUpdateBase(auto_generate=auto_generate)
+    )
+
+    return UriResponse.get_status_response(
+        response=jsonable_encoder(result),
+        status_code=result.get("responseCode", 200)
+    )

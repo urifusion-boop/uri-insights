@@ -1190,6 +1190,180 @@ async def get_spam_stats(
         )
 
 
+@router.patch("/leads/{lead_id}/next-steps/{step_id}/complete", tags=["Leads - AI Next Steps"])
+async def mark_next_step_complete(
+    lead_id: str,
+    step_id: str,
+    completed: bool = True,
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency)
+):
+    """
+    Mark a next step as completed or uncompleted.
+
+    Args:
+        lead_id: The lead ID
+        step_id: The step ID to update
+        completed: Whether the step is completed (default: True)
+
+    Returns:
+        Updated lead with modified next steps
+    """
+    from datetime import datetime
+
+    try:
+        # Get the lead
+        lead_response = await LeadRepository.get_lead_by_id(db, lead_id)
+        if not lead_response or not lead_response.get("status"):
+            return UriResponse.custom_response("Lead not found", 404, False)
+
+        lead = lead_response.get("responseData")
+        if not lead:
+            return UriResponse.custom_response("Lead not found", 404, False)
+
+        # Get next steps
+        ai_next_steps = lead.get("ai_next_steps", {})
+        if not ai_next_steps or "steps" not in ai_next_steps:
+            return UriResponse.custom_response("No next steps found for this lead", 404, False)
+
+        # Find and update the step
+        steps = ai_next_steps.get("steps", [])
+        step_found = False
+        for step in steps:
+            if step.get("step_id") == step_id:
+                step["completed"] = completed
+                step["completed_at"] = datetime.utcnow().isoformat() + "Z" if completed else None
+                step_found = True
+                break
+
+        if not step_found:
+            return UriResponse.custom_response("Step not found", 404, False)
+
+        # Update lead with modified next steps
+        from app.domain.schemas.lead_schema import LeadUpdate
+        update_data = LeadUpdate(ai_next_steps=ai_next_steps)
+
+        result = await LeadRepository.update_lead(db, lead_id, update_data)
+
+        return UriResponse.get_single_data_response(
+            entity_name="Lead next step",
+            data=result,
+            message=f"Step marked as {'completed' if completed else 'incomplete'}"
+        )
+
+    except Exception as e:
+        print(f"Error updating next step: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return UriResponse.custom_response(f"Error updating next step: {str(e)}", 500, False)
+
+
+@router.get("/leads/insights/next-steps-summary", tags=["Leads - AI Next Steps"])
+async def get_next_steps_summary(
+    user_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency)
+):
+    """
+    Get aggregated insights about pending next steps across all leads.
+
+    Returns:
+        {
+            "total_pending_actions": int,
+            "by_priority": {"high": int, "medium": int, "low": int},
+            "leads_requiring_action": int,
+            "completed_actions_today": int,
+            "top_actions": [{"action": str, "count": int}, ...]
+        }
+    """
+    from datetime import datetime, timedelta
+    from collections import Counter
+
+    try:
+        # Get all leads for user with next steps
+        pipeline = [
+            {
+                "$match": {
+                    "assigned_to": user_id,
+                    "ai_next_steps": {"$exists": True, "$ne": None}
+                }
+            },
+            {
+                "$project": {
+                    "lead_id": 1,
+                    "ai_next_steps": 1
+                }
+            }
+        ]
+
+        leads_cursor = db["leads"].aggregate(pipeline)
+        leads = await leads_cursor.to_list(length=None)
+
+        # Aggregate statistics
+        total_pending = 0
+        by_priority = {"high": 0, "medium": 0, "low": 0}
+        leads_with_pending = set()
+        completed_today = 0
+        action_types = []
+
+        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+
+        for lead in leads:
+            ai_next_steps = lead.get("ai_next_steps", {})
+            steps = ai_next_steps.get("steps", [])
+
+            lead_has_pending = False
+            for step in steps:
+                if not step.get("completed", False):
+                    total_pending += 1
+                    priority = step.get("priority", "medium").lower()
+                    by_priority[priority] = by_priority.get(priority, 0) + 1
+                    lead_has_pending = True
+
+                    # Extract action type (first few words)
+                    action = step.get("action", "")
+                    action_type = " ".join(action.split()[:3]) if action else "Other"
+                    action_types.append(action_type)
+                else:
+                    # Check if completed today
+                    completed_at = step.get("completed_at")
+                    if completed_at:
+                        try:
+                            completed_date = datetime.fromisoformat(completed_at.replace("Z", "+00:00"))
+                            if completed_date >= today_start:
+                                completed_today += 1
+                        except:
+                            pass
+
+            if lead_has_pending:
+                leads_with_pending.add(lead["lead_id"])
+
+        # Get top action types
+        action_counter = Counter(action_types)
+        top_actions = [
+            {"action": action, "count": count}
+            for action, count in action_counter.most_common(5)
+        ]
+
+        summary = {
+            "total_pending_actions": total_pending,
+            "by_priority": by_priority,
+            "leads_requiring_action": len(leads_with_pending),
+            "completed_actions_today": completed_today,
+            "top_actions": top_actions
+        }
+
+        return UriResponse.get_single_data_response(
+            entity_name="Next steps summary",
+            data=summary,
+            message="Next steps summary retrieved successfully"
+        )
+
+    except Exception as e:
+        print(f"Error getting next steps summary: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return UriResponse.custom_response(f"Error getting next steps summary: {str(e)}", 500, False)
+
+
 @router.patch("/spam-leads/{spam_id}/notes", tags=["Spam Leads"])
 async def update_spam_notes(
     spam_id: str,

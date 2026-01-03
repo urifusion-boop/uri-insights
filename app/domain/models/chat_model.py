@@ -2,6 +2,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 from app.domain.enums.sentiment_enum import SentimentEnum
 from app.domain.responses.reportgeneration_response import TopSuggestedImprovement
+from datetime import datetime
 
 
 class ChatMessage(BaseModel):
@@ -270,3 +271,21 @@ class SentimentResponse(BaseModel):
     score: float
     magnitude: float
     sentiment: str  # "positive", "neutral", or "negative"
+
+
+class NextStepAction(BaseModel):
+    """Single actionable next step for a lead"""
+    step_id: str
+    action: str  # e.g., "Reply to their LinkedIn post about needing laptops"
+    reasoning: str  # e.g., "Perfect match - they need laptops, you sell gadgets"
+    priority: str  # "high", "medium", "low"
+    confidence: float  # 0.0 to 1.0
+    platform: Optional[str] = None  # "linkedin", "twitter", "email", etc.
+    completed: bool = False
+
+
+class AINextStepsResponse(BaseModel):
+    """AI-generated next steps for a lead based on user's goal"""
+    steps: List[NextStepAction]
+    summary: str  # e.g., "2 high-priority actions recommended"
+    based_on_goal: str  # The user's goal that was used

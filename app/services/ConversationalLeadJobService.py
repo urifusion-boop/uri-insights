@@ -1078,7 +1078,7 @@ class ConversationalLeadJobService:
 
             # Save only qualified leads to database
             if qualified_leads:
-                save_result = await ConversationalLeadJobService._save_leads_batch(db, qualified_leads)
+                save_result = await ConversationalLeadJobService._save_leads_batch(db, qualified_leads, lead_form)
                 new_count = save_result.get("successful_count", 0)
                 duplicate_count = save_result.get("skipped_duplicates", 0)
 
@@ -1486,7 +1486,8 @@ class ConversationalLeadJobService:
     @staticmethod
     async def _save_leads_batch(
         db: AsyncIOMotorDatabase,
-        leads: List[LeadCreate]
+        leads: List[LeadCreate],
+        lead_form: Optional[Dict] = None
     ) -> Dict:
         """
         Save multiple leads to database, returns statistics with per-source breakdown.
@@ -1505,6 +1506,34 @@ class ConversationalLeadJobService:
             # Separate leads by source BEFORE saving
             social_leads = [l for l in leads if l.lead_source != LeadSourceEnum.JOB_BOARDS]
             job_board_leads = [l for l in leads if l.lead_source == LeadSourceEnum.JOB_BOARDS]
+
+            # Generate AI next steps for each lead if goal is provided
+            if lead_form and lead_form.get("lead_generation_goal"):
+                from app.services.AIService import AIService
+                goal = lead_form.get("lead_generation_goal")
+                lead_type = str(lead_form.get("form_type", "PERSON"))
+
+                print(f"🎯 Generating next steps for {len(leads)} leads with goal: {goal}")
+
+                # Generate next steps in parallel for all leads
+                next_steps_tasks = [
+                    AIService.generate_lead_next_steps(
+                        lead_data=lead.model_dump() if hasattr(lead, 'model_dump') else lead.dict(),
+                        user_goal=goal,
+                        lead_type=lead_type
+                    )
+                    for lead in leads
+                ]
+
+                next_steps_results = await asyncio.gather(*next_steps_tasks, return_exceptions=True)
+
+                # Attach next steps to leads
+                for idx, next_steps_result in enumerate(next_steps_results):
+                    if not isinstance(next_steps_result, Exception) and next_steps_result:
+                        leads[idx].ai_next_steps = next_steps_result
+                        print(f"✅ Generated {len(next_steps_result.get('steps', []))} steps for lead {idx+1}")
+                    else:
+                        print(f"⚠️ Failed to generate next steps for lead {idx+1}: {next_steps_result}")
 
             # Save all leads together
             result = await LeadRepository.multiple_create_leads(db, leads)

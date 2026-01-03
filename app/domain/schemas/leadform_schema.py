@@ -115,6 +115,9 @@ class LeadFormBase(BaseModel):
     solution_context: Optional[str] = None  # What problem does user's product/service solve? (for job board analysis)
     job_keywords: Optional[List[str]] = None  # AI-generated job role keywords for job board scanning (PRD Section 5)
 
+    # AI Next Steps fields
+    lead_generation_goal: Optional[str] = None  # User's business goal/reason for generating leads (e.g., "I want to sell gadgets to programmers")
+
     # Pagination
     page: Optional[int] = 1
     per_page: Optional[int] = 10

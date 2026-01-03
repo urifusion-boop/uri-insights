@@ -107,6 +107,9 @@ class LeadBase(BaseModel):
     job_source: Optional[str] = None  # Source of job posting: "LinkedIn Jobs", "Jobberman"
     company_confidence: Optional[float] = None  # PRD Sections 14-16: Confidence that company can be verified (0-1)
 
+    # AI Next Steps - Actionable recommendations based on user's goal
+    ai_next_steps: Optional[dict] = None  # Structure: {"steps": [...], "generated_at": "...", "based_on_goal": "...", "summary": "..."}
+
     class Config:
         json_encoders = {datetime: lambda v: DateHelper.to_iso8601_utc(v) if v else None}
 
@@ -188,6 +191,9 @@ class LeadUpdate(BaseModel):
     implied_problems: Optional[List[str]] = None
     job_source: Optional[str] = None
     company_confidence: Optional[float] = None
+
+    # AI Next Steps (for updates)
+    ai_next_steps: Optional[dict] = None
 
     last_updated: datetime = Field(default_factory=datetime.utcnow)
 
