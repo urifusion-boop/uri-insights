@@ -441,7 +441,7 @@ async def get_forms_by_user_and_type(
     forms = await LeadFormRepository.get_forms_by_user_and_type(db, user_id, form_type)
 
     return UriResponse.get_status_response(
-        response=UriResponse.get_list_data_response("Lead forms", forms),
+        response=jsonable_encoder(UriResponse.get_list_data_response("Lead forms", forms)),
         status_code=200
     )
 
