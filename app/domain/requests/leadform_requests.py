@@ -68,6 +68,7 @@ class BaseFormInput(BaseModel):
     user_id: str = Field(...)
     add_to_history: Optional[bool] = None
     auto_generate: Optional[bool] = None
+    lead_generation_goal: Optional[str] = None  # User's business goal/reason for generating leads
 
 
 # --- Person Search Form ---
