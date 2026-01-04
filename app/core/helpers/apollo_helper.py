@@ -76,6 +76,9 @@ class ApolloHelper:
             "platform_configs",
             "solution_context",
             "job_keywords",
+            "is_default",
+            "monitoring_interval_hours",
+            "lead_generation_goal",
         ]
 
         lead_form.copy()
@@ -132,6 +135,9 @@ class ApolloHelper:
             "post_age_filter",
             "solution_context",
             "job_keywords",
+            "is_default",
+            "monitoring_interval_hours",
+            "lead_generation_goal",
         ]
         organization_search_request_dict = DictHelper.remove_keys(
             lead_form.copy(), unwanted_keys
