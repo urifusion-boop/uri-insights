@@ -110,6 +110,9 @@ class LeadBase(BaseModel):
     # AI Next Steps - Actionable recommendations based on user's goal
     ai_next_steps: Optional[dict] = None  # Structure: {"steps": [...], "generated_at": "...", "based_on_goal": "...", "summary": "..."}
 
+    # Form Title - Populated from lead_form_snapshots via aggregation
+    form_title: Optional[str] = None  # Form title from the snapshot that generated this lead
+
     class Config:
         json_encoders = {datetime: lambda v: DateHelper.to_iso8601_utc(v) if v else None}
 

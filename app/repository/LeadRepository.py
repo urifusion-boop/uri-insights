@@ -210,15 +210,41 @@ class LeadRepository:
                 {"is_pre_stored": {"$exists": False}},
             ]
 
+        # Count total leads matching the query
         total_leads = await db["leads"].count_documents(query)
-        leads = (
-            await db["leads"]
-            .find(query)
-            .sort("last_updated", -1)
-            .skip(skip)
-            .limit(limit)
-            .to_list(length=limit)
-        )
+
+        # Use aggregation pipeline to join with lead_form_snapshots and populate form_title
+        pipeline = [
+            {"$match": query},
+            {"$sort": {"last_updated": -1}},
+            {"$skip": skip},
+            {"$limit": limit},
+            {
+                "$lookup": {
+                    "from": "lead_form_snapshots",
+                    "localField": "lead_form_snapshot_id",
+                    "foreignField": "lead_form_snapshot_id",
+                    "as": "snapshot_data"
+                }
+            },
+            {
+                "$addFields": {
+                    "form_title": {
+                        "$ifNull": [
+                            {"$arrayElemAt": ["$snapshot_data.form_title", 0]},
+                            None
+                        ]
+                    }
+                }
+            },
+            {
+                "$project": {
+                    "snapshot_data": 0  # Remove the snapshot_data array from final output
+                }
+            }
+        ]
+
+        leads = await db["leads"].aggregate(pipeline).to_list(length=limit)
 
         leads_list = [Lead(**lead).dict() for lead in leads]
         return UriResponse.get_paged_data_response(
