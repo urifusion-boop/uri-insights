@@ -142,6 +142,7 @@ class LeadFormUpdateBase(BaseModel):
     disabled_reason: Optional[LeadFormDisabledReasonEnum] = None
     add_to_history: Optional[bool] = True
     auto_generate: Optional[bool] = None
+    lead_generation_goal: Optional[str] = None  # User's business goal/reason for generating leads
     # Pagination
     page: Optional[int] = None
     per_page: Optional[int] = None
