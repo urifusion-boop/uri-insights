@@ -687,6 +687,11 @@ class ApolloService:
                 if latest_lead_form_snapshot
                 else None
             )
+            lead_to_create_dict["form_title"] = (
+                latest_lead_form_snapshot.form_title
+                if latest_lead_form_snapshot
+                else None
+            )
 
             del person["employment_history"]
             tasks.append(
@@ -721,6 +726,11 @@ class ApolloService:
             lead_to_create_dict["assigned_to"] = user_id
             lead_to_create_dict["lead_form_snapshot_id"] = (
                 latest_lead_form_snapshot.lead_form_snapshot_id
+                if latest_lead_form_snapshot
+                else None
+            )
+            lead_to_create_dict["form_title"] = (
+                latest_lead_form_snapshot.form_title
                 if latest_lead_form_snapshot
                 else None
             )

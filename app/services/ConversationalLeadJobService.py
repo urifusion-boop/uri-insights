@@ -722,7 +722,7 @@ class ConversationalLeadJobService:
                     fetch_tasks.append(
                         asyncio.wait_for(
                             ConversationalLeadJobService._fetch_twitter_leads(
-                                twitter_keyword, user_id, lead_form.get("lead_form_id"), max_posts=twitter_limit
+                                twitter_keyword, user_id, lead_form.get("lead_form_id"), lead_form.get("form_title", ""), max_posts=twitter_limit
                             ),
                             timeout=social_platform_timeout
                         )
@@ -739,7 +739,7 @@ class ConversationalLeadJobService:
                     fetch_tasks.append(
                         asyncio.wait_for(
                             ConversationalLeadJobService._fetch_facebook_leads(
-                                facebook_keyword, user_id, lead_form.get("lead_form_id"), max_posts=facebook_limit
+                                facebook_keyword, user_id, lead_form.get("lead_form_id"), lead_form.get("form_title", ""), max_posts=facebook_limit
                             ),
                             timeout=social_platform_timeout
                         )
@@ -756,7 +756,7 @@ class ConversationalLeadJobService:
                     fetch_tasks.append(
                         asyncio.wait_for(
                             ConversationalLeadJobService._fetch_tiktok_leads(
-                                tiktok_keyword, user_id, lead_form.get("lead_form_id"), max_posts=tiktok_limit
+                                tiktok_keyword, user_id, lead_form.get("lead_form_id"), lead_form.get("form_title", ""), max_posts=tiktok_limit
                             ),
                             timeout=social_platform_timeout
                         )
@@ -809,7 +809,7 @@ class ConversationalLeadJobService:
                             fetch_tasks.append(
                                 asyncio.wait_for(
                                     ConversationalLeadJobService._fetch_job_board_signals(
-                                        job_keyword_to_use, user_id, lead_form.get("lead_form_id"), solution_context, max_jobs=job_boards_limit
+                                        job_keyword_to_use, user_id, lead_form.get("lead_form_id"), lead_form.get("form_title", ""), solution_context, max_jobs=job_boards_limit
                                     ),
                                     timeout=job_board_timeout  # Longer timeout for job scraping + AI analysis
                                 )
@@ -999,6 +999,7 @@ class ConversationalLeadJobService:
                             extra_keyword,
                             user_id,
                             lead_form.get("lead_form_id"),
+                            lead_form.get("form_title", ""),
                             solution_context,
                             max_jobs=job_boards_remaining
                         )
@@ -1240,6 +1241,7 @@ class ConversationalLeadJobService:
         search_query: str,
         user_id: str,
         lead_form_id: Optional[str] = None,
+        form_title: str = "",
         max_posts: int = 25
     ) -> List[LeadCreate]:
         """Fetch leads from Twitter using Apify with smart search query"""
@@ -1285,6 +1287,7 @@ class ConversationalLeadJobService:
                     assigned_to=user_id,
                     starred=False,
                     lead_form_snapshot_id=lead_form_id,
+                    form_title=form_title,
                     content_hash=ContentDeduplicator.generate_content_hash(tweet_text),
                 )
 
@@ -1308,6 +1311,7 @@ class ConversationalLeadJobService:
         search_query: str,
         user_id: str,
         lead_form_id: Optional[str] = None,
+        form_title: str = "",
         max_posts: int = 25
     ) -> List[LeadCreate]:
         """Fetch leads from Facebook using Apify with smart search query"""
@@ -1369,6 +1373,7 @@ class ConversationalLeadJobService:
                     assigned_to=user_id,
                     starred=False,
                     lead_form_snapshot_id=lead_form_id,
+                    form_title=form_title,
                     content_hash=ContentDeduplicator.generate_content_hash(post_text),
                 )
 
@@ -1392,6 +1397,7 @@ class ConversationalLeadJobService:
         search_query: str,
         user_id: str,
         lead_form_id: Optional[str] = None,
+        form_title: str = "",
         max_posts: int = 25
     ) -> List[LeadCreate]:
         """Fetch leads from TikTok using Apify with smart search query"""
@@ -1465,6 +1471,7 @@ class ConversationalLeadJobService:
                     assigned_to=user_id,
                     starred=False,
                     lead_form_snapshot_id=lead_form_id,
+                    form_title=form_title,
                     content_hash=ContentDeduplicator.generate_content_hash(post_text),
                 )
 
@@ -1774,6 +1781,7 @@ class ConversationalLeadJobService:
         search_query: str,
         user_id: str,
         lead_form_id: Optional[str] = None,
+        form_title: str = "",
         solution_context: str = "",
         max_jobs: int = 20
     ) -> Dict[str, Any]:
@@ -1895,6 +1903,7 @@ class ConversationalLeadJobService:
                         assigned_to=user_id,
                         starred=False,
                         lead_form_snapshot_id=lead_form_id,
+                        form_title=form_title,
                         # Job-specific fields
                         job_posting_url=job.get("url", ""),
                         job_title_field=job.get("title", ""),
