@@ -139,11 +139,33 @@ class LeadGenerationJobRepository:
         if job["status"] not in ["queued", "processing"]:
             return False
 
-        # Atomically update to cancelling (prevent race conditions)
+        # If job hasn't started - cancel immediately with empty stats
+        if job["status"] == "queued":
+            await LeadGenerationJobRepository.mark_cancelled(
+                db=db,
+                job_id=job_id,
+                partial_stats={
+                    "total_fetched": 0,
+                    "total_qualified": 0,
+                    "new_leads_saved": 0,
+                    "duplicates_skipped": 0,
+                    "social_total_fetched": 0,
+                    "social_qualified": 0,
+                    "social_new_leads": 0,
+                    "social_duplicates": 0,
+                    "job_boards_total_fetched": 0,
+                    "job_signals_found": 0,
+                    "job_signals_saved": 0,
+                },
+                processed_count=0
+            )
+            return True
+
+        # Job is running - signal worker to stop gracefully
         result = await db[LeadGenerationJobRepository.COLLECTION_NAME].update_one(
             {
                 "job_id": job_id,
-                "status": {"$in": ["queued", "processing"]}
+                "status": "processing"
             },
             {
                 "$set": {
