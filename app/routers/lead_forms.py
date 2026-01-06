@@ -287,6 +287,119 @@ async def get_job_status(
         )
 
 
+@router.post("/conversation-search/job-status/{job_id}/cancel")
+async def cancel_lead_generation_job(
+    job_id: str,
+    user_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency)
+):
+    """
+    Cancel a running lead generation job.
+
+    **Behavior**:
+    - Queued jobs: Immediately cancelled (not yet started)
+    - Processing jobs: Worker will stop gracefully at next checkpoint
+    - Completed/Failed jobs: Returns current stats (no action)
+
+    **Response**:
+    - 200: Cancellation requested successfully
+    - 403: Job belongs to different user
+    - 404: Job not found
+
+    **Partial Results**:
+    - Frontend should continue polling job status
+    - When status becomes "cancelled", stats contain partial results
+    - Stats include: posts_fetched, posts_analyzed, leads_saved
+    """
+    from app.repository.LeadGenerationJobRepository import LeadGenerationJobRepository
+
+    try:
+        # 1. Verify job exists and belongs to user
+        job = await LeadGenerationJobRepository.get_job_status(db, job_id)
+
+        if not job:
+            return UriResponse.get_error_response(
+                "Job not found",
+                404
+            )
+
+        if job["user_id"] != user_id:
+            return UriResponse.get_error_response(
+                "You don't have permission to cancel this job",
+                403
+            )
+
+        current_status = job.get("status")
+
+        # 2. Check if job is cancellable
+        if current_status in ["completed", "failed"]:
+            return UriResponse.get_single_data_response(
+                "Job already finished",
+                {
+                    "job_id": job_id,
+                    "status": current_status,
+                    "message": "Job has already completed. No cancellation needed.",
+                    "stats": job.get("stats", {})
+                }
+            )
+
+        if current_status == "cancelled":
+            return UriResponse.get_single_data_response(
+                "Job already cancelled",
+                {
+                    "job_id": job_id,
+                    "status": "cancelled",
+                    "message": "Job was already cancelled.",
+                    "stats": job.get("stats", {})
+                }
+            )
+
+        if current_status == "cancelling":
+            return UriResponse.get_single_data_response(
+                "Cancellation in progress",
+                {
+                    "job_id": job_id,
+                    "status": "cancelling",
+                    "message": "Cancellation already in progress. Worker will stop shortly.",
+                    "current_progress": job.get("progress", 0)
+                }
+            )
+
+        # 3. Request cancellation
+        cancellation_accepted = await LeadGenerationJobRepository.mark_cancellation_requested(
+            db=db,
+            job_id=job_id
+        )
+
+        if not cancellation_accepted:
+            return UriResponse.get_error_response(
+                "Could not cancel job. It may have just completed.",
+                409
+            )
+
+        # 4. Success response
+        return UriResponse.get_single_data_response(
+            "Cancellation requested successfully",
+            {
+                "job_id": job_id,
+                "status": "cancelling",
+                "message": "Worker will stop at next checkpoint (5-15 seconds). Continue polling for final stats.",
+                "estimated_stop_time": "5-15 seconds",
+                "current_progress": job.get("progress", 0),
+                "note": "Partial results will be available when status becomes 'cancelled'"
+            }
+        )
+
+    except Exception as e:
+        print(f"❌ Error cancelling job {job_id}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return UriResponse.get_error_response(
+            f"Failed to cancel job: {str(e)}",
+            500
+        )
+
+
 @router.post("/auto-populate")
 async def auto_populate_lead_form(
     request: AutoPopulationQuery,

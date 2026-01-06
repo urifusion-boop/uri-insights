@@ -445,6 +445,35 @@ class ConversationalLeadJobService:
     _llm_executor = ThreadPoolExecutor(max_workers=10, thread_name_prefix="llm_worker")
 
     @staticmethod
+    async def _check_cancellation(db: AsyncIOMotorDatabase, job_id: str) -> bool:
+        """
+        Check if cancellation was requested for this job.
+
+        This is called during the keyword loop to detect cancellation requests.
+        Returns True if job should stop.
+
+        Performance: Single DB query per check
+        """
+        if not job_id:
+            return False
+
+        from app.repository.LeadGenerationJobRepository import LeadGenerationJobRepository
+
+        try:
+            job = await LeadGenerationJobRepository.get_job_status(db, job_id)
+
+            if job and job.get("status") == "cancelling":
+                print(f"🛑 Cancellation detected for job {job_id}")
+                return True
+
+            return False
+
+        except Exception as e:
+            print(f"⚠️ Error checking cancellation: {str(e)}")
+            # On error, don't stop - let job continue
+            return False
+
+    @staticmethod
     async def fetch_leads_from_platforms(
         db: AsyncIOMotorDatabase,
         lead_form: Dict,
@@ -694,7 +723,16 @@ class ConversationalLeadJobService:
 
             # Try ALL keywords to maximize qualified leads (with early stopping at 150 posts)
             qualified_leads = []
+            cancelled_early = False  # Track if job was cancelled
             for keyword_idx, keyword in enumerate(prioritized_keywords, 1):
+                # Check for cancellation request
+                if await ConversationalLeadJobService._check_cancellation(db, job_id):
+                    print(f"🛑 Job cancelled by user at keyword {keyword_idx}/{len(prioritized_keywords)}")
+                    print(f"   Processed {keyword_idx - 1} keywords before cancellation")
+                    print(f"   Current stats: {distribution_manager.total_collected} posts fetched")
+                    cancelled_early = True
+                    break
+
                 # Check if we should stop early (reached 150 post limit)
                 if distribution_manager.should_stop():
                     print(f"\n✅ Reached {distribution_manager.max_total_posts} post limit, stopping early at keyword {keyword_idx}/{len(prioritized_keywords)}")
@@ -1166,6 +1204,23 @@ class ConversationalLeadJobService:
             except Exception as usage_error:
                 print(f"⚠️ Failed to track trial usage: {str(usage_error)}")
                 # Don't fail the entire operation if usage tracking fails
+
+        # Check if job was cancelled and handle accordingly
+        if job_id and cancelled_early:
+            from app.repository.LeadGenerationJobRepository import LeadGenerationJobRepository
+
+            await LeadGenerationJobRepository.mark_cancelled(
+                db=db,
+                job_id=job_id,
+                partial_stats=stats,
+                processed_count=stats.get("total_fetched", 0)
+            )
+
+            print(f"✅ Job {job_id} cancelled successfully")
+            print(f"   Partial results: {stats}")
+
+            # Return partial stats (same format as successful completion)
+            return stats
 
         # Update job with final status
         if job_id:
