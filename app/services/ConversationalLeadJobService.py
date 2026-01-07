@@ -864,13 +864,13 @@ class ConversationalLeadJobService:
                 platform_errors = []
                 platform_successes = 0
                 keyword_job_boards_fetched = 0  # Track job boards fetched for THIS keyword only
+                keyword_filtered_leads = []  # NEW: Track filtered leads for spam
 
                 if fetch_tasks:
                     print(f"   ⚡ Fetching from {len(fetch_tasks)} platform(s) concurrently...")
                     results = await asyncio.gather(*fetch_tasks, return_exceptions=True)
 
                     # Collect successful results and track failures
-                    keyword_filtered_leads = []  # NEW: Track filtered leads for spam
 
                     for idx, result in enumerate(results):
                         if isinstance(result, asyncio.TimeoutError):
