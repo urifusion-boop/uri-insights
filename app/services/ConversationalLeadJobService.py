@@ -1022,6 +1022,12 @@ class ConversationalLeadJobService:
 
                     # Fetch from job boards with additional keywords
                     for extra_idx, extra_keyword in enumerate(additional_keywords):
+                        # Check for cancellation request
+                        if await ConversationalLeadJobService._check_cancellation(db, job_id):
+                            print(f"🛑 Job cancelled by user during job boards expansion at keyword {extra_idx + 1}/{len(additional_keywords)}")
+                            cancelled_early = True
+                            break
+
                         # Check if we've already reached target
                         if distribution_manager.job_boards_collected >= distribution_manager.max_job_posts:
                             print(f"   ✅ Reached job boards target during expansion - stopping")
