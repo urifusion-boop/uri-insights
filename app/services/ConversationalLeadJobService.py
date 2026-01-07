@@ -38,21 +38,21 @@ class PlatformDistributionManager:
     """
     Manages platform distribution to enforce limits:
     - Social: 150 posts max (70% Twitter, 20% Facebook, 10% TikTok)
-    - Job Boards: 100 posts max
-    - Total: 250 posts across all sources
+    - Job Boards: 50 posts max
+    - Total: 200 posts across all sources
     """
 
-    def __init__(self, max_social_posts: int = 150, max_job_posts: int = 100):
+    def __init__(self, max_social_posts: int = 150, max_job_posts: int = 50):
         """
         Initialize the distribution manager with dynamic smart limits.
 
         Args:
             max_social_posts: Maximum social media posts to fetch (default: 150)
-            max_job_posts: Maximum job board posts to fetch (default: 100)
+            max_job_posts: Maximum job board posts to fetch (default: 50)
         """
         self.max_social_posts = max_social_posts
         self.max_job_posts = max_job_posts
-        self.max_total_posts = max_social_posts + max_job_posts  # 250 total
+        self.max_total_posts = max_social_posts + max_job_posts  # 200 total
 
         self.twitter_target = int(max_social_posts * 0.70)  # 105 posts
         self.facebook_target = int(max_social_posts * 0.20)  # 30 posts
@@ -715,8 +715,8 @@ class ConversationalLeadJobService:
             # Update progress: Starting keyword search
             await update_progress(10, f"Searching with {len(prioritized_keywords)} keyword(s) across {len(enabled_platforms)} platform(s)...")
 
-            # Initialize platform distribution manager (150 social + 100 job boards = 250 total)
-            distribution_manager = PlatformDistributionManager(max_social_posts=150, max_job_posts=100)
+            # Initialize platform distribution manager (150 social + 50 job boards = 200 total)
+            distribution_manager = PlatformDistributionManager(max_social_posts=150, max_job_posts=50)
 
             # Track total job posts fetched across all keywords (before AI filtering)
             job_boards_total_fetched = 0
@@ -740,7 +740,9 @@ class ConversationalLeadJobService:
                     break
 
                 print(f"\n🔍 KEYWORD ATTEMPT {keyword_idx}/{len(prioritized_keywords)}: '{keyword}'")
-                progress_percent = 10 + (keyword_idx * 20)  # 10, 30, 50
+                # Calculate progress dynamically based on keyword completion (10-75% range)
+                # This ensures progress never exceeds 100% regardless of keyword count
+                progress_percent = 10 + int((keyword_idx / len(prioritized_keywords)) * 65)
                 await update_progress(progress_percent, f"Fetching from platforms with keyword '{keyword}'...")
 
                 # Get smart dynamic limits for this keyword based on remaining budget and remaining keywords
