@@ -27,6 +27,7 @@ class CommunicationEntry(BaseModel):
 
 
 class AINextSteps(BaseModel):
+    """For reading from database - flexible to handle old data formats"""
     steps: Optional[Union[List[str], List[dict], List[Any]]] = None  # Support both string lists and complex objects
     generated_at: Optional[str] = None
     based_on_goal: Optional[str] = None
@@ -34,6 +35,17 @@ class AINextSteps(BaseModel):
 
     class Config:
         extra = "allow"  # Allow extra fields for backward compatibility with existing data
+
+
+class AINextStepsStrict(BaseModel):
+    """For OpenAI structured output - strict validation"""
+    steps: Optional[List[str]] = None
+    generated_at: Optional[str] = None
+    based_on_goal: Optional[str] = None
+    summary: Optional[str] = None
+
+    class Config:
+        extra = "forbid"
 
 
 class LeadBase(BaseModel):
@@ -138,6 +150,7 @@ class LeadCreate(LeadBase):
     """
 
     lead_id: str = Field(default_factory=lambda: str(ObjectId()))
+    ai_next_steps: Optional[AINextStepsStrict] = None  # Override with strict version for OpenAI
 
     class Config:
         extra = "forbid"  # Only for OpenAI structured output validation
