@@ -149,7 +149,7 @@ class SpamLeadRepository:
         total = await collection.count_documents(query)
 
         # Get paginated results (sorted by newest first)
-        cursor = collection.find(query).sort("spam_timestamp", -1).skip(skip).limit(page_size)
+        cursor = collection.find(query).sort("created_at", -1).skip(skip).limit(page_size)
         spam_leads = await cursor.to_list(length=page_size)
 
         # Convert ObjectId to string

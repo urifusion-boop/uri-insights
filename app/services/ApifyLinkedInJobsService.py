@@ -35,15 +35,21 @@ class ApifyLinkedInJobsService:
         self,
         search_query: str,
         max_jobs: int = 15,
-        location: str = "Nigeria"
+        location: str = "Worldwide",
+        published_at: str = "Past Month",
+        solution_context: str = "",
+        infer_parameters: bool = True
     ) -> Dict[str, Any]:
         """
-        Fetch job postings from LinkedIn Jobs using Apify
+        Fetch job postings from LinkedIn Jobs using Apify with intelligent parameter inference
 
         Args:
             search_query: The search query (e.g., "DevOps Engineer")
             max_jobs: Maximum number of jobs to fetch (default: 15)
-            location: Geographic location filter (default: "Nigeria")
+            location: Geographic location filter (default: "Worldwide")
+            published_at: Time filter (e.g., "Past Week", "Past Month", "Any Time")
+            solution_context: Solution description for intelligent inference
+            infer_parameters: Enable intelligent parameter inference (default: True)
 
         Returns:
             Dictionary containing jobs and metadata:
@@ -71,8 +77,15 @@ class ApifyLinkedInJobsService:
                     "jobs": []
                 }
 
-            # Fetch jobs from Apify
-            jobs_result = await self._fetch_jobs_from_apify(search_query, max_jobs, location)
+            # Fetch jobs from Apify with inference
+            jobs_result = await self._fetch_jobs_from_apify(
+                search_query,
+                max_jobs,
+                location,
+                published_at,
+                solution_context,
+                infer_parameters
+            )
 
             if not jobs_result["success"]:
                 return jobs_result
@@ -100,7 +113,10 @@ class ApifyLinkedInJobsService:
         self,
         search_query: str,
         max_jobs: int,
-        location: str
+        location: str,
+        published_at: str = "Past Month",
+        solution_context: str = "",
+        infer_parameters: bool = True
     ) -> Dict[str, Any]:
         """
         Fetch job postings from Apify using LinkedIn Jobs scraper actor
@@ -119,20 +135,43 @@ class ApifyLinkedInJobsService:
             # Docs: https://apify.com/bebity/linkedin-jobs-scraper
             actor_id = "bebity/linkedin-jobs-scraper"
 
-            # Configure the input for the actor
-            # Note: bebity/linkedin-jobs-scraper uses keyword-based search
+            # Configure the base input for the actor
             run_input = {
-                "keyword": search_query,  # Search by keyword
-                "location": location,
+                "keyword": search_query,
                 "maxItems": max_jobs,
+                "publishedAt": published_at,  # Time filter
                 "proxy": {
                     "useApifyProxy": True,
                     "apifyProxyGroups": ["RESIDENTIAL"]
                 }
             }
 
+            # Only add location if specified (omit for worldwide search)
+            if location:
+                run_input["location"] = location
+
+            # Intelligently infer additional parameters from job keyword
+            if infer_parameters:
+                from app.services.JobBoardParameterHelper import infer_linkedin_parameters
+
+                inferred = infer_linkedin_parameters(search_query, solution_context)
+
+                # Add inferred parameters (only if they're not None)
+                if inferred.get("experience_level"):
+                    run_input["experienceLevel"] = inferred["experience_level"]
+                    logger.info(f"   🎯 Inferred experience level: {inferred['experience_level']}")
+
+                if inferred.get("on_site_remote"):
+                    run_input["workType"] = inferred["on_site_remote"]  # LinkedIn uses "workType" not "onSiteRemote"
+                    logger.info(f"   🏠 Inferred work arrangement: {inferred['on_site_remote']}")
+
+                if inferred.get("job_type"):
+                    run_input["contractType"] = inferred["job_type"]  # LinkedIn uses "contractType" not "jobType"
+                    logger.info(f"   📋 Inferred job type: {inferred['job_type']}")
+
             # Run the actor in a thread to avoid blocking
-            logger.info(f"Starting Apify actor to fetch LinkedIn jobs for: {search_query} in {location}")
+            location_display = location if location else "Worldwide"
+            logger.info(f"Starting Apify actor to fetch LinkedIn jobs for: {search_query} in {location_display}")
 
             # Run actor synchronously in executor to avoid blocking event loop
             loop = asyncio.get_event_loop()

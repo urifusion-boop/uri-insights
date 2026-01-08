@@ -40,7 +40,7 @@ class SpamLeadBase(BaseModel):
     # === SPAM CLASSIFICATION ===
     spam_reason: str  # Primary reason (use SpamReasonEnum values)
     spam_reason_detail: Optional[str] = None  # Additional explanation with scores
-    spam_timestamp: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=datetime.utcnow)  # Standard timestamp field
     filter_stage: str  # "job_board_ai" | "intent_analysis" | "time_filter" | "location_filter" | "duplicate"
 
     # === LEAD SOURCE CONTEXT ===

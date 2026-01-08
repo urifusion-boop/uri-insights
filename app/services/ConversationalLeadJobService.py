@@ -849,7 +849,14 @@ class ConversationalLeadJobService:
                             fetch_tasks.append(
                                 asyncio.wait_for(
                                     ConversationalLeadJobService._fetch_job_board_signals(
-                                        job_keyword_to_use, user_id, lead_form.get("lead_form_id"), lead_form.get("form_title", ""), solution_context, max_jobs=job_boards_limit
+                                        job_keyword_to_use,
+                                        user_id,
+                                        lead_form.get("lead_form_id"),
+                                        lead_form.get("form_title", ""),
+                                        solution_context,
+                                        max_jobs=job_boards_limit,
+                                        location=lead_form.get("location"),
+                                        post_age_filter=lead_form.get("post_age_filter", "all")
                                     ),
                                     timeout=job_board_timeout  # Longer timeout for job scraping + AI analysis
                                 )
@@ -1047,7 +1054,9 @@ class ConversationalLeadJobService:
                             lead_form.get("lead_form_id"),
                             lead_form.get("form_title", ""),
                             solution_context,
-                            max_jobs=job_boards_remaining
+                            max_jobs=job_boards_remaining,
+                            location=lead_form.get("location"),
+                            post_age_filter=lead_form.get("post_age_filter", "all")
                         )
 
                         # Extract qualified leads and total fetched from result dict
@@ -1125,6 +1134,7 @@ class ConversationalLeadJobService:
 
             # Save only qualified leads to database
             if qualified_leads:
+                await update_progress(85, f"Saving {len(qualified_leads)} qualified leads to database...")
                 save_result = await ConversationalLeadJobService._save_leads_batch(db, qualified_leads, lead_form)
                 new_count = save_result.get("successful_count", 0)
                 duplicate_count = save_result.get("skipped_duplicates", 0)
@@ -1846,7 +1856,9 @@ class ConversationalLeadJobService:
         lead_form_id: Optional[str] = None,
         form_title: str = "",
         solution_context: str = "",
-        max_jobs: int = 20
+        max_jobs: int = 20,
+        location: Optional[List[str]] = None,
+        post_age_filter: str = "all"
     ) -> Dict[str, Any]:
         """
         Fetch and analyze job postings from LinkedIn Jobs and Jobberman
@@ -1858,6 +1870,8 @@ class ConversationalLeadJobService:
             lead_form_id: Lead form snapshot ID
             solution_context: User's solution description (for AI analysis)
             max_jobs: Maximum number of jobs to fetch
+            location: Location filter list (e.g., ["Lagos", "Nigeria"])
+            post_age_filter: Time range filter (e.g., "7d", "30d", "all")
 
         Returns:
             Dict with:
@@ -1867,11 +1881,36 @@ class ConversationalLeadJobService:
         try:
             print(f"💼 Fetching job board signals with query: '{search_query}'")
 
-            # Import services
+            # Import services and helpers
             from app.services.ApifyLinkedInJobsService import ApifyLinkedInJobsService
             from app.services.ApifyJobbermanService import ApifyJobbermanService
             from app.services.ApifyIndeedService import ApifyIndeedService
             from app.services.JobSignalAnalysisService import JobSignalAnalysisService
+            from app.services.JobBoardParameterHelper import (
+                convert_location_for_job_boards,
+                map_post_age_filter
+            )
+
+            # Convert location list to Apify-compatible format
+            location_str, location_scope = convert_location_for_job_boards(location)
+
+            # Provide contextual feedback based on scope
+            if location_scope == "worldwide":
+                print(f"   🌍 Searching globally (worldwide jobs)")
+                print(f"   ℹ️ TIP: Specify a location for more relevant local opportunities")
+            elif location_scope == "country":
+                print(f"   🌍 Searching country-wide: {location_str}")
+                print(f"   ℹ️ TIP: Add a city for more targeted results")
+            elif location_scope == "city":
+                print(f"   📍 Searching location: {location_str}")
+                if location and len(location) > 1:
+                    print(f"   ℹ️ Additional locations for filtering: {', '.join(location[1:])}")
+
+            # Map post age filter to platform-specific formats
+            published_at_linkedin = map_post_age_filter(post_age_filter, "linkedin")
+            posted_date_jobberman = map_post_age_filter(post_age_filter, "jobberman")
+
+            print(f"   📅 Time filter: {post_age_filter} (LinkedIn: {published_at_linkedin}, Jobberman: {posted_date_jobberman})")
 
             # Initialize services
             linkedin_service = ApifyLinkedInJobsService()
@@ -1889,11 +1928,29 @@ class ConversationalLeadJobService:
 
             # Fetch from all 3 services concurrently (3x speedup!)
             results = await asyncio.gather(
-                linkedin_service.fetch_job_postings(search_query, max_jobs=linkedin_max),
-                jobberman_service.fetch_job_postings(search_query, max_jobs=jobberman_max),
-                indeed_service.fetch_job_postings(search_query, max_jobs=indeed_max),
+                linkedin_service.fetch_job_postings(
+                    search_query,
+                    max_jobs=linkedin_max,
+                    location=location_str,  # None if worldwide
+                    published_at=published_at_linkedin,
+                    solution_context=solution_context
+                ),
+                jobberman_service.fetch_job_postings(
+                    search_query,
+                    max_jobs=jobberman_max,
+                    location=location_str,
+                    posted_date=posted_date_jobberman
+                ) if location_str else {"success": True, "jobs": [], "total_jobs": 0},  # Skip Jobberman if no location
+                indeed_service.fetch_job_postings(
+                    search_query,
+                    max_jobs=indeed_max
+                ),
                 return_exceptions=True  # Don't fail all if one fails
             )
+
+            # Log if Jobberman was skipped
+            if not location_str:
+                print(f"   ⚠️ Skipping Jobberman (requires specific location for relevant results)")
 
             # Unpack results
             linkedin_result = results[0] if not isinstance(results[0], Exception) else {"success": False, "jobs": [], "error": str(results[0])}

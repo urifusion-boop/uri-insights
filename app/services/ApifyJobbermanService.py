@@ -35,7 +35,8 @@ class ApifyJobbermanService:
         self,
         search_query: str,
         max_jobs: int = 5,
-        location: str = "Nigeria"
+        location: Optional[str] = None,
+        posted_date: str = "anytime"
     ) -> Dict[str, Any]:
         """
         Fetch job postings from Jobberman using Apify
@@ -43,7 +44,8 @@ class ApifyJobbermanService:
         Args:
             search_query: The search query (e.g., "DevOps Engineer")
             max_jobs: Maximum number of jobs to fetch (default: 5)
-            location: Geographic location filter (default: "Nigeria")
+            location: Geographic location filter (default: None, omits location field for worldwide)
+            posted_date: Time filter (e.g., "anytime", "last_7_days", "last_30_days")
 
         Returns:
             Dictionary containing jobs and metadata:
@@ -72,7 +74,7 @@ class ApifyJobbermanService:
                 }
 
             # Fetch jobs from Apify
-            jobs_result = await self._fetch_jobs_from_apify(search_query, max_jobs, location)
+            jobs_result = await self._fetch_jobs_from_apify(search_query, max_jobs, location, posted_date)
 
             if not jobs_result["success"]:
                 return jobs_result
@@ -100,7 +102,8 @@ class ApifyJobbermanService:
         self,
         search_query: str,
         max_jobs: int,
-        location: str
+        location: Optional[str],
+        posted_date: str = "anytime"
     ) -> Dict[str, Any]:
         """
         Fetch job postings from Apify using Jobberman scraper actor
@@ -109,6 +112,7 @@ class ApifyJobbermanService:
             search_query: Job search query
             max_jobs: Maximum number of jobs to fetch
             location: Geographic location
+            posted_date: Time filter
 
         Returns:
             Dictionary containing the fetched jobs
@@ -119,17 +123,23 @@ class ApifyJobbermanService:
             # Docs: https://apify.com/shahidirfan/jobberman-job-scraper
             actor_id = "shahidirfan/jobberman-job-scraper"
 
-            # Configure the input for the Jobberman actor
-            # Note: Jobberman uses 'keyword' not 'search'
+            # Configure the input for the Jobberman actor with enhanced parameters
             run_input = {
-                "keyword": search_query,  # Jobberman uses 'keyword' instead of 'search'
-                "location": location,
-                "posted_date": "anytime",  # Options: anytime, last_24_hours, last_7_days, last_14_days, last_30_days
-                "proxyConfiguration": {"useApifyProxy": True},  # Use Apify proxies to prevent blocking
+                "keyword": search_query,
+                "posted_date": posted_date,
+                "results_wanted": max_jobs,  # Use results_wanted for better control
+                "max_pages": 10,  # Pagination control
+                "collectDetails": True,  # Get full job details
+                "proxyConfiguration": {"useApifyProxy": True},
             }
 
+            # Only add location if specified (omit for worldwide search)
+            if location:
+                run_input["location"] = location
+
             # Run the actor in a thread to avoid blocking
-            logger.info(f"Starting Apify actor to fetch Jobberman jobs for: {search_query} in {location}")
+            location_msg = location if location else "worldwide"
+            logger.info(f"Starting Apify actor to fetch Jobberman jobs for: {search_query} in {location_msg}")
 
             # Run actor synchronously in executor to avoid blocking event loop
             loop = asyncio.get_event_loop()
