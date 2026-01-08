@@ -127,7 +127,6 @@ class LeadBase(BaseModel):
     form_title: Optional[str] = None  # Form title from the snapshot that generated this lead
 
     class Config:
-        extra = "forbid"
         json_encoders = {datetime: lambda v: DateHelper.to_iso8601_utc(v) if v else None}
 
 
@@ -139,6 +138,10 @@ class LeadCreate(LeadBase):
     """
 
     lead_id: str = Field(default_factory=lambda: str(ObjectId()))
+
+    class Config:
+        extra = "forbid"  # Only for OpenAI structured output validation
+        json_encoders = {datetime: lambda v: DateHelper.to_iso8601_utc(v) if v else None}
 
 
 class LeadUpdate(BaseModel):
