@@ -1,4 +1,4 @@
-from typing import Optional, List
+from typing import Optional, List, Union, Any
 from datetime import datetime
 from pydantic import BaseModel, Field
 from app.core.helpers.date_helper import DateHelper
@@ -27,13 +27,13 @@ class CommunicationEntry(BaseModel):
 
 
 class AINextSteps(BaseModel):
-    steps: Optional[List[str]] = None
+    steps: Optional[Union[List[str], List[dict], List[Any]]] = None  # Support both string lists and complex objects
     generated_at: Optional[str] = None
     based_on_goal: Optional[str] = None
     summary: Optional[str] = None
 
     class Config:
-        extra = "forbid"
+        extra = "allow"  # Allow extra fields for backward compatibility with existing data
 
 
 class LeadBase(BaseModel):
