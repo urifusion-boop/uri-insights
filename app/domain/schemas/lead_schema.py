@@ -22,6 +22,19 @@ class CommunicationEntry(BaseModel):
     medium: Optional[str] = None  # e.g., "email", "call", "LinkedIn"
     status: Optional[str] = None  # e.g., "sent", "opened", "responded"
 
+    class Config:
+        extra = "forbid"
+
+
+class AINextSteps(BaseModel):
+    steps: Optional[List[str]] = None
+    generated_at: Optional[str] = None
+    based_on_goal: Optional[str] = None
+    summary: Optional[str] = None
+
+    class Config:
+        extra = "forbid"
+
 
 class LeadBase(BaseModel):
     lead_id: str = Field(default_factory=lambda: str(ObjectId()))  # Unique ID
@@ -108,12 +121,13 @@ class LeadBase(BaseModel):
     company_confidence: Optional[float] = None  # PRD Sections 14-16: Confidence that company can be verified (0-1)
 
     # AI Next Steps - Actionable recommendations based on user's goal
-    ai_next_steps: Optional[dict] = None  # Structure: {"steps": [...], "generated_at": "...", "based_on_goal": "...", "summary": "..."}
+    ai_next_steps: Optional[AINextSteps] = None
 
     # Form Title - Populated from lead_form_snapshots via aggregation
     form_title: Optional[str] = None  # Form title from the snapshot that generated this lead
 
     class Config:
+        extra = "forbid"
         json_encoders = {datetime: lambda v: DateHelper.to_iso8601_utc(v) if v else None}
 
 
@@ -196,7 +210,7 @@ class LeadUpdate(BaseModel):
     company_confidence: Optional[float] = None
 
     # AI Next Steps (for updates)
-    ai_next_steps: Optional[dict] = None
+    ai_next_steps: Optional[AINextSteps] = None
 
     last_updated: datetime = Field(default_factory=datetime.utcnow)
 

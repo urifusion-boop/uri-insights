@@ -1158,6 +1158,7 @@ class ConversationalLeadJobService:
                     print(f"No new leads saved")
 
                 if new_count > 0:
+                    await update_progress(90, f"Checking for duplicates and updating limits...")
                     try:
                         limit_available, current_count = await UriTaskManagerService.get_elapsed_leads_limit_and_count(user_id)
                         await UriTaskManagerService.update_user_feature_limit_specific_limit(
@@ -1243,6 +1244,8 @@ class ConversationalLeadJobService:
         # Update job with final status
         if job_id:
             if search_success:
+                await update_progress(95, "Finalizing results...")
+
                 message = "Lead fetching and intent analysis completed successfully"
                 if stats["new_leads_saved"] > 0 and stats["duplicates_skipped"] > 0:
                     message = f"Found {stats['new_leads_saved']} new leads. {stats['duplicates_skipped']} duplicates were already in your database."
