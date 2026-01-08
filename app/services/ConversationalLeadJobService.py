@@ -1987,7 +1987,11 @@ class ConversationalLeadJobService:
 
             if not all_jobs:
                 print(f"   ⚠️ No jobs found for query '{search_query}'")
-                return []
+                return {
+                    "qualified_leads": [],
+                    "filtered_leads": [],
+                    "total_fetched": 0
+                }
 
             # Deduplicate jobs (same company + similar title)
             deduplicated_jobs = ConversationalLeadJobService._deduplicate_jobs(all_jobs)

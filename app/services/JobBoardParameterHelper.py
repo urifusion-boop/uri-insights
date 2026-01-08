@@ -13,20 +13,22 @@ logger = logging.getLogger(__name__)
 
 
 # Post age filter mappings
+# LinkedIn uses time in seconds format: r86400 = 1 day (86400 seconds), r604800 = 7 days, r2592000 = 30 days
 POST_AGE_TO_LINKEDIN = {
-    "24h": "Past 24 hours",
-    "7d": "Past Week",
-    "30d": "Past Month",
-    "3m": "Any Time",  # LinkedIn doesn't have 3 months
-    "6m": "Any Time",  # LinkedIn doesn't have 6 months
-    "1y": "Any Time",  # LinkedIn doesn't have 1 year
-    "all": "Any Time"
+    "24h": "r86400",      # 1 day in seconds
+    "7d": "r604800",      # 7 days in seconds
+    "30d": "r2592000",    # 30 days in seconds
+    "3m": "",             # LinkedIn doesn't have 3 months, use empty string for all time
+    "6m": "",             # LinkedIn doesn't have 6 months
+    "1y": "",             # LinkedIn doesn't have 1 year
+    "all": ""             # Empty string = all time
 }
 
+# Jobberman uses simple time format: "24h", "7d", "30d", "anytime"
 POST_AGE_TO_JOBBERMAN = {
-    "24h": "last_24_hours",
-    "7d": "last_7_days",
-    "30d": "last_30_days",
+    "24h": "24h",
+    "7d": "7d",
+    "30d": "30d",
     "3m": "anytime",  # Jobberman doesn't have 3 months
     "6m": "anytime",  # Jobberman doesn't have 6 months
     "1y": "anytime",  # Jobberman doesn't have 1 year
@@ -97,11 +99,11 @@ def map_post_age_filter(post_age_filter: str, platform: str) -> str:
         ("all", "linkedin") → "Any Time"
     """
     if platform.lower() == "linkedin":
-        return POST_AGE_TO_LINKEDIN.get(post_age_filter, "Past Month")
+        return POST_AGE_TO_LINKEDIN.get(post_age_filter, "r2592000")  # Default: 30 days
     elif platform.lower() == "jobberman":
         return POST_AGE_TO_JOBBERMAN.get(post_age_filter, "anytime")
     else:
-        return "Any Time"  # Default fallback
+        return ""  # Default fallback for unknown platforms
 
 
 def infer_linkedin_parameters(job_keyword: str, solution_context: str = "") -> Dict[str, Any]:
