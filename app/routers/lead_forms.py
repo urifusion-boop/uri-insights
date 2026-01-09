@@ -355,6 +355,30 @@ async def cancel_lead_generation_job(
             )
 
         if current_status == "cancelling":
+            # Check if job has been cancelling for too long (> 30 seconds)
+            from datetime import datetime, timedelta
+            cancellation_requested_at = job.get("cancellation_requested_at")
+            if cancellation_requested_at:
+                time_since_cancellation = datetime.utcnow() - cancellation_requested_at
+                if time_since_cancellation > timedelta(seconds=30):
+                    # Force cancel - worker likely crashed or never picked up
+                    print(f"⚠️ Force-cancelling job {job_id} (stuck in cancelling for {time_since_cancellation.seconds}s)")
+                    await LeadGenerationJobRepository.mark_cancelled(
+                        db=db,
+                        job_id=job_id,
+                        partial_stats=job.get("stats", {}),
+                        processed_count=job.get("progress", 0)
+                    )
+                    return UriResponse.get_single_data_response(
+                        "Job cancelled (force stopped)",
+                        {
+                            "job_id": job_id,
+                            "status": "cancelled",
+                            "message": "Job was force-cancelled after timeout",
+                            "stats": job.get("stats", {})
+                        }
+                    )
+
             return UriResponse.get_single_data_response(
                 "Cancellation in progress",
                 {

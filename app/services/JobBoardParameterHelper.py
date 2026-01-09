@@ -167,10 +167,11 @@ def infer_linkedin_parameters(job_keyword: str, solution_context: str = "") -> D
     if any(word in keyword_lower for word in director_keywords):
         params["experience_level"] = "5"  # Director
 
-    # Executive indicators (LinkedIn code: "6")
+    # Executive indicators - map to "5" (Director), LinkedIn's highest valid level
+    # LinkedIn only accepts: "1", "2", "3", "4", "5" (not "6")
     executive_keywords = ["ceo", "cto", "cfo", "coo", "chief", "executive", "president"]
     if any(word in keyword_lower for word in executive_keywords):
-        params["experience_level"] = "6"  # Executive
+        params["experience_level"] = "5"  # Director (highest level LinkedIn accepts)
 
     # If no level detected, don't set (let LinkedIn return all levels)
 
