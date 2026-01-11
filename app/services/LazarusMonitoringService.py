@@ -10,6 +10,7 @@ This service runs weekly background scans to detect:
 
 import hashlib
 import uuid
+import httpx
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -17,6 +18,11 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.repository.LazarusRepository import LazarusRepository
 from app.services.LazarusService import LazarusService
 from app.services.AIService import AIService
+from app.services.OpenAIApifyTwitterService import OpenAIApifyTwitterService
+from app.services.ApifyGoogleSearchService import ApifyGoogleSearchService
+from app.services.ApifyLinkedInJobsService import ApifyLinkedInJobsService
+from app.services.XUsersLookupService import XUsersLookupService
+from app.domain.requests.twitter_requests import CurrentUserLookupParams
 from app.domain.schemas.lazarus_schema import (
     FocusContact,
     CompanyMonitor,
@@ -27,6 +33,9 @@ from app.domain.schemas.lazarus_schema import (
     LazarusMonitoringStatusEnum,
     LazarusAlertEvidence,
 )
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class LazarusMonitoringService:
@@ -128,6 +137,7 @@ class LazarusMonitoringService:
         """
         Fetch tweets using Origami batch query
         Query format: (from:Handle1 OR from:Handle2) AND ("keyword1" OR "keyword2")
+        PRD Section 4.2: Origami Method - Batch processing to save costs
         """
         # Build Origami query
         handles_query = " OR ".join([f"from:{h}" for h in handles])
@@ -135,15 +145,44 @@ class LazarusMonitoringService:
 
         query = f"({handles_query}) AND ({keywords_query})"
 
-        # TODO: Integrate with existing TwitterService or ApifyTwitterService
-        # For now, return mock data structure
-        print(f"🔍 Origami Query: {query}")
+        logger.info(f"🔍 Lazarus Origami Query: {query}")
 
-        # In production, this would call:
-        # results = await TwitterService.search_tweets(db, query, max_results=100)
+        try:
+            # Use existing OpenAIApifyTwitterService to fetch tweets
+            twitter_service = OpenAIApifyTwitterService()
+            result = await twitter_service.fetch_tweets_with_analysis(
+                keyword=query,
+                max_tweets=100,
+                analyze_sentiment=False  # We'll do our own analysis
+            )
 
-        # Return mock structure for now
-        return []
+            if not result.get("success"):
+                logger.warning(f"Twitter fetch failed: {result.get('error_message', 'Unknown error')}")
+                return []
+
+            tweets = result.get("tweets", [])
+            logger.info(f"✅ Fetched {len(tweets)} tweets via Origami method")
+
+            # Transform to our format and map to handles
+            formatted_tweets = []
+            for tweet in tweets:
+                # Extract handle from author username
+                author = tweet.get("author", {})
+                handle = author.get("username") if isinstance(author, dict) else str(author)
+
+                formatted_tweets.append({
+                    "handle": handle,
+                    "text": tweet.get("text", ""),
+                    "url": tweet.get("url", ""),
+                    "created_at": tweet.get("created_at", ""),
+                    "author": author
+                })
+
+            return formatted_tweets
+
+        except Exception as e:
+            logger.error(f"Error in _fetch_batch_tweets: {str(e)}")
+            return []
 
     @staticmethod
     async def _analyze_focus_contact(
@@ -241,6 +280,11 @@ class LazarusMonitoringService:
                 db, monitor
             )
 
+            # Detect cash injection (funding news)
+            cash_alert = await LazarusMonitoringService._detect_cash_injection(
+                db, monitor
+            )
+
             # Detect homepage changes (pivot detection)
             pivot_alert = await LazarusMonitoringService._detect_strategic_pivot(
                 db, monitor
@@ -252,7 +296,7 @@ class LazarusMonitoringService:
             )
 
             # Create alerts if detected
-            for alert in [hiring_alert, pivot_alert, dead_alert]:
+            for alert in [hiring_alert, cash_alert, pivot_alert, dead_alert]:
                 if alert:
                     await LazarusRepository.create_alert(db, alert)
                     total_alerts += 1
@@ -288,76 +332,268 @@ class LazarusMonitoringService:
     ) -> Optional[Dict[str, Any]]:
         """
         Detect hiring spree (job count increased by 3+ in a week)
-        PRD Section 5.1.1: Hiring Spree
+        PRD Section 3 Track A: Hiring Spree
+        Logic: Job_Count_Current > Job_Count_Prev + 2
         """
-        # TODO: Integrate with ApifyLinkedInJobsService or ApifyJobbermanService
-        # Fetch current job count for company
-
-        # Mock: Simulate job count fetch
-        # current_job_count = await ApifyLinkedInJobsService.get_company_job_count(monitor.company_name)
-        current_job_count = monitor.last_job_count  # Placeholder
-
-        # Check if increased by 3+
-        if current_job_count >= monitor.last_job_count + 3:
-            # Update job count
-            await LazarusRepository.update_company_monitor(
-                db,
-                monitor.monitor_id,
-                monitor.user_id,
-                {"last_job_count": current_job_count},
+        try:
+            # Use existing ApifyLinkedInJobsService to fetch current job count
+            linkedin_service = ApifyLinkedInJobsService()
+            result = await linkedin_service.fetch_job_postings(
+                search_query=f"company:{monitor.company_name}",
+                max_jobs=100,  # Just to count, we don't need details
+                location="Worldwide"
             )
 
-            # Create HIRING_SPREE alert
-            return {
-                "alert_id": str(uuid.uuid4()),
-                "user_id": monitor.user_id,
-                "source_type": LazarusMonitorTypeEnum.COMPANY,
-                "source_id": monitor.monitor_id,
-                "alert_type": LazarusAlertTypeEnum.HIRING_SPREE,
-                "alert_message": f"{monitor.company_name} is on a hiring spree! ({current_job_count - monitor.last_job_count} new jobs)",
-                "evidence": {
-                    "detected_date": datetime.utcnow().isoformat(),
-                    "signal_source": "Job Boards",
-                    "old_value": str(monitor.last_job_count),
-                    "new_value": str(current_job_count),
-                    "tweets": None,
-                },
-                "suggested_pitch": None,
-                "status": LazarusAlertStatusEnum.NEW,
-                "resurrected_lead_id": monitor.source_lead_id,
-                "created_date": datetime.utcnow(),
-                "last_updated": datetime.utcnow(),
-            }
+            if not result.get("success"):
+                logger.warning(f"Failed to fetch jobs for {monitor.company_name}: {result.get('error_message')}")
+                return None
 
-        return None
+            current_job_count = result.get("total_jobs", 0)
+            previous_job_count = monitor.last_job_count or 0
+
+            logger.info(f"📊 {monitor.company_name}: Previous jobs: {previous_job_count}, Current jobs: {current_job_count}")
+
+            # PRD Logic: Trigger if increased by 3+
+            if current_job_count >= previous_job_count + 3:
+                # Update job count in monitor
+                await LazarusRepository.update_company_monitor(
+                    db,
+                    monitor.monitor_id,
+                    monitor.user_id,
+                    {"last_job_count": current_job_count},
+                )
+
+                job_increase = current_job_count - previous_job_count
+
+                logger.info(f"🔥 HIRING SPREE DETECTED: {monitor.company_name} added {job_increase} new jobs!")
+
+                # Create HIRING_SPREE alert
+                return {
+                    "alert_id": str(uuid.uuid4()),
+                    "user_id": monitor.user_id,
+                    "source_type": LazarusMonitorTypeEnum.COMPANY,
+                    "source_id": monitor.monitor_id,
+                    "alert_type": LazarusAlertTypeEnum.HIRING_SPREE,
+                    "alert_message": f"Expansion Detected: {monitor.company_name} added {job_increase} new roles",
+                    "evidence": {
+                        "detected_date": datetime.utcnow().isoformat(),
+                        "signal_source": "LinkedIn Jobs",
+                        "old_value": str(previous_job_count),
+                        "new_value": str(current_job_count),
+                        "tweets": None,
+                    },
+                    "suggested_pitch": f"I noticed {monitor.company_name} is expanding rapidly with {job_increase} new roles. This seems like a great time to discuss how we can support your growth.",
+                    "status": LazarusAlertStatusEnum.NEW,
+                    "resurrected_lead_id": monitor.source_lead_id,
+                    "created_date": datetime.utcnow(),
+                    "last_updated": datetime.utcnow(),
+                }
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Error detecting hiring spree for {monitor.company_name}: {str(e)}")
+            return None
+
+    @staticmethod
+    async def _detect_cash_injection(
+        db: AsyncIOMotorDatabase, monitor: CompanyMonitor
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Detect cash injection via Google News
+        PRD Section 3 Track A: Cash Injection
+        Logic: Google News result for "{Company}" + "Raised" exists
+        """
+        try:
+            # Use existing ApifyGoogleSearchService for news detection
+            google_service = ApifyGoogleSearchService()
+
+            # Build dork query for funding news
+            dork_query = f'"{monitor.company_name}" ("raised" OR "funding" OR "investment" OR "Series A" OR "Series B" OR "grant")'
+
+            logger.info(f"🔍 Searching for cash injection: {dork_query}")
+
+            results = await google_service.search(
+                dork_query=dork_query,
+                max_results=10,
+                country_code="ng"
+            )
+
+            # If we found recent funding news
+            if results and len(results) > 0:
+                # Check if news is recent (within last 30 days)
+                recent_news = [r for r in results if r.source_date and
+                               (datetime.utcnow() - r.source_date.replace(tzinfo=None)).days <= 30]
+
+                if recent_news:
+                    news_item = recent_news[0]
+
+                    logger.info(f"💰 CASH INJECTION DETECTED: {monitor.company_name} - {news_item.title}")
+
+                    return {
+                        "alert_id": str(uuid.uuid4()),
+                        "user_id": monitor.user_id,
+                        "source_type": LazarusMonitorTypeEnum.COMPANY,
+                        "source_id": monitor.monitor_id,
+                        "alert_type": LazarusAlertTypeEnum.CASH_INJECTION,
+                        "alert_message": f"New Budget Detected: {monitor.company_name} raised fresh funding",
+                        "evidence": {
+                            "detected_date": datetime.utcnow().isoformat(),
+                            "signal_source": f"Google News - {news_item.url}",
+                            "old_value": None,
+                            "new_value": news_item.title,
+                            "tweets": [news_item.snippet],
+                        },
+                        "suggested_pitch": f"Congratulations on the recent funding! This seems like a perfect time to discuss how we can help {monitor.company_name} scale.",
+                        "status": LazarusAlertStatusEnum.NEW,
+                        "resurrected_lead_id": monitor.source_lead_id,
+                        "created_date": datetime.utcnow(),
+                        "last_updated": datetime.utcnow(),
+                    }
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Error detecting cash injection for {monitor.company_name}: {str(e)}")
+            return None
 
     @staticmethod
     async def _detect_strategic_pivot(
         db: AsyncIOMotorDatabase, monitor: CompanyMonitor
     ) -> Optional[Dict[str, Any]]:
         """
-        Detect strategic pivot (homepage content changed significantly)
-        PRD Section 5.1.2: Strategic Pivot
+        Detect strategic pivot via Google News
+        PRD Section 3 Track A: The Pivot
+        Logic: News about "New", "Launch", "Now serving", "Expansion"
         """
-        # TODO: Integrate with FirecrawlService to scrape homepage
-        # current_homepage = await FirecrawlService.scrape_url(monitor.website_url)
+        try:
+            # Use Google search to detect pivot announcements
+            google_service = ApifyGoogleSearchService()
 
-        # For now, return None (no pivot detected)
-        return None
+            # Build dork query for pivot signals
+            dork_query = f'"{monitor.company_name}" ("new launch" OR "now serving" OR "expansion" OR "new product" OR "rebranding")'
+
+            logger.info(f"🔍 Searching for strategic pivot: {dork_query}")
+
+            results = await google_service.search(
+                dork_query=dork_query,
+                max_results=10,
+                country_code="ng"
+            )
+
+            # If we found recent pivot news
+            if results and len(results) > 0:
+                recent_news = [r for r in results if r.source_date and
+                               (datetime.utcnow() - r.source_date.replace(tzinfo=None)).days <= 60]
+
+                if recent_news:
+                    news_item = recent_news[0]
+
+                    logger.info(f"🔄 STRATEGIC PIVOT DETECTED: {monitor.company_name} - {news_item.title}")
+
+                    return {
+                        "alert_id": str(uuid.uuid4()),
+                        "user_id": monitor.user_id,
+                        "source_type": LazarusMonitorTypeEnum.COMPANY,
+                        "source_id": monitor.monitor_id,
+                        "alert_type": LazarusAlertTypeEnum.STRATEGIC_PIVOT,
+                        "alert_message": f"Strategic Pivot Detected: {monitor.company_name} is offering new services",
+                        "evidence": {
+                            "detected_date": datetime.utcnow().isoformat(),
+                            "signal_source": f"Google News - {news_item.url}",
+                            "old_value": None,
+                            "new_value": news_item.title,
+                            "tweets": [news_item.snippet],
+                        },
+                        "suggested_pitch": f"I saw the news about {monitor.company_name}'s new direction. Would love to discuss how we can support this pivot.",
+                        "status": LazarusAlertStatusEnum.NEW,
+                        "resurrected_lead_id": monitor.source_lead_id,
+                        "created_date": datetime.utcnow(),
+                        "last_updated": datetime.utcnow(),
+                    }
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Error detecting pivot for {monitor.company_name}: {str(e)}")
+            return None
 
     @staticmethod
     async def _detect_company_dead(
         db: AsyncIOMotorDatabase, monitor: CompanyMonitor
     ) -> Optional[Dict[str, Any]]:
         """
-        Detect company dead (3 consecutive 404s)
-        PRD Section 5.1.3: Company Dead
+        Detect company dead (website returns 404 for 4 weeks)
+        PRD Section 3 Track A: The Obituary
+        Logic: Website returns 404 Error (Offline) for 4 weeks in a row
         """
-        # TODO: Check if website returns 404
-        # status_code = await FirecrawlService.check_url_status(monitor.website_url)
+        try:
+            # Check website status
+            logger.info(f"🔍 Checking website status for {monitor.company_name}: {monitor.website_url}")
 
-        # For now, return None (company not dead)
-        return None
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                try:
+                    response = await client.get(monitor.website_url, follow_redirects=True)
+                    status_code = response.status_code
+                except Exception as e:
+                    logger.warning(f"Website check failed for {monitor.website_url}: {str(e)}")
+                    status_code = 404  # Assume dead if any error
+
+            logger.info(f"📊 {monitor.company_name} website status: {status_code}")
+
+            # Track consecutive 404 counts
+            consecutive_404s = monitor.consecutive_404_count if hasattr(monitor, 'consecutive_404_count') else 0
+
+            if status_code == 404 or status_code >= 500:
+                consecutive_404s += 1
+
+                # Update monitor with new 404 count
+                await LazarusRepository.update_company_monitor(
+                    db,
+                    monitor.monitor_id,
+                    monitor.user_id,
+                    {"consecutive_404_count": consecutive_404s},
+                )
+
+                # PRD Logic: 4 weeks in a row = 4 scans (weekly scans)
+                if consecutive_404s >= 4:
+                    logger.warning(f"☠️ COMPANY DEAD: {monitor.company_name} - 404 for {consecutive_404s} weeks")
+
+                    return {
+                        "alert_id": str(uuid.uuid4()),
+                        "user_id": monitor.user_id,
+                        "source_type": LazarusMonitorTypeEnum.COMPANY,
+                        "source_id": monitor.monitor_id,
+                        "alert_type": LazarusAlertTypeEnum.COMPANY_DEAD,
+                        "alert_message": f"Company appears extinct: {monitor.company_name} website offline for 4 weeks. Delete to clean list.",
+                        "evidence": {
+                            "detected_date": datetime.utcnow().isoformat(),
+                            "signal_source": f"Website Check - {monitor.website_url}",
+                            "old_value": "Online",
+                            "new_value": f"404 Error ({consecutive_404s} weeks)",
+                            "tweets": None,
+                        },
+                        "suggested_pitch": None,  # No pitch needed for dead companies
+                        "status": LazarusAlertStatusEnum.NEW,
+                        "resurrected_lead_id": monitor.source_lead_id,
+                        "created_date": datetime.utcnow(),
+                        "last_updated": datetime.utcnow(),
+                    }
+            else:
+                # Website is alive, reset consecutive 404 count
+                if consecutive_404s > 0:
+                    await LazarusRepository.update_company_monitor(
+                        db,
+                        monitor.monitor_id,
+                        monitor.user_id,
+                        {"consecutive_404_count": 0},
+                    )
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Error checking if company dead for {monitor.company_name}: {str(e)}")
+            return None
 
     # ============ AI-POWERED PITCH GENERATION ============
     @staticmethod
