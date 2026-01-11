@@ -30,7 +30,7 @@ from app.domain.schemas.signal_refinery_schema import (
 from app.repository.SignalRefineryRepository import SignalRefineryRepository
 from app.services.ApifyGoogleSearchService import ApifyGoogleSearchService
 from app.services.SignalRefineryService import SignalRefineryService
-from app.domain.schemas.response_schema import UriResponse
+from app.domain.responses.uri_response import UriResponse
 
 logger = logging.getLogger(__name__)
 
