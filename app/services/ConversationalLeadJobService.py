@@ -2252,7 +2252,7 @@ class ConversationalLeadJobService:
                     "commercial_relevance": lead.commercial_relevance,
                     "company_confidence": lead.company_confidence,
                     "implied_problems": lead.implied_problems,
-                    "job_board_reasoning": getattr(lead, "reasoning", None),
+                    "job_board_reasoning": lead.intent_reasoning,
                     "job_posting_url": lead.job_posting_url,
                     "job_title": lead.job_title_field,
                     "hiring_company": lead.hiring_company,

@@ -55,6 +55,8 @@ from app.routers import (
     openai_apify_facebook,
     lead_search_history,
     websockets_leads,
+    signal_refinery_router,
+    lazarus_router,
 )
 from app.routers.admin import admin_lead_analytics
 from app.core.auth_bearer import JWTBearer
@@ -402,6 +404,20 @@ app.include_router(
     admin_lead_analytics.router,
     prefix="",
     tags=["Admin Lead Analytics"],
+    dependencies=[Depends(JWTBearer())],
+)
+
+app.include_router(
+    signal_refinery_router.router,
+    prefix="/api",
+    tags=["Signal Refinery (X-Ray Test)"],
+    dependencies=[Depends(JWTBearer())],
+)
+
+app.include_router(
+    lazarus_router.router,
+    prefix="/api/lazarus",
+    tags=["Lazarus Protocol"],
     dependencies=[Depends(JWTBearer())],
 )
 

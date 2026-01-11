@@ -138,6 +138,16 @@ class LeadBase(BaseModel):
     # Form Title - Populated from lead_form_snapshots via aggregation
     form_title: Optional[str] = None  # Form title from the snapshot that generated this lead
 
+    # Lazarus Protocol - Resurrection tracking fields
+    is_lazarus_monitored: Optional[bool] = False  # Is this lead being monitored by Lazarus?
+    lazarus_focus_id: Optional[str] = None  # Link to focus_contacts collection
+    lazarus_company_monitor_id: Optional[str] = None  # Link to company_monitors collection
+    resurrection_count: Optional[int] = 0  # How many times has this lead been resurrected?
+    last_resurrection_date: Optional[datetime] = None  # When was the last resurrection?
+    last_resurrection_type: Optional[str] = None  # Type of alert that triggered resurrection
+    marked_dead_date: Optional[datetime] = None  # When was this lead marked as DEAD?
+    marked_dead_reason: Optional[str] = None  # Why was this lead marked as DEAD?
+
     class Config:
         json_encoders = {datetime: lambda v: DateHelper.to_iso8601_utc(v) if v else None}
 
