@@ -10,7 +10,7 @@ Endpoints:
 - POST /preview-query - Preview dork queries
 """
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from typing import List, Optional
 import asyncio
@@ -208,6 +208,7 @@ async def start_xray_search(
 async def get_job_status(
     job_id: str,
     db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+    current_user: dict = Depends(AuthHandler.get_current_user)
 ):
     """Get status of X-Ray search job"""
     try:
@@ -234,13 +235,14 @@ async def get_job_status(
 
 @router.get("/jobs", response_model=dict)
 async def list_jobs(
-    user_id: str = Query(...),
     skip: int = 0,
     limit: int = 20,
     db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+    current_user: dict = Depends(AuthHandler.get_current_user)
 ):
     """List all X-Ray search jobs for user"""
     try:
+        user_id = current_user.get("user_id")
 
         jobs = await SignalRefineryRepository.get_jobs_by_user(
             db=db,
@@ -266,13 +268,14 @@ async def list_jobs(
 
 @router.get("/leads", response_model=dict)
 async def get_refined_leads(
-    user_id: str = Query(...),
     skip: int = 0,
     limit: int = 50,
     db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+    current_user: dict = Depends(AuthHandler.get_current_user)
 ):
     """Get all refined leads (buyers only)"""
     try:
+        user_id = current_user.get("user_id")
 
         leads = await SignalRefineryRepository.get_leads_by_user(
             db=db,
@@ -298,11 +301,12 @@ async def get_refined_leads(
 
 @router.get("/metrics", response_model=dict)
 async def get_metrics_summary(
-    user_id: str = Query(...),
     db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+    current_user: dict = Depends(AuthHandler.get_current_user)
 ):
     """Get aggregate metrics across all jobs"""
     try:
+        user_id = current_user.get("user_id")
 
         metrics = await SignalRefineryRepository.get_metrics_summary(
             db=db,
@@ -324,6 +328,7 @@ async def preview_dork_queries(
     keyword: str,
     platforms: List[XRayPlatformEnum],
     location: str = "Nigeria",
+    current_user: dict = Depends(AuthHandler.get_current_user)
 ):
     """
     Preview dork queries that will be used (without executing search)
@@ -355,11 +360,12 @@ async def preview_dork_queries(
 @router.delete("/jobs/{job_id}", response_model=dict)
 async def delete_job(
     job_id: str,
-    user_id: str = Query(...),
     db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+    current_user: dict = Depends(AuthHandler.get_current_user)
 ):
     """Delete a job (cleanup)"""
     try:
+        user_id = current_user.get("user_id")
 
         deleted = await SignalRefineryRepository.delete_job(
             db=db,
