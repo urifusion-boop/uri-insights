@@ -16,8 +16,8 @@ from typing import List, Optional
 import asyncio
 import logging
 
-from app.core.database import get_database
-from app.core.handlers.auth_handler import AuthHandler
+from app.database import get_db
+from app.dependencies import get_db_dependency
 from app.domain.schemas.signal_refinery_schema import (
     XRaySearchRequest,
     XRaySearchResponse,
@@ -162,7 +162,7 @@ async def process_xray_search_job(
 async def start_xray_search(
     request: XRaySearchRequest,
     background_tasks: BackgroundTasks,
-    db: AsyncIOMotorDatabase = Depends(get_database),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
     current_user: dict = Depends(AuthHandler.get_current_user)
 ):
     """
@@ -208,7 +208,7 @@ async def start_xray_search(
 @router.get("/jobs/{job_id}", response_model=dict)
 async def get_job_status(
     job_id: str,
-    db: AsyncIOMotorDatabase = Depends(get_database),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
     current_user: dict = Depends(AuthHandler.get_current_user)
 ):
     """Get status of X-Ray search job"""
@@ -238,7 +238,7 @@ async def get_job_status(
 async def list_jobs(
     skip: int = 0,
     limit: int = 20,
-    db: AsyncIOMotorDatabase = Depends(get_database),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
     current_user: dict = Depends(AuthHandler.get_current_user)
 ):
     """List all X-Ray search jobs for user"""
@@ -271,7 +271,7 @@ async def list_jobs(
 async def get_refined_leads(
     skip: int = 0,
     limit: int = 50,
-    db: AsyncIOMotorDatabase = Depends(get_database),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
     current_user: dict = Depends(AuthHandler.get_current_user)
 ):
     """Get all refined leads (buyers only)"""
@@ -302,7 +302,7 @@ async def get_refined_leads(
 
 @router.get("/metrics", response_model=dict)
 async def get_metrics_summary(
-    db: AsyncIOMotorDatabase = Depends(get_database),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
     current_user: dict = Depends(AuthHandler.get_current_user)
 ):
     """Get aggregate metrics across all jobs"""
@@ -361,7 +361,7 @@ async def preview_dork_queries(
 @router.delete("/jobs/{job_id}", response_model=dict)
 async def delete_job(
     job_id: str,
-    db: AsyncIOMotorDatabase = Depends(get_database),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
     current_user: dict = Depends(AuthHandler.get_current_user)
 ):
     """Delete a job (cleanup)"""
