@@ -166,16 +166,16 @@ class ApifyGoogleSearchService:
             if actor_id == self.PRIMARY_ACTOR_ID:
                 # apify/google-search-scraper (official)
                 run_input = {
-                    "queries": [dork_query],
+                    "queries": dork_query,  # String, not list
                     "maxPagesPerQuery": max(1, max_results // 10),  # 10 results per page
                     "resultsPerPage": 10,
-                    "countryCode": country_code,
+                    "mobileResults": False,
                     "languageCode": "en"
                 }
             else:
                 # apidojo/google-search-scraper (fallback)
                 run_input = {
-                    "queries": [dork_query],
+                    "queries": [dork_query],  # This one uses list
                     "maxResults": max_results,
                     "countryCode": country_code,
                     "languageCode": "en",
@@ -183,7 +183,8 @@ class ApifyGoogleSearchService:
                 }
 
             # Run the actor
-            logger.info(f"   Starting Apify actor run...")
+            logger.info(f"   Starting Apify actor run with actor_id: {actor_id}")
+            logger.info(f"   Run input: {run_input}")
             run = self.apify_client.actor(actor_id).call(run_input=run_input)
 
             # Check status

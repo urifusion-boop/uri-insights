@@ -324,9 +324,9 @@ async def get_metrics_summary(
 
 @router.post("/preview-query", response_model=dict)
 async def preview_dork_queries(
-    keyword: str,
-    platforms: List[XRayPlatformEnum],
-    location: str = "Nigeria",
+    keyword: str = Query(...),
+    platforms: List[XRayPlatformEnum] = Query(...),
+    location: str = Query("Nigeria"),
 ):
     """
     Preview dork queries that will be used (without executing search)
