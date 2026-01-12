@@ -63,9 +63,9 @@ async def process_xray_search_job(
     print(f"🎬 BACKGROUND TASK STARTED for job {job_id}")
     logger.info(f"🎬 BACKGROUND TASK STARTED for job {job_id}")
 
-    # Get a fresh database connection
+    # Get database connection
     from app.database import get_db
-    db = await get_db().__anext__()
+    db = get_db()
 
     try:
         print(f"🚀 Starting X-Ray search job: {job_id}")
