@@ -172,7 +172,7 @@ async def start_xray_search(
     Poll /jobs/{job_id} to check progress.
     """
     try:
-        user_id = request.user_id or current_user.get("user_id")
+        user_id = request.user_id
 
         # Create job
         job_id = await SignalRefineryRepository.create_job(
@@ -180,6 +180,8 @@ async def start_xray_search(
             user_id=user_id,
             request=request
         )
+
+        logger.info(f"🚀 Created X-Ray search job {job_id} for user {user_id}")
 
         # Start background task
         background_tasks.add_task(
@@ -250,12 +252,10 @@ async def list_jobs(
 
         jobs_data = [job.dict() for job in jobs]
 
-        return UriResponse.get_list_response(
-            message=f"Found {len(jobs)} jobs",
+        return UriResponse.get_list_data_response(
+            entity_name="X-Ray Search Jobs",
             data=jobs_data,
-            total_count=len(jobs),
-            page=skip // limit + 1,
-            page_size=limit
+            message=f"Found {len(jobs)} jobs"
         )
 
     except Exception as e:
@@ -282,12 +282,10 @@ async def get_refined_leads(
 
         leads_data = [lead.dict() for lead in leads]
 
-        return UriResponse.get_list_response(
-            message=f"Found {len(leads)} refined leads",
+        return UriResponse.get_list_data_response(
+            entity_name="Refined Leads",
             data=leads_data,
-            total_count=len(leads),
-            page=skip // limit + 1,
-            page_size=limit
+            message=f"Found {len(leads)} refined leads"
         )
 
     except Exception as e:
@@ -339,12 +337,10 @@ async def preview_dork_queries(
 
         previews_data = [p.dict() for p in previews]
 
-        return UriResponse.get_list_response(
-            message=f"Generated {len(previews)} dork queries",
+        return UriResponse.get_list_data_response(
+            entity_name="Dork Query Previews",
             data=previews_data,
-            total_count=len(previews),
-            page=1,
-            page_size=len(previews)
+            message=f"Generated {len(previews)} dork queries"
         )
 
     except Exception as e:
