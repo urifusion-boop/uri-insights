@@ -37,9 +37,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Signal Refinery (X-Ray Test)"])
 
 # Log at module load time to verify code is being loaded
-logger.info("=" * 80)
-logger.info("🔥 SIGNAL REFINERY ROUTER MODULE LOADED - CODE IS ACTIVE 🔥")
-logger.info("=" * 80)
+print("=" * 80)
+print("🔥 SIGNAL REFINERY ROUTER MODULE LOADED - CODE IS ACTIVE 🔥")
+print("=" * 80)
 
 
 # ========================================
@@ -177,8 +177,10 @@ async def start_xray_search(
     This runs in the background and returns immediately with job_id.
     Poll /jobs/{job_id} to check progress.
     """
+    print(f"🎯 START_XRAY_SEARCH ENDPOINT CALLED with keyword: {request.keyword}")
     try:
         user_id = request.user_id
+        print(f"   User ID: {user_id}")
 
         # Create job
         job_id = await SignalRefineryRepository.create_job(
@@ -187,6 +189,7 @@ async def start_xray_search(
             request=request
         )
 
+        print(f"🚀 Created X-Ray search job {job_id} for user {user_id}")
         logger.info(f"🚀 Created X-Ray search job {job_id} for user {user_id}")
 
         # Start background task
