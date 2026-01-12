@@ -49,8 +49,7 @@ print("=" * 80)
 async def process_xray_search_job(
     job_id: str,
     user_id: str,
-    request: XRaySearchRequest,
-    db: AsyncIOMotorDatabase
+    request: XRaySearchRequest
 ):
     """
     Background task to process X-Ray search
@@ -61,8 +60,15 @@ async def process_xray_search_job(
     3. Run Signal Refinery (filter + classify)
     4. Save leads and metrics
     """
+    print(f"🎬 BACKGROUND TASK STARTED for job {job_id}")
     logger.info(f"🎬 BACKGROUND TASK STARTED for job {job_id}")
+
+    # Get a fresh database connection
+    from app.database import get_db
+    db = await get_db().__anext__()
+
     try:
+        print(f"🚀 Starting X-Ray search job: {job_id}")
         logger.info(f"🚀 Starting X-Ray search job: {job_id}")
 
         google_service = ApifyGoogleSearchService()
@@ -204,13 +210,14 @@ async def start_xray_search(
         logger.info(f"🚀 Created X-Ray search job {job_id} for user {user_id}")
 
         # Start background task
+        print(f"⏱️  Adding background task to queue...")
         background_tasks.add_task(
             process_xray_search_job,
             job_id=job_id,
             user_id=user_id,
-            request=request,
-            db=db
+            request=request
         )
+        print(f"✅ Background task added to queue")
 
         return UriResponse.get_single_data_response(
             entity_name="X-Ray Search Job",
