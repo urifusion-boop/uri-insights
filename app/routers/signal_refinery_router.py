@@ -36,6 +36,11 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Signal Refinery (X-Ray Test)"])
 
+# Log at module load time to verify code is being loaded
+logger.info("=" * 80)
+logger.info("🔥 SIGNAL REFINERY ROUTER MODULE LOADED - CODE IS ACTIVE 🔥")
+logger.info("=" * 80)
+
 
 # ========================================
 # BACKGROUND JOB PROCESSOR
