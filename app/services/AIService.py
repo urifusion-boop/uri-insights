@@ -229,6 +229,50 @@ class AIService:
             return {"error": str(e)}
 
     @staticmethod
+    async def analyze_with_structured_output(
+        prompt: str,
+        response_model: Any,
+        model: str = "gpt-4o-mini",
+        temperature: float = 0.7
+    ) -> Any:
+        """
+        Analyze text with structured output using OpenAI's structured output feature.
+
+        Args:
+            prompt: The analysis prompt
+            response_model: Pydantic model for structured response
+            model: OpenAI model to use
+            temperature: Temperature for generation
+
+        Returns:
+            Parsed response matching the response_model schema
+        """
+        messages = [
+            {"role": "system", "content": "You are an expert analyst. Provide accurate, structured analysis."},
+            {"role": "user", "content": prompt}
+        ]
+
+        chat_request = ChatModel(
+            model=model,
+            messages=messages,
+            temperature=temperature
+        )
+
+        try:
+            response = await AIService.structured_chat_completion(
+                request=chat_request,
+                response_model=response_model
+            )
+
+            # Extract the parsed result
+            result = AIService.extract_ai_result(response)
+            return result
+
+        except Exception as e:
+            print(f"Error in analyze_with_structured_output: {e}")
+            raise
+
+    @staticmethod
     async def generate_lead_next_steps(
         lead_data: Dict[str, Any],
         user_goal: Optional[str] = None,
