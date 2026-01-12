@@ -190,13 +190,14 @@ async def start_xray_search(
         )
 
         return UriResponse.get_single_data_response(
-            message="X-Ray search started",
+            entity_name="X-Ray Search Job",
             data={
                 "job_id": job_id,
                 "status": "running",
                 "keyword": request.keyword,
                 "platforms": [p.value for p in request.platforms]
-            }
+            },
+            message="X-Ray search started"
         )
 
     except Exception as e:
@@ -221,8 +222,9 @@ async def get_job_status(
             raise HTTPException(status_code=403, detail="Not authorized")
 
         return UriResponse.get_single_data_response(
-            message=f"Job status: {job.status}",
-            data=job.dict()
+            entity_name="X-Ray Search Job",
+            data=job.dict(),
+            message=f"Job status: {job.status}"
         )
 
     except HTTPException:
@@ -310,8 +312,9 @@ async def get_metrics_summary(
         )
 
         return UriResponse.get_single_data_response(
-            message="Metrics summary",
-            data=metrics
+            entity_name="Metrics Summary",
+            data=metrics,
+            message="Metrics summary"
         )
 
     except Exception as e:
@@ -369,8 +372,9 @@ async def delete_job(
 
         if deleted:
             return UriResponse.get_single_data_response(
-                message="Job deleted",
-                data={"job_id": job_id}
+                entity_name="X-Ray Search Job",
+                data={"job_id": job_id},
+                message="Job deleted"
             )
         else:
             raise HTTPException(status_code=404, detail="Job not found")
