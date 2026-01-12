@@ -34,7 +34,7 @@ from app.domain.responses.uri_response import UriResponse
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/signal-refinery", tags=["Signal Refinery (X-Ray Test)"])
+router = APIRouter(tags=["Signal Refinery (X-Ray Test)"])
 
 
 # ========================================

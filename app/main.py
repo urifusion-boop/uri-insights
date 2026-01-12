@@ -409,7 +409,7 @@ app.include_router(
 
 app.include_router(
     signal_refinery_router.router,
-    prefix="/api",
+    prefix="/signal-refinery",
     tags=["Signal Refinery (X-Ray Test)"],
     dependencies=[Depends(JWTBearer())],
 )
