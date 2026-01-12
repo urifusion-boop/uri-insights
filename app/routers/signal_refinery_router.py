@@ -99,10 +99,12 @@ async def process_xray_search_job(
                 max_results=request.max_results_per_platform
             )
 
+            print(f"   ✅ {platform.value}: {len(results)} results returned from search()")
             logger.info(f"   ✅ {platform.value}: {len(results)} results returned from search()")
             all_results.extend(results)
 
         total_results = len(all_results)
+        print(f"📊 Total results from Google: {total_results}")
         logger.info(f"📊 Total results from Google: {total_results}")
 
         # STEP 2: Run Signal Refinery
@@ -119,7 +121,16 @@ async def process_xray_search_job(
             enable_nigerian_filter=request.enable_nigerian_filter
         )
 
+        print(f"✅ Refinery complete: {len(leads)} buyer leads")
         logger.info(f"✅ Refinery complete: {len(leads)} buyer leads")
+
+        # Log each lead
+        for idx, lead in enumerate(leads, 1):
+            print(f"   LEAD [{idx}]: {lead.title[:80]}")
+            print(f"            Platform: {lead.platform.value}")
+            print(f"            Classification: {lead.buyer_seller.classification.value}")
+            print(f"            Confidence: {lead.buyer_seller.confidence}")
+            print(f"            URL: {lead.url}")
 
         # STEP 3: Save leads
         await SignalRefineryRepository.update_job_progress(

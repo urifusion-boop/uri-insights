@@ -198,14 +198,23 @@ class ApifyGoogleSearchService:
             try:
                 for item in self.apify_client.dataset(run["defaultDatasetId"]).iterate_items():
                     items.append(item)
+                print(f"   ✅ Fetched {len(items)} items from Apify dataset")
                 logger.info(f"   ✅ Fetched {len(items)} results from Google")
             except Exception as dataset_error:
+                print(f"   ❌ Error reading dataset: {str(dataset_error)}")
                 logger.error(f"   ❌ Error reading dataset: {str(dataset_error)}")
                 return []
 
             # Parse results
             results = self._parse_google_results(items, dork_query)
+            print(f"   ✅ Parsed {len(results)} valid results")
             logger.info(f"   ✅ Parsed {len(results)} valid results")
+
+            # Log each result
+            for idx, result in enumerate(results, 1):
+                print(f"      [{idx}] {result.platform.value}: {result.title[:80]}...")
+                print(f"          URL: {result.url}")
+                print(f"          Snippet: {result.snippet[:100]}...")
 
             return results
 
