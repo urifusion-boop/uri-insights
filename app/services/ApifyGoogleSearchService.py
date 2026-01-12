@@ -211,14 +211,17 @@ class ApifyGoogleSearchService:
 
             # Parse results
             results = self._parse_google_results(items, dork_query)
-            print(f"   ✅ Parsed {len(results)} valid results")
+            print(f"   ✅ Parsed {len(results)} valid organic results")
             logger.info(f"   ✅ Parsed {len(results)} valid results")
 
-            # Log each result
+            # Log each result with full details
             for idx, result in enumerate(results, 1):
-                print(f"      [{idx}] {result.platform.value}: {result.title[:80]}...")
+                print(f"\n      🔍 [{idx}] {result.platform.value} Post/Thread:")
+                print(f"          Title: {result.title[:120]}")
                 print(f"          URL: {result.url}")
-                print(f"          Snippet: {result.snippet[:100]}...")
+                print(f"          Snippet: {result.snippet[:150]}...")
+                if result.source_date:
+                    print(f"          Date: {result.source_date.strftime('%Y-%m-%d')}")
 
             return results
 
@@ -235,47 +238,65 @@ class ApifyGoogleSearchService:
     ) -> List[XRaySearchResult]:
         """
         Parse raw Apify results into XRaySearchResult objects
+        Each item from Apify contains an 'organicResults' array with the actual search results
         """
         results = []
+        rank = 1
 
-        for idx, item in enumerate(items):
+        for page_idx, item in enumerate(items):
             try:
-                # Extract fields (structure varies by actor)
-                title = item.get("title", item.get("name", ""))
-                snippet = item.get("description", item.get("snippet", ""))
-                url = item.get("url", item.get("link", ""))
+                # Apify returns pages with organicResults array
+                organic_results = item.get("organicResults", [])
 
-                if not url:
-                    logger.warning(f"   Skipping result {idx+1}: No URL found")
+                if not organic_results:
+                    logger.warning(f"   Page {page_idx+1}: No organicResults found")
                     continue
 
-                # Try to extract date
-                source_date = None
-                date_str = item.get("date", item.get("publishedDate"))
-                if date_str:
+                print(f"   📄 Processing page {page_idx+1}: {len(organic_results)} organic results")
+
+                for result_idx, organic_item in enumerate(organic_results):
                     try:
-                        source_date = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-                    except:
-                        pass
+                        # Extract fields from organic result
+                        title = organic_item.get("title", "")
+                        snippet = organic_item.get("description", "")
+                        url = organic_item.get("url", "")
 
-                # Determine platform from URL
-                platform = self._detect_platform_from_url(url)
+                        if not url:
+                            logger.warning(f"      Skipping result {result_idx+1} on page {page_idx+1}: No URL")
+                            continue
 
-                result = XRaySearchResult(
-                    platform=platform,
-                    title=title,
-                    snippet=snippet,
-                    url=url,
-                    source_date=source_date,
-                    google_rank=idx + 1,  # Position in results
-                    dork_query=dork_query,
-                    raw_data=item  # Store full raw data for debugging
-                )
+                        # Try to extract date
+                        source_date = None
+                        date_str = organic_item.get("date")
+                        if date_str:
+                            try:
+                                source_date = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+                            except:
+                                pass
 
-                results.append(result)
+                        # Determine platform from URL
+                        platform = self._detect_platform_from_url(url)
+
+                        result = XRaySearchResult(
+                            platform=platform,
+                            title=title,
+                            snippet=snippet,
+                            url=url,
+                            source_date=source_date,
+                            google_rank=rank,  # Overall position across all pages
+                            dork_query=dork_query,
+                            raw_data=organic_item  # Store organic result data
+                        )
+
+                        results.append(result)
+                        rank += 1
+
+                    except Exception as e:
+                        logger.error(f"      Error parsing organic result {result_idx+1}: {str(e)}")
+                        continue
 
             except Exception as e:
-                logger.warning(f"   Error parsing result {idx+1}: {str(e)}")
+                logger.error(f"   Error parsing page {page_idx+1}: {str(e)}")
                 continue
 
         return results
