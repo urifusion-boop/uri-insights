@@ -218,10 +218,6 @@ async def get_job_status(
         if not job:
             raise HTTPException(status_code=404, detail="Job not found")
 
-        # Verify ownership
-        if job.user_id != current_user.get("user_id"):
-            raise HTTPException(status_code=403, detail="Not authorized")
-
         return UriResponse.get_single_data_response(
             entity_name="X-Ray Search Job",
             data=job.dict(),
