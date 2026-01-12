@@ -56,6 +56,7 @@ async def process_xray_search_job(
     3. Run Signal Refinery (filter + classify)
     4. Save leads and metrics
     """
+    logger.info(f"🎬 BACKGROUND TASK STARTED for job {job_id}")
     try:
         logger.info(f"🚀 Starting X-Ray search job: {job_id}")
 
