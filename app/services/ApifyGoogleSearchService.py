@@ -30,11 +30,11 @@ logger = logging.getLogger(__name__)
 class ApifyGoogleSearchService:
     """Service for Google X-Ray search using Apify"""
 
-    # Primary actor (cheapest)
-    PRIMARY_ACTOR_ID = "apidojo/google-search-scraper"
+    # Primary actor (official, more reliable)
+    PRIMARY_ACTOR_ID = "apify/google-search-scraper"
 
-    # Fallback actor (official, more reliable)
-    FALLBACK_ACTOR_ID = "apify/google-search-scraper"
+    # Fallback actor (cheaper 3rd party)
+    FALLBACK_ACTOR_ID = "apidojo/google-search-scraper"
 
     def __init__(self):
         """Initialize Apify client"""
@@ -164,15 +164,6 @@ class ApifyGoogleSearchService:
 
             # Configure input based on actor
             if actor_id == self.PRIMARY_ACTOR_ID:
-                # apidojo/google-search-scraper
-                run_input = {
-                    "queries": [dork_query],
-                    "maxResults": max_results,
-                    "countryCode": country_code,
-                    "languageCode": "en",
-                    "includeUnfilteredResults": False
-                }
-            else:
                 # apify/google-search-scraper (official)
                 run_input = {
                     "queries": [dork_query],
@@ -180,6 +171,15 @@ class ApifyGoogleSearchService:
                     "resultsPerPage": 10,
                     "countryCode": country_code,
                     "languageCode": "en"
+                }
+            else:
+                # apidojo/google-search-scraper (fallback)
+                run_input = {
+                    "queries": [dork_query],
+                    "maxResults": max_results,
+                    "countryCode": country_code,
+                    "languageCode": "en",
+                    "includeUnfilteredResults": False
                 }
 
             # Run the actor
