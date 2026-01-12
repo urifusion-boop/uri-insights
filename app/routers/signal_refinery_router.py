@@ -85,6 +85,7 @@ async def process_xray_search_job(
                 keyword=request.keyword,
                 location=request.location
             )
+            logger.info(f"🔍 Executing search for {platform.value} with query: {dork_query}")
 
             # Execute search
             results = await google_service.search(
@@ -92,8 +93,8 @@ async def process_xray_search_job(
                 max_results=request.max_results_per_platform
             )
 
+            logger.info(f"   ✅ {platform.value}: {len(results)} results returned from search()")
             all_results.extend(results)
-            logger.info(f"   ✅ {platform.value}: {len(results)} results")
 
         total_results = len(all_results)
         logger.info(f"📊 Total results from Google: {total_results}")
