@@ -199,6 +199,10 @@ class ApifyGoogleSearchService:
                 for item in self.apify_client.dataset(run["defaultDatasetId"]).iterate_items():
                     items.append(item)
                 print(f"   ✅ Fetched {len(items)} items from Apify dataset")
+                print(f"   📦 RAW APIFY DATA STRUCTURE:")
+                if items:
+                    import json
+                    print(json.dumps(items[0], indent=2, default=str))
                 logger.info(f"   ✅ Fetched {len(items)} results from Google")
             except Exception as dataset_error:
                 print(f"   ❌ Error reading dataset: {str(dataset_error)}")
