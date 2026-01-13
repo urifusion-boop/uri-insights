@@ -427,6 +427,16 @@ class LazarusService:
         return LazarusMetrics(**metrics_data)
 
     @staticmethod
+    async def get_analytics_data(
+        db: AsyncIOMotorDatabase, user_id: str, days: int = 30
+    ) -> Dict[str, Any]:
+        """
+        Get detailed analytics data for dashboard
+        PRD Section 7 - Success Metrics
+        """
+        return await LazarusRepository.get_analytics_data(db, user_id, days)
+
+    @staticmethod
     async def upgrade_to_pro(
         db: AsyncIOMotorDatabase, user_id: str
     ) -> Dict[str, Any]:

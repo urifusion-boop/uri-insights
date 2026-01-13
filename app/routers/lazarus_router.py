@@ -13,6 +13,7 @@ from app.domain.schemas.lazarus_schema import (
     LazarusMonitoringStatusEnum,
     LazarusAlertStatusEnum,
     CSVUploadRow,
+    DetectionRulesUpdate,
 )
 
 
@@ -395,4 +396,126 @@ async def scan_company_monitors(
         "Company monitor scan completed",
         200,
         result,
+    )
+
+
+# ============ AUTO-DETECTION RULES ============
+@router.get("/auto-detection/rules")
+async def get_auto_detection_rules(
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Get user's auto-detection rules for dead leads
+    Returns default rules if none configured
+    """
+    from app.services.AutoDeadLeadDetectionService import AutoDeadLeadDetectionService
+
+    rules = await AutoDeadLeadDetectionService.get_user_detection_rules(db, user_id)
+
+    return UriResponse.custom_response(
+        "Auto-detection rules retrieved successfully",
+        200,
+        jsonable_encoder(rules)
+    )
+
+
+@router.put("/auto-detection/rules")
+async def update_auto_detection_rules(
+    rules_update: DetectionRulesUpdate,
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """Update user's auto-detection rules"""
+    from app.services.AutoDeadLeadDetectionService import AutoDeadLeadDetectionService
+
+    result = await AutoDeadLeadDetectionService.update_user_detection_rules(
+        db, user_id, rules_update.dict(exclude_unset=True)
+    )
+
+    return UriResponse.custom_response(
+        "Auto-detection rules updated successfully",
+        200,
+        jsonable_encoder(result)
+    )
+
+
+@router.post("/auto-detection/scan")
+async def trigger_auto_detection_scan(
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Manually trigger auto-detection scan for dead leads
+    Scans user's leads based on their configured rules
+    """
+    from app.services.AutoDeadLeadDetectionService import AutoDeadLeadDetectionService
+
+    # Get user's detection rules
+    rules_doc = await AutoDeadLeadDetectionService.get_user_detection_rules(db, user_id)
+
+    if not rules_doc.get("enabled"):
+        return UriResponse.custom_response(
+            "Auto-detection is disabled. Enable it in settings first.",
+            400
+        )
+
+    # Run scan
+    scan_result = await AutoDeadLeadDetectionService.scan_for_dead_leads(
+        db, user_id, rules_doc["detection_rules"]
+    )
+
+    # Save to history
+    await AutoDeadLeadDetectionService.save_scan_result(db, user_id, scan_result)
+
+    return UriResponse.custom_response(
+        "Auto-detection scan completed successfully",
+        200,
+        jsonable_encoder(scan_result)
+    )
+
+
+@router.get("/auto-detection/history")
+async def get_auto_detection_history(
+    user_id: str = Query(...),
+    skip: int = Query(0),
+    limit: int = Query(20),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """Get history of auto-detection scans"""
+    from app.services.AutoDeadLeadDetectionService import AutoDeadLeadDetectionService
+
+    history = await AutoDeadLeadDetectionService.get_scan_history(
+        db, user_id, skip, limit
+    )
+
+    return UriResponse.custom_response(
+        "Scan history retrieved successfully",
+        200,
+        [jsonable_encoder(record) for record in history]
+    )
+
+
+# ============ ANALYTICS ============
+@router.get("/analytics")
+async def get_analytics_data(
+    user_id: str = Query(...),
+    days: int = Query(30, description="Number of days to analyze (default: 30)"),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Get detailed analytics data for Lazarus dashboard
+    PRD Section 7 - Success Metrics
+
+    Returns:
+    - Resurrection rate (% of alerts acted upon) - Target >15%
+    - Quota utilization (% of slots used)
+    - Alert performance by type
+    - Weekly trend data (last 4 weeks)
+    - False positive rate (dismissals)
+    - Accuracy rate
+    """
+    analytics = await LazarusService.get_analytics_data(db, user_id, days)
+    return UriResponse.custom_response(
+        "Analytics data retrieved successfully", 200, analytics
     )

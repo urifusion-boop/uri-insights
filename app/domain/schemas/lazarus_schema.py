@@ -327,3 +327,70 @@ class LazarusMetrics(BaseModel):
     should_upgrade: bool  # If near quota limit
     upgrade_from: str
     upgrade_to: str
+
+
+# ========================================
+# AUTO-DETECTION RULES & HISTORY
+# ========================================
+
+class DetectionRules(BaseModel):
+    """Rules for auto-detecting dead leads"""
+    no_response_days: int = 30  # Mark dead if no activity in X days
+    status_unchanged_days: Optional[int] = 60  # Mark dead if status unchanged
+    min_contact_attempts: int = 2  # Minimum contact attempts required
+    exclude_statuses: List[str] = ["Qualified", "Converted"]  # Never auto-mark these
+    auto_add_to_lazarus: bool = False  # Auto-add to Lazarus monitoring
+    monitor_type: str = "focus_contact"  # "focus_contact" or "company_monitor"
+
+    class Config:
+        extra = "forbid"
+
+
+class AutoDetectionSettings(BaseModel):
+    """User's auto-detection settings"""
+    user_id: str
+    enabled: bool = False
+    detection_rules: DetectionRules
+    schedule: str = "weekly"  # "daily", "weekly", "monthly"
+    last_scan_date: Optional[datetime] = None
+    next_scan_date: Optional[datetime] = None
+    created_date: datetime = Field(default_factory=datetime.utcnow)
+    last_updated: datetime = Field(default_factory=datetime.utcnow)
+
+    class Config:
+        json_encoders = {datetime: lambda v: v.isoformat() if v else None}
+
+
+class DetectionRulesUpdate(BaseModel):
+    """Schema for updating detection rules"""
+    enabled: Optional[bool] = None
+    detection_rules: Optional[DetectionRules] = None
+    schedule: Optional[str] = None
+
+    class Config:
+        extra = "forbid"
+
+
+class ScanHistoryRecord(BaseModel):
+    """Record of an auto-detection scan"""
+    user_id: str
+    scan_date: datetime
+    scanned_leads: int
+    marked_dead: int
+    added_to_lazarus: int
+    errors: List[Dict[str, Any]] = []
+
+    class Config:
+        json_encoders = {datetime: lambda v: v.isoformat() if v else None}
+
+
+class ScanResponse(BaseModel):
+    """Response from manual or automated scan"""
+    scanned_leads: int
+    marked_dead: int
+    added_to_lazarus: int
+    errors: List[Dict[str, Any]] = []
+    timestamp: datetime
+
+    class Config:
+        json_encoders = {datetime: lambda v: v.isoformat() if v else None}

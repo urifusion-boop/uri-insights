@@ -473,3 +473,152 @@ class LazarusRepository:
             "dismissed_alerts_count": dismissed_alerts,
             "total_alerts": new_alerts + contacted_alerts + dismissed_alerts,
         }
+
+    @staticmethod
+    async def get_analytics_data(db: AsyncIOMotorDatabase, user_id: str, days: int = 30) -> Dict[str, Any]:
+        """
+        Get detailed analytics data for PRD Section 7 - Success Metrics
+
+        Returns:
+        - Resurrection rate (% of alerts acted upon)
+        - Quota utilization (% of slots used)
+        - Alert performance by type
+        - Weekly trend data
+        - False positive rate (dismissals)
+        """
+        from datetime import datetime, timedelta
+
+        # Get current metrics
+        slots = await LazarusRepository.get_or_create_slots(db, user_id)
+
+        # Date range for analytics
+        start_date = datetime.utcnow() - timedelta(days=days)
+
+        # Get all alerts in date range
+        alerts_collection = db["lazarus_alerts"]
+        all_alerts = await alerts_collection.find({
+            "user_id": user_id,
+            "created_at": {"$gte": start_date}
+        }).to_list(None)
+
+        # Calculate resurrection rate (PRD 7.1: % of alerts acted upon)
+        total_alerts = len(all_alerts)
+        acted_upon = len([a for a in all_alerts if a.get("status") in [
+            LazarusAlertStatusEnum.CONTACTED,
+            LazarusAlertStatusEnum.RESURRECTED
+        ]])
+        dismissed = len([a for a in all_alerts if a.get("status") == LazarusAlertStatusEnum.DISMISSED])
+        pending = len([a for a in all_alerts if a.get("status") == LazarusAlertStatusEnum.NEW])
+
+        resurrection_rate = (acted_upon / total_alerts * 100) if total_alerts > 0 else 0.0
+
+        # Calculate false positive rate (PRD 7.4: % dismissed)
+        false_positive_rate = (dismissed / total_alerts * 100) if total_alerts > 0 else 0.0
+        accuracy_rate = 100.0 - false_positive_rate
+
+        # Quota utilization (PRD 7.2)
+        quota_utilization = (slots.used_slots / slots.max_slots * 100) if slots.max_slots > 0 else 0.0
+
+        # Alert performance by type
+        alert_types_stats = {}
+        for alert in all_alerts:
+            alert_type = alert.get("alert_type", "Unknown")
+            if alert_type not in alert_types_stats:
+                alert_types_stats[alert_type] = {
+                    "total": 0,
+                    "acted_upon": 0,
+                    "dismissed": 0,
+                    "pending": 0
+                }
+
+            alert_types_stats[alert_type]["total"] += 1
+            status = alert.get("status")
+            if status in [LazarusAlertStatusEnum.CONTACTED, LazarusAlertStatusEnum.RESURRECTED]:
+                alert_types_stats[alert_type]["acted_upon"] += 1
+            elif status == LazarusAlertStatusEnum.DISMISSED:
+                alert_types_stats[alert_type]["dismissed"] += 1
+            elif status == LazarusAlertStatusEnum.NEW:
+                alert_types_stats[alert_type]["pending"] += 1
+
+        # Calculate action rate for each type
+        for alert_type, stats in alert_types_stats.items():
+            stats["action_rate"] = (stats["acted_upon"] / stats["total"] * 100) if stats["total"] > 0 else 0.0
+
+        # Weekly trend data (last 4 weeks)
+        weekly_trends = []
+        for week in range(4):
+            week_start = datetime.utcnow() - timedelta(days=(week + 1) * 7)
+            week_end = datetime.utcnow() - timedelta(days=week * 7)
+
+            week_alerts = [a for a in all_alerts
+                          if week_start <= a.get("created_at", datetime.utcnow()) < week_end]
+            week_total = len(week_alerts)
+            week_acted = len([a for a in week_alerts if a.get("status") in [
+                LazarusAlertStatusEnum.CONTACTED, LazarusAlertStatusEnum.RESURRECTED
+            ]])
+
+            week_rate = (week_acted / week_total * 100) if week_total > 0 else 0.0
+
+            weekly_trends.insert(0, {  # Insert at beginning to get chronological order
+                "week": f"Week {4 - week}",
+                "start_date": week_start.isoformat(),
+                "end_date": week_end.isoformat(),
+                "resurrection_rate": round(week_rate, 1),
+                "total_alerts": week_total,
+                "acted_upon": week_acted
+            })
+
+        # Get resurrected leads count
+        leads_collection = db["leads"]
+        resurrected_leads = await leads_collection.count_documents({
+            "user_id": user_id,
+            "status": "RESURRECTED",
+            "last_resurrection_date": {"$gte": start_date}
+        })
+
+        return {
+            # KPI Metrics
+            "resurrection_rate": round(resurrection_rate, 1),
+            "resurrection_rate_target": 15.0,  # PRD 7.1: Goal >15%
+            "resurrection_rate_status": "above_target" if resurrection_rate >= 15.0 else "below_target",
+
+            "quota_utilization": round(quota_utilization, 1),
+            "slots_used": slots.used_slots,
+            "slots_total": slots.max_slots,
+            "slots_remaining": slots.max_slots - slots.used_slots,
+
+            "accuracy_rate": round(accuracy_rate, 1),
+            "false_positive_rate": round(false_positive_rate, 1),
+
+            # Alert Performance
+            "total_alerts": total_alerts,
+            "acted_upon_count": acted_upon,
+            "dismissed_count": dismissed,
+            "pending_count": pending,
+            "resurrected_leads_count": resurrected_leads,
+
+            # Breakdown percentages
+            "contacted_percentage": round((acted_upon / total_alerts * 100) if total_alerts > 0 else 0, 1),
+            "dismissed_percentage": round((dismissed / total_alerts * 100) if total_alerts > 0 else 0, 1),
+            "pending_percentage": round((pending / total_alerts * 100) if total_alerts > 0 else 0, 1),
+
+            # Alert type performance
+            "alert_types_performance": sorted(
+                [
+                    {
+                        "alert_type": alert_type,
+                        **stats
+                    }
+                    for alert_type, stats in alert_types_stats.items()
+                ],
+                key=lambda x: x["action_rate"],
+                reverse=True
+            ),
+
+            # Trend data
+            "weekly_trends": weekly_trends,
+
+            # Plan info
+            "plan_type": slots.plan_type,
+            "should_upgrade": quota_utilization >= 90.0 and slots.plan_type == "BASIC",
+        }
