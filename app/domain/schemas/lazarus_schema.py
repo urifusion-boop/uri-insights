@@ -133,7 +133,7 @@ class CompanyMonitor(BaseModel):
 
     # Identity
     company_name: str
-    website_url: str
+    website_url: Optional[str] = None
     domain: Optional[str] = None  # Extracted from website_url
 
     # Homepage tracking for pivots
