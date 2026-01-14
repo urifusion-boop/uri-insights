@@ -462,6 +462,15 @@ class LazarusRepository:
         # Calculate utilization percentage
         utilization_percent = (slots.used_slots / slots.max_slots * 100) if slots.max_slots > 0 else 0
 
+        # Calculate resurrection rate (% of alerts acted upon)
+        total_actionable_alerts = new_alerts + acted_alerts + dismissed_alerts
+        resurrection_rate = (acted_alerts / total_actionable_alerts * 100) if total_actionable_alerts > 0 else 0.0
+
+        # Upgrade recommendations (if using >80% of slots)
+        should_upgrade = utilization_percent > 80
+        upgrade_from = slots.plan_type
+        upgrade_to = "PRO" if slots.plan_type == "BASIC" else "ENTERPRISE"
+
         return {
             "used_slots": slots.used_slots,
             "max_slots": slots.max_slots,
@@ -471,6 +480,10 @@ class LazarusRepository:
             "total_alerts": new_alerts + acted_alerts + dismissed_alerts,
             "new_alerts": new_alerts,
             "resurrected_leads": acted_alerts,  # Acted alerts = resurrected leads
+            "resurrection_rate": round(resurrection_rate, 2),
+            "should_upgrade": should_upgrade,
+            "upgrade_from": upgrade_from,
+            "upgrade_to": upgrade_to,
         }
 
     @staticmethod
