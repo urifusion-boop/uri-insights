@@ -66,9 +66,10 @@ async def get_focus_contacts(
     )
 
     return UriResponse.custom_response(
-        "Focus contacts retrieved successfully",
-        200,
-        [jsonable_encoder(c) for c in contacts],
+        message="Focus contacts retrieved successfully",
+        error_code=200,
+        success=True,
+        data=[jsonable_encoder(c) for c in contacts],
     )
 
 
@@ -163,9 +164,10 @@ async def get_company_monitors(
     )
 
     return UriResponse.custom_response(
-        "Company monitors retrieved successfully",
-        200,
-        [jsonable_encoder(m) for m in monitors],
+        message="Company monitors retrieved successfully",
+        error_code=200,
+        success=True,
+        data=[jsonable_encoder(m) for m in monitors],
     )
 
 
