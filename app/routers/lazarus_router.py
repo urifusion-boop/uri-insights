@@ -198,9 +198,10 @@ async def bulk_upload_csv(
     result = await LazarusService.bulk_upload_from_csv(db, user_id, csv_rows)
 
     return UriResponse.custom_response(
-        result["message"],
-        200,
-        {
+        message=result["message"],
+        error_code=200,
+        success=True,
+        data={
             "added_count": result.get("added_count"),
             "failed_count": result.get("failed_count"),
             "errors": result.get("errors", []),

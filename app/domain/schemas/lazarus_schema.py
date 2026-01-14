@@ -294,10 +294,12 @@ class CompanyMonitorCreate(BaseModel):
 
 class CSVUploadRow(BaseModel):
     """Single row from CSV upload (PRD Section 2.2.1)"""
-    company: Optional[str] = None
-    website: Optional[str] = None
-    contact_name: Optional[str] = None
+    type: LazarusMonitorTypeEnum
+    name: str
     social_handle: Optional[str] = None
+    current_bio: Optional[str] = None
+    website_url: Optional[str] = None
+    industry_keywords: Optional[List[str]] = None
 
 
 class LazarusMetrics(BaseModel):

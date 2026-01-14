@@ -376,7 +376,7 @@ class LazarusService:
     ) -> Dict[str, Any]:
         """Mark an alert as contacted"""
         updated = await LazarusRepository.update_alert_status(
-            db, alert_id, user_id, LazarusAlertStatusEnum.CONTACTED
+            db, alert_id, user_id, LazarusAlertStatusEnum.ACTED
         )
 
         if not updated:
