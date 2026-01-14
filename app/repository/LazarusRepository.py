@@ -622,3 +622,71 @@ class LazarusRepository:
             "plan_type": slots.plan_type,
             "should_upgrade": quota_utilization >= 90.0 and slots.plan_type == "BASIC",
         }
+
+    # ============ HELPER METHODS FOR CRM SYNC ============
+    @staticmethod
+    async def get_focus_contact_by_email(
+        db: AsyncIOMotorDatabase,
+        user_id: str,
+        email: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get focus contact by email address (for duplicate detection during CRM sync)
+
+        Args:
+            db: Database connection
+            user_id: User ID
+            email: Email address
+
+        Returns:
+            Focus contact or None if not found
+        """
+        try:
+            contact = await db["focus_contacts"].find_one({
+                "user_id": user_id,
+                "email": email
+            })
+
+            if contact:
+                contact["_id"] = str(contact["_id"])
+                return contact
+
+            return None
+
+        except Exception as e:
+            print(f"Error getting focus contact by email: {str(e)}")
+            return None
+
+    @staticmethod
+    async def get_company_monitor_by_name(
+        db: AsyncIOMotorDatabase,
+        user_id: str,
+        company_name: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get company monitor by company name (for duplicate detection during CRM sync)
+
+        Args:
+            db: Database connection
+            user_id: User ID
+            company_name: Company name
+
+        Returns:
+            Company monitor or None if not found
+        """
+        try:
+            # Case-insensitive search
+            monitor = await db["company_monitors"].find_one({
+                "user_id": user_id,
+                "company_name": {"$regex": f"^{company_name}$", "$options": "i"}
+            })
+
+            if monitor:
+                monitor["_id"] = str(monitor["_id"])
+                return monitor
+
+            return None
+
+        except Exception as e:
+            print(f"Error getting company monitor by name: {str(e)}")
+            return None

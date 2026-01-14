@@ -57,6 +57,7 @@ from app.routers import (
     websockets_leads,
     signal_refinery_router,
     lazarus_router,
+    lazarus_crm_router,
 )
 from app.routers.admin import admin_lead_analytics
 from app.core.auth_bearer import JWTBearer
@@ -418,6 +419,13 @@ app.include_router(
     lazarus_router.router,
     prefix="/api/lazarus",
     tags=["Lazarus Protocol"],
+    dependencies=[Depends(JWTBearer())],
+)
+
+app.include_router(
+    lazarus_crm_router.router,
+    prefix="/api/lazarus/crm",
+    tags=["Lazarus CRM Integration"],
     dependencies=[Depends(JWTBearer())],
 )
 
