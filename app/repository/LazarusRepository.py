@@ -444,8 +444,8 @@ class LazarusRepository:
         new_alerts = await db["lazarus_alerts"].count_documents(
             {"user_id": user_id, "status": LazarusAlertStatusEnum.NEW}
         )
-        contacted_alerts = await db["lazarus_alerts"].count_documents(
-            {"user_id": user_id, "status": LazarusAlertStatusEnum.CONTACTED}
+        acted_alerts = await db["lazarus_alerts"].count_documents(
+            {"user_id": user_id, "status": LazarusAlertStatusEnum.ACTED}
         )
         dismissed_alerts = await db["lazarus_alerts"].count_documents(
             {"user_id": user_id, "status": LazarusAlertStatusEnum.DISMISSED}
@@ -459,19 +459,18 @@ class LazarusRepository:
             {"user_id": user_id, "monitoring_status": LazarusMonitoringStatusEnum.ACTIVE}
         )
 
+        # Calculate utilization percentage
+        utilization_percent = (slots.used_slots / slots.max_slots * 100) if slots.max_slots > 0 else 0
+
         return {
-            "slots_used": slots.used_slots,
-            "slots_available": slots.max_slots - slots.used_slots,
+            "used_slots": slots.used_slots,
             "max_slots": slots.max_slots,
-            "plan_type": slots.plan_type,
-            "focus_contacts_count": slots.focus_contacts_count,
-            "company_monitors_count": slots.company_monitors_count,
+            "utilization_percent": round(utilization_percent, 2),
             "active_focus_contacts": active_focus,
             "active_company_monitors": active_companies,
-            "new_alerts_count": new_alerts,
-            "contacted_alerts_count": contacted_alerts,
-            "dismissed_alerts_count": dismissed_alerts,
-            "total_alerts": new_alerts + contacted_alerts + dismissed_alerts,
+            "total_alerts": new_alerts + acted_alerts + dismissed_alerts,
+            "new_alerts": new_alerts,
+            "resurrected_leads": acted_alerts,  # Acted alerts = resurrected leads
         }
 
     @staticmethod
