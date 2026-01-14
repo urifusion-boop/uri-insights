@@ -280,11 +280,19 @@ async def get_user_metrics(
     Get comprehensive Lazarus metrics for a user
     PRD Section 7: Success Metrics
     """
-    metrics = await LazarusService.get_user_metrics(db, user_id)
-
-    return UriResponse.custom_response(
-        "Metrics retrieved successfully", 200, jsonable_encoder(metrics)
-    )
+    try:
+        metrics = await LazarusService.get_user_metrics(db, user_id)
+        return UriResponse.custom_response(
+            message="Metrics retrieved successfully",
+            error_code=200,
+            success=True,
+            data=jsonable_encoder(metrics)
+        )
+    except Exception as e:
+        print(f"❌ Error in get_user_metrics: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise
 
 
 @router.post("/upgrade-to-pro")
