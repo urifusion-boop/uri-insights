@@ -10,9 +10,11 @@ Handles:
 """
 import os
 import httpx
+import jwt
+import secrets
 from typing import Dict, List, Any, Optional
 from motor.motor_asyncio import AsyncIOMotorDatabase
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 class SalesforceService:
@@ -24,15 +26,61 @@ class SalesforceService:
     REDIRECT_URI = os.getenv("OAUTH_REDIRECT_URI", "https://api.uricreative.com:8443/api/lazarus/crm/connect/salesforce/callback")
     AUTH_URL = "https://login.salesforce.com/services/oauth2/authorize"
     TOKEN_URL = "https://login.salesforce.com/services/oauth2/token"
+    JWT_SECRET = os.getenv("JWT_SECRET", "")  # Use same JWT secret as main app
 
     # API Configuration
     API_VERSION = "v59.0"
     SCOPES = ["api", "refresh_token", "offline_access"]
 
     @staticmethod
+    def generate_oauth_state(user_id: str) -> str:
+        """
+        Generate JWT-based OAuth state token for CSRF protection
+
+        Args:
+            user_id: User ID to encode in state
+
+        Returns:
+            Signed JWT token containing user_id and nonce
+        """
+        nonce = secrets.token_urlsafe(32)
+        payload = {
+            "user_id": user_id,
+            "nonce": nonce,
+            "exp": datetime.utcnow() + timedelta(minutes=10),  # Expire in 10 minutes
+            "iat": datetime.utcnow(),
+        }
+        return jwt.encode(payload, SalesforceService.JWT_SECRET, algorithm="HS256")
+
+    @staticmethod
+    def verify_oauth_state(state_token: str) -> Optional[str]:
+        """
+        Verify and decode OAuth state token
+
+        Args:
+            state_token: JWT state token from callback
+
+        Returns:
+            user_id if valid, None otherwise
+        """
+        try:
+            payload = jwt.decode(
+                state_token,
+                SalesforceService.JWT_SECRET,
+                algorithms=["HS256"]
+            )
+            return payload.get("user_id")
+        except jwt.ExpiredSignatureError:
+            print("OAuth state token expired")
+            return None
+        except jwt.InvalidTokenError:
+            print("Invalid OAuth state token")
+            return None
+
+    @staticmethod
     def get_authorization_url(user_id: str) -> str:
         """
-        Generate Salesforce OAuth authorization URL
+        Generate Salesforce OAuth authorization URL with secure state token
 
         Args:
             user_id: User ID to pass in state parameter
@@ -41,12 +89,14 @@ class SalesforceService:
             Authorization URL for OAuth popup
         """
         scope = " ".join(SalesforceService.SCOPES)
+        state_token = SalesforceService.generate_oauth_state(user_id)
+
         params = {
             "response_type": "code",
             "client_id": SalesforceService.CLIENT_ID,
             "redirect_uri": SalesforceService.REDIRECT_URI,
             "scope": scope,
-            "state": user_id,  # Pass user_id to retrieve in callback
+            "state": state_token,  # JWT-based state for CSRF protection
         }
 
         # Build URL with query parameters
@@ -54,11 +104,65 @@ class SalesforceService:
         return f"{SalesforceService.AUTH_URL}?{query_string}"
 
     @staticmethod
+    async def fetch_account_info(access_token: str, instance_url: str) -> Dict[str, Any]:
+        """
+        Fetch Salesforce organization information
+
+        Args:
+            access_token: Salesforce access token
+            instance_url: Salesforce instance URL
+
+        Returns:
+            Account info with org_id, org_name, instance_url
+        """
+        try:
+            headers = {
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json",
+            }
+
+            async with httpx.AsyncClient() as client:
+                # Fetch org info from Salesforce API
+                response = await client.get(
+                    f"{instance_url}/services/data/{SalesforceService.API_VERSION}/sobjects/Organization",
+                    headers=headers,
+                )
+
+                if response.status_code != 200:
+                    return {"instance_url": instance_url}
+
+                # Query for organization details
+                query = "SELECT Id, Name, OrganizationType, IsSandbox FROM Organization LIMIT 1"
+                org_response = await client.get(
+                    f"{instance_url}/services/data/{SalesforceService.API_VERSION}/query",
+                    headers=headers,
+                    params={"q": query}
+                )
+
+                if org_response.status_code == 200:
+                    org_data = org_response.json()
+                    if org_data.get("records"):
+                        org = org_data["records"][0]
+                        return {
+                            "org_id": org.get("Id"),
+                            "org_name": org.get("Name"),
+                            "org_type": org.get("OrganizationType"),
+                            "is_sandbox": org.get("IsSandbox", False),
+                            "instance_url": instance_url,
+                        }
+
+                return {"instance_url": instance_url}
+
+        except Exception as e:
+            print(f"Error fetching Salesforce account info: {str(e)}")
+            return {"instance_url": instance_url}
+
+    @staticmethod
     async def handle_oauth_callback(
         db: AsyncIOMotorDatabase, user_id: str, code: str
     ) -> Dict[str, Any]:
         """
-        Handle OAuth callback - exchange code for access token
+        Handle OAuth callback - exchange code for access token and fetch account info
 
         Args:
             db: Database connection
@@ -90,6 +194,12 @@ class SalesforceService:
 
                 token_data = response.json()
 
+            # Fetch account info
+            instance_url = token_data["instance_url"]
+            account_info = await SalesforceService.fetch_account_info(
+                token_data["access_token"], instance_url
+            )
+
             # Store connection in database
             from app.repository.CRMRepository import CRMRepository
 
@@ -98,12 +208,27 @@ class SalesforceService:
                 "crm_type": "salesforce",
                 "access_token": token_data["access_token"],
                 "refresh_token": token_data["refresh_token"],
-                "instance_url": token_data["instance_url"],
+                "instance_url": instance_url,
                 "token_type": token_data["token_type"],
                 "connected_at": datetime.utcnow(),
                 "last_sync_at": None,
                 "contacts_synced": 0,
                 "companies_synced": 0,
+                # Account info fields
+                "org_id": account_info.get("org_id"),
+                "org_name": account_info.get("org_name"),
+                "org_type": account_info.get("org_type"),
+                "is_sandbox": account_info.get("is_sandbox", False),
+                # Metadata
+                "scopes": SalesforceService.SCOPES,
+                "auth_type": "oauth2",
+                "api_version": SalesforceService.API_VERSION,
+                # Sync stats
+                "total_syncs": 0,
+                "successful_syncs": 0,
+                "failed_syncs": 0,
+                "avg_sync_duration_seconds": 0,
+                "last_sync_duration_seconds": None,
             }
 
             await CRMRepository.save_crm_connection(db, user_id, connection)
@@ -337,9 +462,10 @@ class SalesforceService:
                 "Content-Type": "application/json",
             }
 
-            # Query OpportunityContactRole to get associated contacts
+            # Query OpportunityContactRole to get associated contacts (with phone fallbacks)
             query = f"""
-                SELECT ContactId, Contact.FirstName, Contact.LastName, Contact.Email, Contact.Title, Contact.Account.Name
+                SELECT ContactId, Contact.FirstName, Contact.LastName, Contact.Email,
+                       Contact.Phone, Contact.MobilePhone, Contact.Title, Contact.Account.Name
                 FROM OpportunityContactRole
                 WHERE OpportunityId = '{opportunity_id}'
             """
@@ -356,16 +482,21 @@ class SalesforceService:
 
                 data = response.json()
 
-            # Process contacts
+            # Process contacts with field mapping fallbacks (Priority 3)
             contacts = []
             for record in data.get("records", []):
                 contact = record.get("Contact", {})
                 account = contact.get("Account", {})
+
+                # Phone field fallback: try Phone first, then MobilePhone
+                phone = contact.get("Phone") or contact.get("MobilePhone") or ""
+
                 contacts.append({
                     "contact_id": record.get("ContactId"),
                     "first_name": contact.get("FirstName", ""),
                     "last_name": contact.get("LastName", ""),
                     "email": contact.get("Email", ""),
+                    "phone": phone,  # With fallback
                     "job_title": contact.get("Title", ""),
                     "company": account.get("Name", ""),
                 })
@@ -375,3 +506,82 @@ class SalesforceService:
         except Exception as e:
             print(f"Error fetching contacts from opportunity: {str(e)}")
             return []
+
+    @staticmethod
+    async def create_task_on_contact(
+        db: AsyncIOMotorDatabase,
+        user_id: str,
+        access_token: str,
+        instance_url: str,
+        contact_email: str,
+        task_description: str
+    ) -> Dict[str, Any]:
+        """
+        Create a task on a Salesforce contact
+        PRD: "Syncs insights back to the CRM (notifications / notes)"
+
+        Args:
+            db: Database connection
+            user_id: User ID
+            access_token: Salesforce access token
+            instance_url: Salesforce instance URL
+            contact_email: Email of contact to add task to
+            task_description: Task description (Lazarus alert details)
+
+        Returns:
+            Success status and message
+        """
+        try:
+            headers = {
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json",
+            }
+
+            # First, find contact by email
+            query = f"SELECT Id FROM Contact WHERE Email = '{contact_email}' LIMIT 1"
+
+            async with httpx.AsyncClient() as client:
+                search_response = await client.get(
+                    f"{instance_url}/services/data/{SalesforceService.API_VERSION}/query",
+                    headers=headers,
+                    params={"q": query}
+                )
+
+                if search_response.status_code != 200 or not search_response.json().get("records"):
+                    return {
+                        "success": False,
+                        "message": f"Contact not found in Salesforce: {contact_email}"
+                    }
+
+                contact_id = search_response.json()["records"][0]["Id"]
+
+                # Create task associated with contact
+                task_response = await client.post(
+                    f"{instance_url}/services/data/{SalesforceService.API_VERSION}/sobjects/Task",
+                    headers=headers,
+                    json={
+                        "Subject": "🧬 Lazarus Buying Signal Detected",
+                        "Description": task_description,
+                        "WhoId": contact_id,  # Associate with contact
+                        "Status": "Not Started",
+                        "Priority": "High",
+                        "ActivityDate": datetime.utcnow().strftime("%Y-%m-%d")
+                    }
+                )
+
+                if task_response.status_code in [200, 201]:
+                    return {
+                        "success": True,
+                        "message": "Task created in Salesforce"
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "message": f"Failed to create task: {task_response.text}"
+                    }
+
+        except Exception as e:
+            return {
+                "success": False,
+                "message": f"Error creating Salesforce task: {str(e)}"
+            }

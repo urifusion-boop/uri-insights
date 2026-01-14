@@ -180,7 +180,8 @@ class CRMRepository:
         db: AsyncIOMotorDatabase,
         user_id: str,
         contacts_synced: int,
-        companies_synced: int
+        companies_synced: int,
+        sync_duration_seconds: Optional[float] = None
     ) -> Dict[str, Any]:
         """
         Update last sync timestamp and counts
@@ -190,23 +191,55 @@ class CRMRepository:
             user_id: User ID
             contacts_synced: Number of contacts added in this sync
             companies_synced: Number of companies added in this sync
+            sync_duration_seconds: Duration of sync in seconds
 
         Returns:
             Result with success status
         """
         try:
+            # Get current connection to calculate average
+            connection = await db["crm_connections"].find_one({"user_id": user_id})
+            if not connection:
+                return {
+                    "success": False,
+                    "message": "No connection found to update",
+                }
+
+            # Calculate new average sync duration
+            total_syncs = connection.get("total_syncs", 0)
+            avg_duration = connection.get("avg_sync_duration_seconds", 0)
+
+            if sync_duration_seconds and total_syncs > 0:
+                new_avg_duration = ((avg_duration * total_syncs) + sync_duration_seconds) / (total_syncs + 1)
+            elif sync_duration_seconds:
+                new_avg_duration = sync_duration_seconds
+            else:
+                new_avg_duration = avg_duration
+
+            update_data = {
+                "$set": {
+                    "last_sync_at": datetime.utcnow(),
+                    "updated_at": datetime.utcnow(),
+                    "last_error": None,  # Clear error on successful sync
+                    "last_error_code": None,
+                    "last_error_type": None,
+                    "last_error_at": None,
+                    "avg_sync_duration_seconds": new_avg_duration,
+                },
+                "$inc": {
+                    "contacts_synced": contacts_synced,
+                    "companies_synced": companies_synced,
+                    "total_syncs": 1,
+                    "successful_syncs": 1,
+                }
+            }
+
+            if sync_duration_seconds:
+                update_data["$set"]["last_sync_duration_seconds"] = sync_duration_seconds
+
             result = await db["crm_connections"].update_one(
                 {"user_id": user_id},
-                {
-                    "$set": {
-                        "last_sync_at": datetime.utcnow(),
-                        "updated_at": datetime.utcnow(),
-                    },
-                    "$inc": {
-                        "contacts_synced": contacts_synced,
-                        "companies_synced": companies_synced,
-                    }
-                }
+                update_data
             )
 
             if result.modified_count > 0:
@@ -224,6 +257,63 @@ class CRMRepository:
             return {
                 "success": False,
                 "message": f"Failed to update sync status: {str(e)}",
+            }
+
+    # ============ ERROR TRACKING ============
+    @staticmethod
+    async def update_error_tracking(
+        db: AsyncIOMotorDatabase,
+        user_id: str,
+        error_message: str,
+        error_code: Optional[str] = None,
+        error_type: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Track error details for CRM connection and increment failed syncs
+
+        Args:
+            db: Database connection
+            user_id: User ID
+            error_message: Error message
+            error_code: HTTP status code or error code
+            error_type: Type of error (auth_failed, rate_limit, api_error, etc.)
+
+        Returns:
+            Result with success status
+        """
+        try:
+            result = await db["crm_connections"].update_one(
+                {"user_id": user_id},
+                {
+                    "$set": {
+                        "last_error": error_message,
+                        "last_error_code": error_code,
+                        "last_error_type": error_type,
+                        "last_error_at": datetime.utcnow(),
+                        "updated_at": datetime.utcnow(),
+                    },
+                    "$inc": {
+                        "total_syncs": 1,
+                        "failed_syncs": 1,
+                    }
+                }
+            )
+
+            if result.modified_count > 0:
+                return {
+                    "success": True,
+                    "message": "Error tracking updated",
+                }
+            else:
+                return {
+                    "success": False,
+                    "message": "No connection found to update",
+                }
+
+        except Exception as e:
+            return {
+                "success": False,
+                "message": f"Failed to update error tracking: {str(e)}",
             }
 
     # ============ DELETE ============

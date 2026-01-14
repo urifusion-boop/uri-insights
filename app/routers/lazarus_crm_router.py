@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, Query, HTTPException, Request
+from fastapi import APIRouter, Depends, Query, HTTPException, Request, BackgroundTasks
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from fastapi.responses import RedirectResponse
 from typing import Optional
+from datetime import datetime
 
 from app.dependencies import get_db_dependency
 from app.domain.responses.uri_response import UriResponse
@@ -44,6 +45,97 @@ async def initiate_crm_connection(
         raise HTTPException(status_code=500, detail=f"Failed to initiate {crm_type} OAuth: {str(e)}")
 
 
+# ============ PRIVATE APP CONNECTION (Priority 3) ============
+@router.post("/connect/private-app")
+async def connect_private_app(
+    user_id: str = Query(...),
+    crm_type: str = Query(..., description="hubspot or salesforce"),
+    access_token: str = Query(..., description="Private app access token"),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Connect CRM using Private App token (simpler alternative to OAuth)
+    Priority 3: Private App support
+
+    Use Case: Server-to-server integration without OAuth popup
+    HubSpot: Settings > Integrations > Private Apps
+    Salesforce: Create Connected App with JWT or username-password flow
+
+    Body Parameters:
+    - access_token: Private app access token from CRM
+    """
+    from app.repository.CRMRepository import CRMRepository
+
+    if crm_type not in ["hubspot", "salesforce"]:
+        raise HTTPException(status_code=400, detail="Invalid CRM type")
+
+    try:
+        # Validate token by fetching account info
+        if crm_type == "hubspot":
+            account_info = await HubSpotService.fetch_account_info(access_token)
+            if not account_info or not account_info.get("hub_id"):
+                raise HTTPException(status_code=401, detail="Invalid HubSpot access token")
+
+            connection_data = {
+                "user_id": user_id,
+                "crm_type": "hubspot",
+                "access_token": access_token,
+                "refresh_token": None,  # Private apps don't have refresh tokens
+                "expires_in": None,  # Private app tokens don't expire
+                "token_type": "private_app",
+                "connected_at": datetime.utcnow(),
+                "last_sync_at": None,
+                "contacts_synced": 0,
+                "companies_synced": 0,
+                # Account info
+                "hub_id": account_info.get("hub_id"),
+                "hub_domain": account_info.get("hub_domain"),
+                "portal_url": account_info.get("portal_url"),
+                "account_name": account_info.get("account_name"),
+                "time_zone": account_info.get("time_zone"),
+                # Metadata
+                "scopes": ["private_app"],  # Private apps have all scopes
+                "auth_type": "private_app",
+                "api_version": "v3",
+                # Sync stats
+                "total_syncs": 0,
+                "successful_syncs": 0,
+                "failed_syncs": 0,
+                "avg_sync_duration_seconds": 0,
+                "last_sync_duration_seconds": None,
+            }
+
+        else:  # salesforce
+            # Note: Salesforce private app requires instance_url
+            raise HTTPException(
+                status_code=501,
+                detail="Salesforce private app support requires instance_url parameter. Use OAuth instead."
+            )
+
+        # Save connection
+        result = await CRMRepository.save_crm_connection(db, user_id, connection_data)
+
+        if not result["success"]:
+            raise HTTPException(status_code=500, detail=result["message"])
+
+        return UriResponse.custom_response(
+            f"{crm_type.title()} connected successfully via Private App",
+            200,
+            {
+                "success": True,
+                "crm_type": crm_type,
+                "auth_type": "private_app",
+                "account_name": account_info.get("account_name", ""),
+                "hub_id": account_info.get("hub_id")
+            }
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to connect private app: {str(e)}")
+
+
 @router.get("/connect/hubspot/callback")
 async def hubspot_oauth_callback(
     request: Request,
@@ -52,25 +144,28 @@ async def hubspot_oauth_callback(
     db: AsyncIOMotorDatabase = Depends(get_db_dependency),
 ):
     """
-    Handle HubSpot OAuth callback
+    Handle HubSpot OAuth callback with state validation
     Exchanges code for access token and stores connection
     """
     try:
-        # Extract user_id from state parameter
-        user_id = state
+        # Verify and decode state token (CSRF protection)
+        user_id = HubSpotService.verify_oauth_state(state)
+
+        if not user_id:
+            return RedirectResponse(url="/crm-callback?crm_error=Invalid or expired OAuth state token")
 
         # Exchange code for tokens
         result = await HubSpotService.handle_oauth_callback(db, user_id, code)
 
         if not result["success"]:
-            # Redirect to error page
-            return RedirectResponse(url=f"/lazarus?crm_error={result['message']}")
+            # Redirect to callback page with error
+            return RedirectResponse(url=f"/crm-callback?crm_error={result['message']}")
 
-        # Redirect to success page with postMessage to close popup
-        return RedirectResponse(url="/lazarus?crm_connected=hubspot")
+        # Redirect to callback page with success (will trigger postMessage and close popup)
+        return RedirectResponse(url="/crm-callback?crm_connected=hubspot")
 
     except Exception as e:
-        return RedirectResponse(url=f"/lazarus?crm_error={str(e)}")
+        return RedirectResponse(url=f"/crm-callback?crm_error={str(e)}")
 
 
 @router.get("/connect/salesforce/callback")
@@ -81,23 +176,26 @@ async def salesforce_oauth_callback(
     db: AsyncIOMotorDatabase = Depends(get_db_dependency),
 ):
     """
-    Handle Salesforce OAuth callback
+    Handle Salesforce OAuth callback with state validation
     Exchanges code for access token and stores connection
     """
     try:
-        # Extract user_id from state parameter
-        user_id = state
+        # Verify and decode state token (CSRF protection)
+        user_id = SalesforceService.verify_oauth_state(state)
+
+        if not user_id:
+            return RedirectResponse(url="/crm-callback?crm_error=Invalid or expired OAuth state token")
 
         # Exchange code for tokens
         result = await SalesforceService.handle_oauth_callback(db, user_id, code)
 
         if not result["success"]:
-            return RedirectResponse(url=f"/lazarus?crm_error={result['message']}")
+            return RedirectResponse(url=f"/crm-callback?crm_error={result['message']}")
 
-        return RedirectResponse(url="/lazarus?crm_connected=salesforce")
+        return RedirectResponse(url="/crm-callback?crm_connected=salesforce")
 
     except Exception as e:
-        return RedirectResponse(url=f"/lazarus?crm_error={str(e)}")
+        return RedirectResponse(url=f"/crm-callback?crm_error={str(e)}")
 
 
 # ============ CRM STATUS ============
@@ -161,15 +259,44 @@ async def disconnect_crm(
     )
 
 
+# ============ CRM SYNC LOGS ============
+@router.get("/sync-logs")
+async def get_sync_logs(
+    user_id: str = Query(...),
+    limit: int = Query(10, description="Number of logs to return"),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Get CRM sync history logs
+    Priority 2: Sync logs viewer
+
+    Returns recent sync operations with stats and errors
+    """
+    from app.repository.CRMSyncLogRepository import CRMSyncLogRepository
+
+    logs = await CRMSyncLogRepository.get_sync_logs_for_user(db, user_id, limit)
+
+    return UriResponse.custom_response(
+        "Sync logs retrieved",
+        200,
+        logs
+    )
+
+
 # ============ CRM SYNC ============
 @router.post("/sync")
 async def sync_crm(
     user_id: str = Query(...),
+    background: Optional[bool] = Query(False, description="Run sync in background for large datasets"),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
     db: AsyncIOMotorDatabase = Depends(get_db_dependency),
 ):
     """
-    Manually trigger CRM sync
+    Manually trigger CRM sync (Priority 3: Background task support)
     PRD: Auto-imports stalled deals and closed-lost leads
+
+    Query Parameters:
+    - background: Set to true for large syncs (1000+ contacts)
 
     Returns count of contacts and companies added
     """
@@ -183,6 +310,24 @@ async def sync_crm(
 
     crm_type = connection.get("crm_type")
 
+    # If background mode requested, queue the sync
+    if background:
+        background_tasks.add_task(
+            CRMSyncService.sync_crm_data,
+            db, user_id, crm_type, connection
+        )
+
+        return UriResponse.custom_response(
+            f"{crm_type.title()} sync started in background",
+            202,
+            {
+                "success": True,
+                "status": "processing",
+                "message": "Sync running in background. Check sync logs for results."
+            }
+        )
+
+    # Otherwise run sync synchronously
     try:
         # Trigger sync based on CRM type
         result = await CRMSyncService.sync_crm_data(db, user_id, crm_type, connection)
@@ -201,3 +346,73 @@ async def sync_crm(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"CRM sync failed: {str(e)}")
+
+
+# ============ SYNC INSIGHTS BACK TO CRM ============
+@router.post("/sync-alert-to-crm")
+async def sync_alert_to_crm(
+    user_id: str = Query(...),
+    alert_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Sync Lazarus alert back to CRM as a note/activity
+    PRD: "Syncs insights back to the CRM (notifications / notes)"
+
+    When a buying signal is detected, this writes it back to the user's CRM
+    so they can see it in HubSpot/Salesforce alongside the deal/contact.
+    """
+    from app.repository.CRMRepository import CRMRepository
+    from app.repository.LazarusRepository import LazarusRepository
+
+    try:
+        # Get CRM connection
+        connection = await CRMRepository.get_crm_connection(db, user_id)
+        if not connection:
+            raise HTTPException(status_code=404, detail="No CRM connected")
+
+        # Get alert details
+        alert = await LazarusRepository.get_alert_by_id(db, user_id, alert_id)
+        if not alert:
+            raise HTTPException(status_code=404, detail="Alert not found")
+
+        crm_type = connection.get("crm_type")
+        access_token = connection.get("access_token")
+
+        # Format note content
+        note_content = f"""
+🧬 Lazarus Signal Detected
+
+Type: {alert.get('alert_type')}
+Signal: {alert.get('alert_message')}
+
+Suggested Action:
+{alert.get('suggested_pitch', 'Review this opportunity')}
+
+Detected: {alert.get('created_at')}
+        """.strip()
+
+        # Sync to CRM
+        if crm_type == "hubspot":
+            result = await HubSpotService.create_note_on_contact(
+                db, user_id, access_token, alert.get('contact_email'), note_content
+            )
+        elif crm_type == "salesforce":
+            result = await SalesforceService.create_task_on_contact(
+                db, user_id, access_token, connection.get('instance_url'),
+                alert.get('contact_email'), note_content
+            )
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported CRM type")
+
+        if result.get("success"):
+            return UriResponse.custom_response(
+                "Alert synced to CRM successfully",
+                200,
+                {"synced": True, "crm_type": crm_type}
+            )
+        else:
+            raise HTTPException(status_code=500, detail=result.get("message", "Failed to sync"))
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to sync alert to CRM: {str(e)}")

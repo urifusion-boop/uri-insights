@@ -7,6 +7,7 @@ Orchestrates syncing data from HubSpot and Salesforce:
 - Auto-imports closed-lost deals/opportunities as focus contacts
 - Auto-imports associated companies as company monitors
 - Updates sync statistics
+- Logs sync operations for tracking
 """
 from typing import Dict, Any, List
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -16,6 +17,7 @@ from app.services.HubSpotService import HubSpotService
 from app.services.SalesforceService import SalesforceService
 from app.services.LazarusService import LazarusService
 from app.domain.schemas.lazarus_schema import FocusContactCreate, CompanyMonitorCreate
+from app.repository.CRMSyncLogRepository import CRMSyncLogRepository
 
 
 class CRMSyncService:
@@ -29,7 +31,7 @@ class CRMSyncService:
         connection: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        Sync data from CRM to Lazarus Protocol
+        Sync data from CRM to Lazarus Protocol with logging
         PRD: Auto-import stalled deals and closed-lost leads
 
         Args:
@@ -41,15 +43,25 @@ class CRMSyncService:
         Returns:
             Success status with counts of contacts and companies added
         """
+        # Create sync log entry
+        log_id = await CRMSyncLogRepository.create_sync_log(db, user_id, crm_type)
+
         try:
             if crm_type == "hubspot":
                 result = await CRMSyncService._sync_hubspot_data(db, user_id, connection)
             elif crm_type == "salesforce":
                 result = await CRMSyncService._sync_salesforce_data(db, user_id, connection)
             else:
+                error_msg = f"Unsupported CRM type: {crm_type}"
+                if log_id:
+                    await CRMSyncLogRepository.complete_sync_log(
+                        db, log_id, "failed", {},
+                        error_message=error_msg,
+                        error_type="invalid_crm_type"
+                    )
                 return {
                     "success": False,
-                    "message": f"Unsupported CRM type: {crm_type}",
+                    "message": error_msg,
                 }
 
             # Update last sync time
@@ -61,12 +73,41 @@ class CRMSyncService:
                 result.get("companies_added", 0),
             )
 
+            # Complete sync log with success
+            if log_id:
+                await CRMSyncLogRepository.complete_sync_log(
+                    db,
+                    log_id,
+                    "success",
+                    {
+                        "contacts_added": result.get("contacts_added", 0),
+                        "companies_added": result.get("companies_added", 0),
+                        "deals_processed": result.get("deals_processed", 0),
+                    }
+                )
+
             return result
 
         except Exception as e:
+            error_msg = f"CRM sync failed: {str(e)}"
+
+            # Track error in CRM connection
+            from app.repository.CRMRepository import CRMRepository
+            await CRMRepository.update_error_tracking(
+                db, user_id, error_msg, error_type="sync_error"
+            )
+
+            # Complete sync log with failure
+            if log_id:
+                await CRMSyncLogRepository.complete_sync_log(
+                    db, log_id, "failed", {},
+                    error_message=error_msg,
+                    error_type="sync_error"
+                )
+
             return {
                 "success": False,
-                "message": f"CRM sync failed: {str(e)}",
+                "message": error_msg,
             }
 
     @staticmethod

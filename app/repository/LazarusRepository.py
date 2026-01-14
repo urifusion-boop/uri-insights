@@ -690,3 +690,36 @@ class LazarusRepository:
         except Exception as e:
             print(f"Error getting company monitor by name: {str(e)}")
             return None
+
+    @staticmethod
+    async def get_alert_by_id(
+        db: AsyncIOMotorDatabase,
+        user_id: str,
+        alert_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get Lazarus alert by ID (for syncing back to CRM)
+
+        Args:
+            db: Database connection
+            user_id: User ID
+            alert_id: Alert ID
+
+        Returns:
+            Alert document or None if not found
+        """
+        try:
+            alert = await db["lazarus_alerts"].find_one({
+                "alert_id": alert_id,
+                "user_id": user_id
+            })
+
+            if alert:
+                alert["_id"] = str(alert["_id"])
+                return alert
+
+            return None
+
+        except Exception as e:
+            print(f"Error getting alert by ID: {str(e)}")
+            return None
