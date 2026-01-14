@@ -275,6 +275,7 @@ class FocusContactCreate(BaseModel):
     """Create a new focus contact monitor"""
     name: str
     social_handle: Optional[str] = None
+    last_bio_text: Optional[str] = None
     linkedin_url: Optional[str] = None
     twitter_url: Optional[str] = None
     current_company: Optional[str] = None
