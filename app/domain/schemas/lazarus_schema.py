@@ -286,7 +286,9 @@ class FocusContactCreate(BaseModel):
 class CompanyMonitorCreate(BaseModel):
     """Create a new company monitor"""
     company_name: str
-    website_url: str
+    website_url: Optional[str] = None
+    last_homepage_content: Optional[str] = None
+    last_job_count: int = 0
     industry_keywords: List[str] = []
     marked_dead_reason: Optional[str] = None
     source_lead_id: Optional[str] = None
