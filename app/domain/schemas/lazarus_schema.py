@@ -98,6 +98,10 @@ class FocusContact(BaseModel):
     # Monitoring state
     monitoring_status: LazarusMonitoringStatusEnum = LazarusMonitoringStatusEnum.ACTIVE
     last_scan_date: Optional[datetime] = None
+    next_scan_date: Optional[datetime] = None
+    scan_frequency_days: int = 7  # How often to scan (default: weekly)
+    scan_count: int = 0  # Number of scans performed
+    alert_count: int = 0  # Number of alerts generated
 
     # Link to original lead (if came from existing system)
     source_lead_id: Optional[str] = None  # Link to leads collection
@@ -158,6 +162,10 @@ class CompanyMonitor(BaseModel):
     # Monitoring state
     monitoring_status: LazarusMonitoringStatusEnum = LazarusMonitoringStatusEnum.ACTIVE
     last_scan_date: Optional[datetime] = None
+    next_scan_date: Optional[datetime] = None
+    scan_frequency_days: int = 7  # How often to scan (default: weekly)
+    scan_count: int = 0  # Number of scans performed
+    alert_count: int = 0  # Number of alerts generated
 
     # Link to original lead
     source_lead_id: Optional[str] = None
@@ -280,6 +288,7 @@ class FocusContactCreate(BaseModel):
     twitter_url: Optional[str] = None
     current_company: Optional[str] = None
     industry_keywords: List[str] = []
+    scan_frequency_days: Optional[int] = 7  # Default: weekly scans
     marked_dead_reason: Optional[str] = None
     source_lead_id: Optional[str] = None
 
@@ -291,6 +300,7 @@ class CompanyMonitorCreate(BaseModel):
     last_homepage_content: Optional[str] = None
     last_job_count: int = 0
     industry_keywords: List[str] = []
+    scan_frequency_days: Optional[int] = 7  # Default: weekly scans
     marked_dead_reason: Optional[str] = None
     source_lead_id: Optional[str] = None
 
@@ -303,6 +313,7 @@ class CSVUploadRow(BaseModel):
     current_bio: Optional[str] = None
     website_url: Optional[str] = None
     industry_keywords: Optional[List[str]] = None
+    scan_frequency_days: Optional[int] = 7  # Default: weekly scans
 
 
 class LazarusMetrics(BaseModel):

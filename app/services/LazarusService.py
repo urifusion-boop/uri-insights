@@ -55,6 +55,9 @@ class LazarusService:
                 contact_create.last_bio_text.encode()
             ).hexdigest()
 
+        # Use custom scan frequency or default to 7 days
+        scan_frequency = contact_create.scan_frequency_days or 7
+
         # Build focus contact data
         contact_data = {
             "focus_id": str(uuid.uuid4()),
@@ -67,7 +70,8 @@ class LazarusService:
             "monitoring_status": LazarusMonitoringStatusEnum.ACTIVE,
             "source_lead_id": source_lead_id,
             "last_scan_date": None,
-            "next_scan_date": datetime.utcnow() + timedelta(days=7),  # First scan in 7 days
+            "next_scan_date": datetime.utcnow() + timedelta(days=scan_frequency),
+            "scan_frequency_days": scan_frequency,
             "scan_count": 0,
             "alert_count": 0,
             "created_date": datetime.utcnow(),
@@ -161,18 +165,25 @@ class LazarusService:
         db: AsyncIOMotorDatabase, user_id: str, focus_id: str
     ) -> Dict[str, Any]:
         """Resume monitoring for a paused focus contact"""
+        # Get contact to retrieve scan frequency
+        contact = await LazarusRepository.get_focus_contact_by_id(db, focus_id, user_id)
+        if not contact:
+            return {"success": False, "message": "Focus contact not found"}
+
+        scan_frequency = contact.scan_frequency_days if hasattr(contact, 'scan_frequency_days') else 7
+
         updated = await LazarusRepository.update_focus_contact(
             db,
             focus_id,
             user_id,
             {
                 "monitoring_status": LazarusMonitoringStatusEnum.ACTIVE,
-                "next_scan_date": datetime.utcnow() + timedelta(days=7),
+                "next_scan_date": datetime.utcnow() + timedelta(days=scan_frequency),
             },
         )
 
         if not updated:
-            return {"success": False, "message": "Focus contact not found"}
+            return {"success": False, "message": "Failed to update focus contact"}
 
         return {"success": True, "message": "Focus contact resumed"}
 
@@ -204,6 +215,9 @@ class LazarusService:
                 monitor_create.last_homepage_content.encode()
             ).hexdigest()
 
+        # Use custom scan frequency or default to 7 days
+        scan_frequency = monitor_create.scan_frequency_days or 7
+
         # Build company monitor data
         monitor_data = {
             "monitor_id": str(uuid.uuid4()),
@@ -216,7 +230,8 @@ class LazarusService:
             "monitoring_status": LazarusMonitoringStatusEnum.ACTIVE,
             "source_lead_id": source_lead_id,
             "last_scan_date": None,
-            "next_scan_date": datetime.utcnow() + timedelta(days=7),
+            "next_scan_date": datetime.utcnow() + timedelta(days=scan_frequency),
+            "scan_frequency_days": scan_frequency,
             "scan_count": 0,
             "alert_count": 0,
             "created_date": datetime.utcnow(),
@@ -323,6 +338,7 @@ class LazarusService:
                         social_handle=row.social_handle,
                         last_bio_text=row.current_bio,
                         industry_keywords=row.industry_keywords or [],
+                        scan_frequency_days=row.scan_frequency_days or 7,
                     )
                     result = await LazarusService.add_focus_contact(
                         db, user_id, contact_create
@@ -333,6 +349,7 @@ class LazarusService:
                         website_url=row.website_url,
                         last_homepage_content=None,
                         last_job_count=0,
+                        scan_frequency_days=row.scan_frequency_days or 7,
                     )
                     result = await LazarusService.add_company_monitor(
                         db, user_id, monitor_create

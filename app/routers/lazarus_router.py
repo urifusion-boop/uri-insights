@@ -118,6 +118,44 @@ async def resume_focus_contact(
     return UriResponse.custom_response(result["message"], 200)
 
 
+@router.patch("/focus-contacts/{focus_id}/scan-frequency")
+async def update_focus_contact_scan_frequency(
+    focus_id: str,
+    scan_frequency_days: int = Query(..., ge=1, le=30),
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """Update scan frequency for a focus contact (1-30 days)"""
+    from app.repository.LazarusRepository import LazarusRepository
+    from datetime import datetime, timedelta
+
+    # Get contact to calculate new next_scan_date
+    contact = await LazarusRepository.get_focus_contact_by_id(db, focus_id, user_id)
+    if not contact:
+        return UriResponse.custom_response("Focus contact not found", 404)
+
+    # Update scan frequency and recalculate next scan
+    updated = await LazarusRepository.update_focus_contact(
+        db,
+        focus_id,
+        user_id,
+        {
+            "scan_frequency_days": scan_frequency_days,
+            "next_scan_date": datetime.utcnow() + timedelta(days=scan_frequency_days),
+        },
+    )
+
+    if not updated:
+        return UriResponse.custom_response("Failed to update scan frequency", 500)
+
+    return UriResponse.custom_response(
+        message=f"Scan frequency updated to every {scan_frequency_days} days",
+        error_code=200,
+        success=True,
+        data={"scan_frequency_days": scan_frequency_days}
+    )
+
+
 # ============ COMPANY MONITORS ============
 @router.post("/company-monitors/add")
 async def add_company_monitor(
@@ -184,6 +222,44 @@ async def remove_company_monitor(
         return UriResponse.custom_response(result["message"], 404)
 
     return UriResponse.custom_response(result["message"], 200)
+
+
+@router.patch("/company-monitors/{monitor_id}/scan-frequency")
+async def update_company_monitor_scan_frequency(
+    monitor_id: str,
+    scan_frequency_days: int = Query(..., ge=1, le=30),
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """Update scan frequency for a company monitor (1-30 days)"""
+    from app.repository.LazarusRepository import LazarusRepository
+    from datetime import datetime, timedelta
+
+    # Get monitor to calculate new next_scan_date
+    monitor = await LazarusRepository.get_company_monitor_by_id(db, monitor_id, user_id)
+    if not monitor:
+        return UriResponse.custom_response("Company monitor not found", 404)
+
+    # Update scan frequency and recalculate next scan
+    updated = await LazarusRepository.update_company_monitor(
+        db,
+        monitor_id,
+        user_id,
+        {
+            "scan_frequency_days": scan_frequency_days,
+            "next_scan_date": datetime.utcnow() + timedelta(days=scan_frequency_days),
+        },
+    )
+
+    if not updated:
+        return UriResponse.custom_response("Failed to update scan frequency", 500)
+
+    return UriResponse.custom_response(
+        message=f"Scan frequency updated to every {scan_frequency_days} days",
+        error_code=200,
+        success=True,
+        data={"scan_frequency_days": scan_frequency_days}
+    )
 
 
 # ============ BULK CSV UPLOAD ============
