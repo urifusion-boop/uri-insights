@@ -126,6 +126,7 @@ async def update_focus_contact_scan_frequency(
     db: AsyncIOMotorDatabase = Depends(get_db_dependency),
 ):
     """Update scan frequency for a focus contact (1-30 days)"""
+    print(f"🔍 [BACKEND] scan-frequency endpoint HIT! focus_id={focus_id}, user_id={user_id}, days={scan_frequency_days}")
     from app.repository.LazarusRepository import LazarusRepository
     from datetime import datetime, timedelta
 
