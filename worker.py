@@ -1,9 +1,12 @@
 """
-Worker Process for Lead Generation Queue Consumer
+Worker Process for Azure Service Bus Queue Consumers
 
 This is a standalone process that runs independently from the web server.
-It consumes jobs from the Azure Service Bus LEAD_GENERATION_QUEUE and
-processes them in the background.
+It consumes jobs from multiple Azure Service Bus queues and processes them in the background.
+
+Queues:
+    - LEAD_GENERATION_QUEUE: Conversational lead generation jobs
+    - LAZARUS_MONITORING_QUEUE: Lazarus Protocol monitoring scans
 
 Usage:
     python worker.py
@@ -11,49 +14,61 @@ Usage:
 Deployment:
     - Run as separate container/process alongside web server
     - Can scale horizontally (multiple worker instances)
-    - Monitors LEAD_GENERATION_QUEUE for new jobs
+    - Monitors multiple queues concurrently
 """
 import asyncio
 import signal
 import sys
 from app.services.azure.consumers.LeadGenerationConsumer import LeadGenerationConsumer
+from app.services.azure.consumers.LazarusMonitoringConsumer import LazarusMonitoringConsumer
 from app.database import connect_to_mongo
 from app.core.config import settings
 
 
-# Global consumer instance for graceful shutdown
-consumer_instance = None
+# Global consumer instances for graceful shutdown
+lead_consumer_instance = None
+lazarus_consumer_instance = None
 
 
 async def main():
     """
-    Main worker loop - initializes consumer and keeps it running.
+    Main worker loop - initializes all consumers and keeps them running.
     """
-    global consumer_instance
+    global lead_consumer_instance, lazarus_consumer_instance
 
     print("=" * 80)
-    print("🚀 Lead Generation Worker Starting...")
+    print("🚀 Multi-Queue Worker Starting...")
     print("=" * 80)
-    print(f"Queue: LEAD_GENERATION_QUEUE")
-    print(f"Message Types: CONVERSATIONAL_LEAD_GENERATION")
+    print(f"Queues:")
+    print(f"  1. LEAD_GENERATION_QUEUE → Conversational Lead Generation")
+    print(f"  2. LAZARUS_MONITORING_QUEUE → Lazarus Protocol Scans")
     print("=" * 80)
 
     try:
-        # Connect to MongoDB first (required before consumer can use get_db())
+        # Connect to MongoDB first (required before consumers can use get_db())
         print("🔌 Connecting to MongoDB...")
         connect_to_mongo(settings.MONGODB_DB)
         print("✅ MongoDB connected")
 
-        # Create and initialize consumer
-        consumer_instance = LeadGenerationConsumer()
-        await consumer_instance._async_init()
+        # Create and initialize Lead Generation consumer
+        print("🔧 Initializing Lead Generation Consumer...")
+        lead_consumer_instance = LeadGenerationConsumer()
+        await lead_consumer_instance._async_init()
+        print("✅ Lead Generation Consumer ready")
 
-        print("✅ Worker ready and listening for jobs...")
+        # Create and initialize Lazarus Monitoring consumer
+        print("🔧 Initializing Lazarus Monitoring Consumer...")
+        lazarus_consumer_instance = LazarusMonitoringConsumer()
+        await lazarus_consumer_instance.setup()
+        print("✅ Lazarus Monitoring Consumer ready")
+
+        print("=" * 80)
+        print("✅ All workers ready and listening for jobs...")
         print("Press Ctrl+C to stop")
         print("=" * 80)
 
         # Keep worker running indefinitely
-        # The consumer runs in its own asyncio task (consumer_task)
+        # Both consumers run in their own asyncio tasks
         await asyncio.Event().wait()  # Wait forever
 
     except KeyboardInterrupt:
@@ -69,26 +84,28 @@ async def main():
 
 async def shutdown():
     """
-    Graceful shutdown - cleanup resources.
+    Graceful shutdown - cleanup resources for all consumers.
     """
-    global consumer_instance
+    global lead_consumer_instance, lazarus_consumer_instance
 
     print("\n" + "=" * 80)
-    print("🛑 Shutting down worker gracefully...")
+    print("🛑 Shutting down all workers gracefully...")
     print("=" * 80)
 
     try:
-        if consumer_instance:
-            # Cancel consumer task
+        # Shutdown Lead Generation Consumer
+        if lead_consumer_instance:
             await AzureServiceBusConsumer.shutdown()
-            print("✅ Consumer stopped")
+            await lead_consumer_instance._cleanup()
+            print("✅ Lead Generation Consumer stopped")
 
-            # Cleanup Azure Service Bus connections
-            await consumer_instance._cleanup()
-            print("✅ Connections closed")
+        # Shutdown Lazarus Monitoring Consumer
+        if lazarus_consumer_instance:
+            await lazarus_consumer_instance._cleanup()
+            print("✅ Lazarus Monitoring Consumer stopped")
 
         print("=" * 80)
-        print("✅ Worker shutdown complete")
+        print("✅ All workers shutdown complete")
         print("=" * 80)
 
     except Exception as e:
