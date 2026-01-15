@@ -139,6 +139,8 @@ class CompanyMonitor(BaseModel):
     company_name: str
     website_url: Optional[str] = None
     domain: Optional[str] = None  # Extracted from website_url
+    location: Optional[str] = None  # e.g., "Lagos, Nigeria" or "Remote"
+    country_code: Optional[str] = None  # e.g., "ng", "us", "uk" - for Google Search
 
     # Homepage tracking for pivots
     last_homepage_hash: Optional[str] = None  # MD5 hash
@@ -297,6 +299,8 @@ class CompanyMonitorCreate(BaseModel):
     """Create a new company monitor"""
     company_name: str
     website_url: Optional[str] = None
+    location: Optional[str] = None  # e.g., "Lagos, Nigeria" or "Remote"
+    country_code: Optional[str] = None  # e.g., "ng", "us", "uk"
     last_homepage_content: Optional[str] = None
     last_job_count: int = 0
     industry_keywords: List[str] = []
@@ -312,6 +316,8 @@ class CSVUploadRow(BaseModel):
     social_handle: Optional[str] = None
     current_bio: Optional[str] = None
     website_url: Optional[str] = None
+    location: Optional[str] = None  # For companies
+    country_code: Optional[str] = None  # For companies
     industry_keywords: Optional[List[str]] = None
     scan_frequency_days: Optional[int] = 7  # Default: weekly scans
 

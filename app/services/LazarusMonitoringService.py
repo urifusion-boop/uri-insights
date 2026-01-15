@@ -113,14 +113,15 @@ class LazarusMonitoringService:
                         {"alert_count": contact.alert_count + 1},
                     )
 
-                # Update scan metadata
+                # Update scan metadata using custom scan frequency
+                scan_frequency = contact.scan_frequency_days if hasattr(contact, 'scan_frequency_days') else 7
                 await LazarusRepository.update_focus_contact(
                     db,
                     contact.focus_id,
                     contact.user_id,
                     {
                         "last_scan_date": datetime.utcnow(),
-                        "next_scan_date": datetime.utcnow() + timedelta(days=7),
+                        "next_scan_date": datetime.utcnow() + timedelta(days=scan_frequency),
                         "scan_count": contact.scan_count + 1,
                     },
                 )
@@ -309,14 +310,15 @@ class LazarusMonitoringService:
                         {"alert_count": monitor.alert_count + 1},
                     )
 
-            # Update scan metadata
+            # Update scan metadata using custom scan frequency
+            scan_frequency = monitor.scan_frequency_days if hasattr(monitor, 'scan_frequency_days') else 7
             await LazarusRepository.update_company_monitor(
                 db,
                 monitor.monitor_id,
                 monitor.user_id,
                 {
                     "last_scan_date": datetime.utcnow(),
-                    "next_scan_date": datetime.utcnow() + timedelta(days=7),
+                    "next_scan_date": datetime.utcnow() + timedelta(days=scan_frequency),
                     "scan_count": monitor.scan_count + 1,
                 },
             )
@@ -338,10 +340,14 @@ class LazarusMonitoringService:
         try:
             # Use existing ApifyLinkedInJobsService to fetch current job count
             linkedin_service = ApifyLinkedInJobsService()
+
+            # Use monitor's location if specified, otherwise omit (no location filter)
+            location = monitor.location if hasattr(monitor, 'location') and monitor.location else None
+
             result = await linkedin_service.fetch_job_postings(
                 search_query=f"company:{monitor.company_name}",
                 max_jobs=100,  # Just to count, we don't need details
-                location="Worldwide"
+                location=location  # None = no location filter
             )
 
             if not result.get("success"):
@@ -413,10 +419,13 @@ class LazarusMonitoringService:
 
             logger.info(f"🔍 Searching for cash injection: {dork_query}")
 
+            # Use monitor's country_code if specified, otherwise use "us" for global results
+            country_code = monitor.country_code if hasattr(monitor, 'country_code') and monitor.country_code else "us"
+
             results = await google_service.search(
                 dork_query=dork_query,
                 max_results=10,
-                country_code="ng"
+                country_code=country_code
             )
 
             # If we found recent funding news
@@ -475,10 +484,13 @@ class LazarusMonitoringService:
 
             logger.info(f"🔍 Searching for strategic pivot: {dork_query}")
 
+            # Use monitor's country_code if specified, otherwise use "us" for global results
+            country_code = monitor.country_code if hasattr(monitor, 'country_code') and monitor.country_code else "us"
+
             results = await google_service.search(
                 dork_query=dork_query,
                 max_results=10,
-                country_code="ng"
+                country_code=country_code
             )
 
             # If we found recent pivot news
