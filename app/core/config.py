@@ -79,6 +79,8 @@ class Settings(BaseSettings):
     
     # Apify Configuration
     APIFY_API_TOKEN: str = ""
+    APIFY_API_TOKEN_BACKUP: str = ""  # Backup token for failover
+    APIFY_TIMEOUT_SECONDS: int = 60   # Timeout before switching to backup
 
     # Gemini Configuration (for LLM fallback)
     GEMINI_API_KEY: Optional[str] = None
