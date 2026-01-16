@@ -103,7 +103,7 @@ async def remove_focus_contact(
     return UriResponse.custom_response(result["message"], 200)
 
 
-@router.patch("/focus-contacts/{focus_id}/pause")
+@router.put("/focus-contacts/{focus_id}/pause")
 async def pause_focus_contact(
     focus_id: str,
     user_id: str = Query(...),
@@ -118,7 +118,7 @@ async def pause_focus_contact(
     return UriResponse.custom_response(result["message"], 200)
 
 
-@router.patch("/focus-contacts/{focus_id}/resume")
+@router.put("/focus-contacts/{focus_id}/resume")
 async def resume_focus_contact(
     focus_id: str,
     user_id: str = Query(...),
@@ -352,7 +352,7 @@ async def get_alerts(
     )
 
 
-@router.patch("/alerts/{alert_id}/contacted")
+@router.put("/alerts/{alert_id}/contacted")
 async def mark_alert_contacted(
     alert_id: str,
     user_id: str = Query(...),
@@ -367,7 +367,7 @@ async def mark_alert_contacted(
     return UriResponse.custom_response(result["message"], 200)
 
 
-@router.patch("/alerts/{alert_id}/dismiss")
+@router.put("/alerts/{alert_id}/dismiss")
 async def dismiss_alert(
     alert_id: str,
     user_id: str = Query(...),
@@ -442,7 +442,7 @@ async def upgrade_to_pro(
 
 
 # ============ LEAD INTEGRATION ============
-@router.patch("/leads/{lead_id}/mark-dead")
+@router.put("/leads/{lead_id}/mark-dead")
 async def mark_lead_as_dead(
     lead_id: str,
     user_id: str = Query(...),
@@ -464,7 +464,7 @@ async def mark_lead_as_dead(
     return UriResponse.custom_response(result["message"], 200, result)
 
 
-@router.patch("/leads/{lead_id}/resurrect")
+@router.put("/leads/{lead_id}/resurrect")
 async def resurrect_lead(
     lead_id: str,
     user_id: str = Query(...),
