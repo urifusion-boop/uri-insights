@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from typing import Optional, List
 from fastapi.encoders import jsonable_encoder
+import logging
 
 from app.dependencies import get_db_dependency
 from app.domain.responses.uri_response import UriResponse
@@ -16,8 +17,22 @@ from app.domain.schemas.lazarus_schema import (
     DetectionRulesUpdate,
 )
 
+# Configure logging
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 router = APIRouter()
+
+# Log all registered routes when router is loaded
+@router.on_event("startup")
+async def log_routes():
+    logger.info("=" * 80)
+    logger.info("LAZARUS ROUTER LOADED - Registered Routes:")
+    for route in router.routes:
+        if hasattr(route, 'path') and hasattr(route, 'methods'):
+            methods = ','.join(route.methods) if route.methods else 'ANY'
+            logger.info(f"  {methods:10} {route.path}")
+    logger.info("=" * 80)
 
 
 # ============ FOCUS CONTACTS ============
@@ -118,6 +133,30 @@ async def resume_focus_contact(
     return UriResponse.custom_response(result["message"], 200)
 
 
+# ============ DIAGNOSTIC TEST ENDPOINTS ============
+@router.get("/diagnostic/ping")
+async def diagnostic_ping():
+    """Ultra-simple test endpoint - no dependencies, just returns success"""
+    logger.info("🏓 DIAGNOSTIC PING endpoint hit!")
+    return {
+        "success": True,
+        "message": "Lazarus router is alive!",
+        "endpoint": "/diagnostic/ping"
+    }
+
+
+@router.patch("/diagnostic/test-patch/{item_id}")
+async def diagnostic_test_patch(item_id: str, value: int = Query(default=1)):
+    """Test PATCH method with path param and query param"""
+    logger.info(f"🧪 DIAGNOSTIC TEST-PATCH hit! item_id={item_id}, value={value}")
+    return {
+        "success": True,
+        "message": "PATCH method works!",
+        "item_id": item_id,
+        "value": value
+    }
+
+
 @router.patch("/focus-contacts/{focus_id}/scanfrequency")
 async def update_focus_contact_scan_frequency(
     focus_id: str,
@@ -126,6 +165,12 @@ async def update_focus_contact_scan_frequency(
     db: AsyncIOMotorDatabase = Depends(get_db_dependency),
 ):
     """Update scan frequency for a focus contact (1-30 days)"""
+    logger.info("=" * 80)
+    logger.info(f"🔥 SCANFREQUENCY ENDPOINT HIT!")
+    logger.info(f"  focus_id: {focus_id}")
+    logger.info(f"  user_id: {user_id}")
+    logger.info(f"  scan_frequency_days: {scan_frequency_days}")
+    logger.info("=" * 80)
     print(f"🔍 [BACKEND] scan-frequency endpoint HIT! focus_id={focus_id}, user_id={user_id}, days={scan_frequency_days}")
     from app.repository.LazarusRepository import LazarusRepository
     from datetime import datetime, timedelta
