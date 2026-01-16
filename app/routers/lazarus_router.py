@@ -157,7 +157,7 @@ async def diagnostic_test_patch(item_id: str, value: int = Query(default=1)):
     }
 
 
-@router.patch("/focus-contacts/{focus_id}/scanfrequency")
+@router.put("/focus-contacts/{focus_id}/scanfrequency")
 async def update_focus_contact_scan_frequency(
     focus_id: str,
     scan_frequency_days: int = Query(..., ge=1, le=30),
@@ -270,7 +270,7 @@ async def remove_company_monitor(
     return UriResponse.custom_response(result["message"], 200)
 
 
-@router.patch("/company-monitors/{monitor_id}/scanfrequency")
+@router.put("/company-monitors/{monitor_id}/scanfrequency")
 async def update_company_monitor_scan_frequency(
     monitor_id: str,
     scan_frequency_days: int = Query(..., ge=1, le=30),
