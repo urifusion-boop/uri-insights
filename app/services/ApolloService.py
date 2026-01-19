@@ -673,6 +673,11 @@ class ApolloService:
     ) -> Optional[List[LeadCreate]]:
         people = search_result.get("people", [])
 
+        print(f"[PEOPLE RESULT] Processing {len(people)} people from search result")
+        if people:
+            # Log first person's keys to understand response structure
+            print(f"[PEOPLE RESULT] First person keys: {list(people[0].keys())[:10]}")
+
         if not people or not user_id:
             return None
 
@@ -698,7 +703,8 @@ class ApolloService:
                 else None
             )
 
-            del person["employment_history"]
+            # Safely remove employment_history if it exists (may not be present in new API)
+            person.pop("employment_history", None)
             tasks.append(
                 ApolloService.perform_ai_lead_enrichment(lead_to_create_dict, person)
             )
