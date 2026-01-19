@@ -593,7 +593,8 @@ class ApolloService:
                 else None
             )
 
-            del person["employment_history"]
+            # Safely remove employment_history if it exists (may not be present in new API)
+            person.pop("employment_history", None)
             tasks.append(
                 ApolloService.perform_ai_lead_enrichment(lead_to_create_dict, person)
             )
