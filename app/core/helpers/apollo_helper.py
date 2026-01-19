@@ -167,7 +167,8 @@ class ApolloHelper:
     def get_url_for_search_request(lead_form: dict):
         form_type = lead_form.get("form_type")
         if form_type == LeadFormTypeEnum.PERSON.value:
-            base_url = f"{ApolloHelper.BASE_URL}/mixed_people/search"
+            # Updated to new Apollo API endpoint as per deprecation notice
+            base_url = f"{ApolloHelper.BASE_URL}/mixed_people/api_search"
         elif form_type == LeadFormTypeEnum.ORGANIZATION.value:
             base_url = f"{ApolloHelper.BASE_URL}/mixed_companies/search"
         else:

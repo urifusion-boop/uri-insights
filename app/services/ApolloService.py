@@ -84,12 +84,17 @@ class ApolloService:
             )
         search_result = {}
         url = ApolloHelper.get_url_for_search_request(lead_form)
+        print(f"[PEOPLE SEARCH] Calling Apollo API: {url[:150]}...")
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 url,
                 headers=ApolloService.HEADERS,
             )
+            print(f"[PEOPLE SEARCH] Apollo API response status: {response.status_code}")
+            if response.status_code != 200:
+                print(f"[PEOPLE SEARCH] Error response: {response.text}")
             search_result = ApolloService._process_response(response)
+        print(f"[PEOPLE SEARCH] People in response: {len(search_result.get('people', []))}")
         return search_result
 
     @staticmethod
