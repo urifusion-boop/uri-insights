@@ -695,3 +695,108 @@ class LeadFollowUpMessagePromptEnum(Enum):
 
         Output only the message text that the business could send to the lead.
     """
+
+
+class LazarusPrompt(Enum):
+    """Prompts for Lazarus Protocol - Resurrection Signal Detection"""
+    
+    ANALYZE_BUYING_SIGNALS = """
+You are analyzing social media posts/tweets to detect buying signals for the Lazarus Protocol.
+
+Context:
+- Person: {contact_name}
+- Company: {current_company}
+- Industry Keywords: {keywords}
+- Signal Types to Detect: {signal_types}
+
+Tweets to analyze:
+{tweets}
+
+Signal Type Definitions:
+- "pain": Expressing frustration, complaints, problems with current tools/solutions
+- "switch": Looking for alternatives, considering switching, asking for recommendations
+- "hiring": Company is hiring, expanding team, job postings
+- "funding": Company received investment, raised capital, announced funding
+
+Task:
+Analyze the tweets and determine if ANY of the specified signal types are present.
+Consider:
+1. Does the content mention any of the industry keywords?
+2. Does it express pain points or dissatisfaction?
+3. Is the person asking for recommendations or alternatives?
+4. Is there indication of budget/buying authority?
+5. Are there hiring or funding announcements?
+
+Return a JSON object with:
+{{
+    "signal_detected": boolean,
+    "signal_type": "pain" | "switch" | "hiring" | "funding" | null,
+    "confidence": 0.0 to 1.0,
+    "evidence": "quote from tweet that triggered detection",
+    "reason": "brief explanation of why this is a buying signal"
+}}
+
+Only return TRUE if you have high confidence (>0.7) that this is a genuine buying signal.
+"""
+
+    GENERATE_PITCH = """
+You are generating a personalized sales pitch for a resurrected lead in the Lazarus Protocol.
+
+Context:
+- Contact: {contact_name}
+- Current Company: {current_company}
+- Alert Type: {alert_type}
+- Alert Message: {alert_message}
+- Evidence: {evidence}
+- Your Business: {business_context}
+
+Task:
+Generate a short, personalized pitch (2-3 sentences max) that:
+1. References the specific signal detected (job change, pain point, etc.)
+2. Shows you understand their situation
+3. Offers clear value proposition
+4. Includes a soft call-to-action
+
+Tone: Professional, helpful, not salesy. Sound like a human reaching out, not a template.
+
+Example for job change:
+"Congrats on the new role at {company}! As you're building out your team, thought our {solution} might be helpful - we've helped similar companies reduce {pain_point} by 40%. Happy to share a quick demo if useful."
+
+Generate the pitch:
+"""
+
+    EXTRACT_KEYWORDS_FROM_POST = """
+You are extracting industry keywords from a social media post to set up monitoring in the Lazarus Protocol.
+
+Post Content:
+{post_content}
+
+Additional Context (if available):
+- Bio: {bio}
+- Company: {company}
+- Job Title: {job_title}
+- Signal Types User Cares About: {signal_types}
+
+Task:
+Extract 5-8 relevant keywords that would be useful for monitoring this person's activity for buying signals.
+
+Consider:
+1. Company names mentioned
+2. Technologies, tools, or solutions discussed
+3. Industry-specific terms
+4. Problems or pain points mentioned
+5. Competitor names
+6. If user cares about "funding" signals: include investor/VC terms
+7. If user cares about "hiring" signals: include role/department terms
+8. If user cares about "pain" signals: include problem keywords
+9. If user cares about "switch" signals: include alternative/competitor terms
+
+Return a JSON object:
+{{
+    "keywords": ["keyword1", "keyword2", ...],
+    "confidence": 0.0 to 1.0,
+    "reasoning": "brief explanation of why these keywords were chosen"
+}}
+
+Focus on keywords that will help detect future buying signals, not just describe the current post.
+"""

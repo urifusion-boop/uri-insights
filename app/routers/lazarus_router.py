@@ -15,6 +15,8 @@ from app.domain.schemas.lazarus_schema import (
     LazarusAlertStatusEnum,
     CSVUploadRow,
     DetectionRulesUpdate,
+    KeywordExtractionRequest,
+    KeywordExtractionResult,
 )
 
 # Configure logging
@@ -627,6 +629,77 @@ async def get_auto_detection_history(
         200,
         [jsonable_encoder(record) for record in history]
     )
+
+
+# ============ AI KEYWORD EXTRACTION ============
+@router.post("/extract-keywords")
+async def extract_keywords(
+    request: KeywordExtractionRequest,
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Extract industry keywords from profile/post data using AI
+    This endpoint helps auto-generate keywords for Paste & Go and CSV uploads
+    """
+    from app.services.AIService import AIService
+    from app.domain.enums.ai_prompt import LazarusPrompt
+
+    try:
+        # Build context from provided data
+        context_parts = []
+        if request.name:
+            context_parts.append(f"Name: {request.name}")
+        if request.title:
+            context_parts.append(f"Title: {request.title}")
+        if request.company:
+            context_parts.append(f"Company: {request.company}")
+        if request.bio:
+            context_parts.append(f"Bio: {request.bio}")
+        if request.recent_post:
+            context_parts.append(f"Recent Post: {request.recent_post}")
+
+        context = "\n".join(context_parts)
+
+        if not context:
+            return UriResponse.custom_response(
+                "No data provided for keyword extraction",
+                400,
+            )
+
+        # Build AI prompt
+        prompt = LazarusPrompt.EXTRACT_KEYWORDS_FROM_POST.value.format(
+            context=context,
+            signal_types=", ".join(request.signal_types)
+        )
+
+        # Get AI analysis
+        ai_model = AIService.build_ai_model([
+            AIService.construct_user_prompt(prompt)
+        ])
+
+        ai_response = await AIService.structured_chat_completion(
+            ai_model, KeywordExtractionResult
+        )
+
+        result = AIService.extract_ai_result(ai_response)
+
+        return UriResponse.custom_response(
+            "Keywords extracted successfully",
+            200,
+            {
+                "keywords": result.keywords,
+                "confidence": result.confidence,
+                "reasoning": result.reasoning
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"Keyword extraction failed: {e}")
+        return UriResponse.custom_response(
+            f"Keyword extraction failed: {str(e)}",
+            500
+        )
 
 
 # ============ ANALYTICS ============

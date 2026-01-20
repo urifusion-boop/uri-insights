@@ -356,13 +356,14 @@ class LazarusMetrics(BaseModel):
 # ========================================
 
 class DetectionRules(BaseModel):
-    """Rules for auto-detecting dead leads"""
+    """Rules for auto-detecting dead leads and monitoring buying signals"""
     no_response_days: int = 30  # Mark dead if no activity in X days
     status_unchanged_days: Optional[int] = 60  # Mark dead if status unchanged
     min_contact_attempts: int = 2  # Minimum contact attempts required
     exclude_statuses: List[str] = ["Qualified", "Converted"]  # Never auto-mark these
     auto_add_to_lazarus: bool = False  # Auto-add to Lazarus monitoring
     monitor_type: str = "focus_contact"  # "focus_contact" or "company_monitor"
+    signal_types: List[str] = ["funding", "hiring", "pain", "switch"]  # Buying signals to monitor
 
     class Config:
         extra = "forbid"
@@ -416,3 +417,33 @@ class ScanResponse(BaseModel):
 
     class Config:
         json_encoders = {datetime: lambda v: v.isoformat() if v else None}
+
+
+# ========================================
+# AI RESPONSE MODELS
+# ========================================
+
+class BuyingSignalAnalysis(BaseModel):
+    """AI analysis result for buying signal detection"""
+    signal_detected: bool
+    signal_type: Optional[str] = None  # "pain", "switch", "hiring", "funding"
+    confidence: float
+    evidence: Optional[str] = None
+    reason: Optional[str] = None
+
+
+class KeywordExtractionResult(BaseModel):
+    """AI result for keyword extraction from posts"""
+    keywords: List[str]
+    confidence: float
+    reasoning: Optional[str] = None
+
+
+class KeywordExtractionRequest(BaseModel):
+    """Request schema for keyword extraction"""
+    name: Optional[str] = None
+    bio: Optional[str] = None
+    company: Optional[str] = None
+    title: Optional[str] = None
+    recent_post: Optional[str] = None
+    signal_types: List[str] = ["pain", "switch", "hiring", "funding"]

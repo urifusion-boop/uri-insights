@@ -193,6 +193,18 @@ class LazarusMonitoringService:
         Analyze focus contact for signals
         PRD Section 5.1: Detection Logic
         """
+        # Fetch user's signal preferences from their settings
+        # Default to all signal types if no settings found
+        user_signal_preferences = ["pain", "switch", "hiring", "funding"]
+
+        try:
+            # Try to get user's AutoDetectionSettings
+            settings = await db["auto_detection_settings"].find_one({"user_id": contact.user_id})
+            if settings and settings.get("detection_rules", {}).get("signal_types"):
+                user_signal_preferences = settings["detection_rules"]["signal_types"]
+        except Exception as e:
+            logger.warning(f"Could not fetch user signal preferences, using defaults: {e}")
+
         # Check for bio changes (job exit detection)
         bio_changed = False
         new_bio_text = None
@@ -210,27 +222,48 @@ class LazarusMonitoringService:
 
         # Analyze tweets for buying signals using AI
         if tweets:
-            buying_intent_detected = await LazarusMonitoringService._detect_buying_intent(
-                db, tweets, contact.industry_keywords
+            signal_analysis = await LazarusMonitoringService._detect_buying_intent(
+                db, contact, tweets, user_signal_preferences
             )
 
-            if buying_intent_detected:
-                # Create BUYING_INTENT alert
+            if signal_analysis:
+                # Map signal_type to alert_type
+                signal_type_map = {
+                    "pain": LazarusAlertTypeEnum.BUYING_INTENT,
+                    "switch": LazarusAlertTypeEnum.BUYING_INTENT,
+                    "hiring": LazarusAlertTypeEnum.HIRING_SPREE,
+                    "funding": LazarusAlertTypeEnum.CASH_INJECTION,
+                }
+
+                alert_type = signal_type_map.get(
+                    signal_analysis.get("signal_type", "pain"),
+                    LazarusAlertTypeEnum.BUYING_INTENT
+                )
+
+                # Generate AI-powered pitch
+                suggested_pitch = await LazarusMonitoringService._generate_ai_pitch(
+                    db, contact, signal_analysis, tweets
+                )
+
+                # Create alert with AI analysis
                 return {
                     "alert_id": str(uuid.uuid4()),
                     "user_id": contact.user_id,
                     "source_type": LazarusMonitorTypeEnum.FOCUS_CONTACT,
                     "source_id": contact.focus_id,
-                    "alert_type": LazarusAlertTypeEnum.BUYING_INTENT,
-                    "alert_message": f"{contact.name} is showing buying intent signals",
+                    "alert_type": alert_type,
+                    "alert_message": signal_analysis.get("reason", f"{contact.name} is showing buying intent signals"),
                     "evidence": {
                         "detected_date": datetime.utcnow().isoformat(),
-                        "signal_source": "Twitter/X",
+                        "signal_source": "Twitter/X (AI Analysis)",
+                        "signal_type": signal_analysis.get("signal_type"),
+                        "confidence": signal_analysis.get("confidence"),
+                        "evidence_text": signal_analysis.get("evidence"),
                         "tweets": [t.get("text", "") for t in tweets[:3]],
                         "old_value": None,
                         "new_value": None,
                     },
-                    "suggested_pitch": None,  # TODO: Generate AI pitch
+                    "suggested_pitch": suggested_pitch,
                     "status": LazarusAlertStatusEnum.NEW,
                     "resurrected_lead_id": contact.source_lead_id,
                     "created_date": datetime.utcnow(),
@@ -241,20 +274,134 @@ class LazarusMonitoringService:
 
     @staticmethod
     async def _detect_buying_intent(
-        db: AsyncIOMotorDatabase, tweets: List[Dict[str, Any]], keywords: List[str]
-    ) -> bool:
-        """Use AI to detect buying intent in tweets"""
-        # TODO: Integrate with existing IntentAnalysisService
-        # For now, simple keyword matching
+        db: AsyncIOMotorDatabase,
+        contact: FocusContact,
+        tweets: List[Dict[str, Any]],
+        user_signal_preferences: List[str]
+    ) -> Optional[Dict[str, Any]]:
+        """Use AI to detect buying intent in tweets based on user's signal preferences"""
+        if not tweets:
+            return None
+
+        # Import here to avoid circular dependency
+        from app.services.AIService import AIService
+        from app.domain.enums.ai_prompt import LazarusPrompt
+        from app.domain.schemas.lazarus_schema import BuyingSignalAnalysis
+
+        # Format tweets for AI analysis
+        tweet_texts = "\n\n".join([
+            f"Tweet {i+1}: {tweet.get('text', '')}"
+            for i, tweet in enumerate(tweets[:5])  # Analyze up to 5 recent tweets
+        ])
+
+        # Build AI prompt with user's signal preferences
+        prompt = LazarusPrompt.ANALYZE_BUYING_SIGNALS.value.format(
+            contact_name=contact.name,
+            current_company=contact.current_company or "Unknown",
+            keywords=", ".join(contact.industry_keywords),
+            signal_types=", ".join(user_signal_preferences),
+            tweets=tweet_texts
+        )
+
+        # Get AI analysis
+        try:
+            ai_model = AIService.build_ai_model([
+                AIService.construct_user_prompt(prompt)
+            ])
+
+            ai_response = await AIService.structured_chat_completion(
+                ai_model, BuyingSignalAnalysis
+            )
+
+            result = AIService.extract_ai_result(ai_response)
+
+            # Only return if signal detected with high confidence
+            if result.signal_detected and result.confidence >= 0.7:
+                return {
+                    "signal_type": result.signal_type,
+                    "confidence": result.confidence,
+                    "evidence": result.evidence,
+                    "reason": result.reason
+                }
+
+        except Exception as e:
+            logger.error(f"AI buying intent detection failed: {e}")
+            # Fallback to simple keyword matching if AI fails
+            return await LazarusMonitoringService._fallback_keyword_detection(
+                tweets, contact.industry_keywords
+            )
+
+        return None
+
+    @staticmethod
+    async def _fallback_keyword_detection(
+        tweets: List[Dict[str, Any]], keywords: List[str]
+    ) -> Optional[Dict[str, Any]]:
+        """Fallback: Simple keyword matching if AI fails"""
+        buying_signals = ["looking for", "need", "recommend", "anyone know", "suggestions",
+                         "alternative", "switch", "considering", "evaluate"]
+
         for tweet in tweets:
             text = tweet.get("text", "").lower()
             for keyword in keywords:
                 if keyword.lower() in text:
-                    # Check for buying signals: "looking for", "need", "recommend", etc.
-                    buying_signals = ["looking for", "need", "recommend", "anyone know", "suggestions"]
                     if any(signal in text for signal in buying_signals):
-                        return True
-        return False
+                        return {
+                            "signal_type": "switch",
+                            "confidence": 0.6,
+                            "evidence": text[:200],
+                            "reason": "Keyword match with buying signal phrase"
+                        }
+        return None
+
+    @staticmethod
+    async def _generate_ai_pitch(
+        db: AsyncIOMotorDatabase,
+        contact: FocusContact,
+        signal_analysis: Dict[str, Any],
+        tweets: List[Dict[str, Any]]
+    ) -> Optional[str]:
+        """Generate AI-powered personalized pitch based on signal analysis"""
+        from app.services.AIService import AIService
+        from app.domain.enums.ai_prompt import LazarusPrompt
+
+        try:
+            # Format tweets for context
+            tweet_texts = "\n".join([
+                f"- {tweet.get('text', '')}"
+                for tweet in tweets[:3]
+            ])
+
+            # Build AI prompt for pitch generation
+            prompt = LazarusPrompt.GENERATE_PITCH.value.format(
+                contact_name=contact.name,
+                current_company=contact.current_company or "their company",
+                signal_type=signal_analysis.get("signal_type", "unknown"),
+                evidence=signal_analysis.get("evidence", ""),
+                recent_tweets=tweet_texts
+            )
+
+            # Get AI-generated pitch
+            ai_model = AIService.build_ai_model([
+                AIService.construct_user_prompt(prompt)
+            ])
+
+            ai_response = await AIService.chat_completion(ai_model)
+            pitch = AIService.extract_ai_result(ai_response)
+
+            return pitch if pitch else None
+
+        except Exception as e:
+            logger.error(f"AI pitch generation failed: {e}")
+            # Fallback to template-based pitch
+            signal_type = signal_analysis.get("signal_type", "switch")
+            fallback_pitches = {
+                "pain": f"Hi {contact.name}, I noticed you mentioned some challenges. Would love to discuss how we might help.",
+                "switch": f"Hi {contact.name}, saw you're exploring alternatives. Happy to share how we've helped similar companies.",
+                "hiring": f"Hi {contact.name}, congrats on the team expansion! Let's discuss how we can support your growth.",
+                "funding": f"Hi {contact.name}, congratulations on the funding! Great time to discuss scaling together."
+            }
+            return fallback_pitches.get(signal_type, f"Hi {contact.name}, let's reconnect!")
 
     # ============ COMPANY MONITOR SCANNING ============
     @staticmethod
