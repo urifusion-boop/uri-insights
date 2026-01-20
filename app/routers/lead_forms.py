@@ -424,6 +424,57 @@ async def cancel_lead_generation_job(
         )
 
 
+@router.post("/conversation-search/job-status/{job_id}/force-cancel")
+async def force_cancel_job(
+    job_id: str,
+    user_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency)
+):
+    """
+    FORCE-CANCEL a job immediately without waiting for worker.
+    Use this when job is stuck and won't respond to normal cancellation.
+    """
+    from app.repository.LeadGenerationJobRepository import LeadGenerationJobRepository
+
+    try:
+        # Verify job exists and belongs to user
+        job = await LeadGenerationJobRepository.get_job_status(db, job_id)
+
+        if not job:
+            return UriResponse.get_error_response("Job not found", 404)
+
+        if job["user_id"] != user_id:
+            return UriResponse.get_error_response(
+                "You don't have permission to cancel this job", 403
+            )
+
+        # Force-cancel immediately regardless of status
+        await LeadGenerationJobRepository.mark_cancelled(
+            db=db,
+            job_id=job_id,
+            partial_stats=job.get("stats", {}),
+            processed_count=job.get("progress", 0)
+        )
+
+        print(f"⚡ FORCE-CANCELLED job {job_id} by user request")
+
+        return UriResponse.get_single_data_response(
+            "Job force-cancelled successfully",
+            {
+                "job_id": job_id,
+                "status": "cancelled",
+                "message": "Job was force-cancelled immediately",
+                "stats": job.get("stats", {})
+            }
+        )
+
+    except Exception as e:
+        print(f"❌ Error force-cancelling job {job_id}: {str(e)}")
+        return UriResponse.get_error_response(
+            f"Failed to force-cancel job: {str(e)}", 500
+        )
+
+
 @router.post("/auto-populate")
 async def auto_populate_lead_form(
     request: AutoPopulationQuery,
