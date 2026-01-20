@@ -355,12 +355,12 @@ async def cancel_lead_generation_job(
             )
 
         if current_status == "cancelling":
-            # Check if job has been cancelling for too long (> 30 seconds)
+            # Check if job has been cancelling for too long (> 5 seconds)
             from datetime import datetime, timedelta
             cancellation_requested_at = job.get("cancellation_requested_at")
             if cancellation_requested_at:
                 time_since_cancellation = datetime.utcnow() - cancellation_requested_at
-                if time_since_cancellation > timedelta(seconds=30):
+                if time_since_cancellation > timedelta(seconds=5):
                     # Force cancel - worker likely crashed or never picked up
                     print(f"⚠️ Force-cancelling job {job_id} (stuck in cancelling for {time_since_cancellation.seconds}s)")
                     await LeadGenerationJobRepository.mark_cancelled(
