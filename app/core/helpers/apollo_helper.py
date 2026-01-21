@@ -178,25 +178,43 @@ class ApolloHelper:
 
     @staticmethod
     def get_enrich_person_params_from_lead(lead: dict):
+        apollo_id = lead.get("apollo_id")
+
+        # If we have apollo_id, use it directly for reliable matching
+        if apollo_id:
+            print(f"[ENRICH PARAMS] Using Apollo ID for enrichment: {apollo_id}")
+            return {"id": apollo_id}
+
+        # Otherwise, build params from lead data
         # Extract domain from website_url
         website_url = lead.get("website_url") or ""
         parsed_domain = (
             urlparse(website_url).netloc.replace("www.", "") if website_url else ""
         )
 
+        # Build name, filtering out None/"None" values
+        first_name = lead.get('first_name', '') or ''
+        last_name = lead.get('last_name', '') or ''
+        # Don't include "None" string as a name
+        if last_name == "None":
+            last_name = ''
+        full_name = f"{first_name} {last_name}".strip()
+
         params = {
-            "name": f"{lead.get('first_name', '')} {lead.get('last_name', '')}".strip(),
+            "name": full_name if full_name else None,
             "organization_name": lead.get("company_name", ""),
             "domain": parsed_domain,
             "linkedin_url": lead.get("linkedin_url", ""),
         }
 
         print(f"[ENRICH PARAMS] Building params for lead:")
-        print(f"  first_name: {lead.get('first_name')}")
-        print(f"  last_name: {lead.get('last_name')}")
+        print(f"  first_name: {first_name}")
+        print(f"  last_name: {last_name}")
+        print(f"  full_name: {full_name}")
         print(f"  company_name: {lead.get('company_name')}")
+        print(f"  website_url: {website_url}")
+        print(f"  parsed_domain: {parsed_domain}")
         print(f"  linkedin_url: {lead.get('linkedin_url')}")
-        print(f"  apollo_id: {lead.get('apollo_id')}")
         print(f"[ENRICH PARAMS] Final params: {params}")
 
         return params
