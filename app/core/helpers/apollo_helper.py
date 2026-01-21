@@ -184,12 +184,22 @@ class ApolloHelper:
             urlparse(website_url).netloc.replace("www.", "") if website_url else ""
         )
 
-        return {
+        params = {
             "name": f"{lead.get('first_name', '')} {lead.get('last_name', '')}".strip(),
             "organization_name": lead.get("company_name", ""),
             "domain": parsed_domain,
             "linkedin_url": lead.get("linkedin_url", ""),
         }
+
+        print(f"[ENRICH PARAMS] Building params for lead:")
+        print(f"  first_name: {lead.get('first_name')}")
+        print(f"  last_name: {lead.get('last_name')}")
+        print(f"  company_name: {lead.get('company_name')}")
+        print(f"  linkedin_url: {lead.get('linkedin_url')}")
+        print(f"  apollo_id: {lead.get('apollo_id')}")
+        print(f"[ENRICH PARAMS] Final params: {params}")
+
+        return params
 
     @staticmethod
     def get_url_for_enrich_person_request(

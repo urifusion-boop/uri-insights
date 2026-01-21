@@ -265,9 +265,19 @@ class ApolloService:
         if not email:
             response = await ApolloService.enrich_person(lead, reveal_email=True)
             email = response.get("person", {}).get("email", "")
+            email_status = response.get("person", {}).get("email_status", "")
+            revealed = response.get("person", {}).get("revealed_for_current_team", False)
+
             print(f"[EMAIL ENRICHMENT] Lead: {lead.get('username', 'Unknown')}")
             print(f"[EMAIL ENRICHMENT] Apollo Response: {response}")
             print(f"[EMAIL ENRICHMENT] Extracted Email: {email}")
+            print(f"[EMAIL ENRICHMENT] Email Status: {email_status}")
+            print(f"[EMAIL ENRICHMENT] Revealed for team: {revealed}")
+
+            # If no email but revealed, Apollo doesn't have it in database
+            if not email and revealed:
+                print(f"[EMAIL ENRICHMENT] ⚠️  Apollo has no email for this contact in their database")
+                email = "NOT_IN_APOLLO_DB"
 
         # Normalize payload
         email = email or "UNAVAILABLE"
@@ -336,9 +346,15 @@ class ApolloService:
         url = ApolloHelper.get_url_for_enrich_person_request(
             lead, reveal_email, reveal_phone, webhook_url
         )
+        print(f"[APOLLO ENRICH] URL: {url}")
+        print(f"[APOLLO ENRICH] Lead: {lead.get('username', 'Unknown')}, Apollo ID: {lead.get('apollo_id', 'None')}")
+        print(f"[APOLLO ENRICH] reveal_email={reveal_email}, reveal_phone={reveal_phone}")
         async with httpx.AsyncClient() as client:
             response = await client.post(url, headers=ApolloService.HEADERS)
-            return ApolloService._process_response(response)
+            result = ApolloService._process_response(response)
+            print(f"[APOLLO ENRICH] Response status: {response.status_code}")
+            print(f"[APOLLO ENRICH] Response data: {result}")
+            return result
 
     @staticmethod
     async def enrich_people_bulk(
