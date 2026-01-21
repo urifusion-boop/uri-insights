@@ -265,9 +265,13 @@ class ApolloService:
         if not email:
             response = await ApolloService.enrich_person(lead, reveal_email=True)
             email = response.get("person", {}).get("email", "")
+            print(f"[EMAIL ENRICHMENT] Lead: {lead.get('username', 'Unknown')}")
+            print(f"[EMAIL ENRICHMENT] Apollo Response: {response}")
+            print(f"[EMAIL ENRICHMENT] Extracted Email: {email}")
 
         # Normalize payload
         email = email or "UNAVAILABLE"
+        print(f"[EMAIL ENRICHMENT] Final Email Value: {email}")
         payload = {"person": {"email": email}} if isinstance(email, str) else email
 
         # Process and persist
@@ -300,12 +304,17 @@ class ApolloService:
             )
         # Trigger apollo webhook process if phone number isn't already in DB
         if not phone:
+            print(f"[PHONE ENRICHMENT] Lead: {lead.get('username', 'Unknown')} - No phone in DB, calling Apollo API...")
             response = await ApolloService.enrich_person(
                 lead, reveal_phone=True, webhook_url=webhook_url
             )
+            print(f"[PHONE ENRICHMENT] Apollo Response: {response}")
             await LeadRepository.update_lead(
                 db, lead_id, LeadUpdate(phone="PROCESSING")
             )
+            print(f"[PHONE ENRICHMENT] Phone set to PROCESSING (awaiting webhook)")
+        else:
+            print(f"[PHONE ENRICHMENT] Lead: {lead.get('username', 'Unknown')} - Phone found in DB: {phone}")
 
         return await ApolloService._process_person_phone_enrichment_response(
             db, lead_id, phone, response
@@ -537,12 +546,14 @@ class ApolloService:
         db: AsyncIOMotorDatabase, lead_id: str, response: dict
     ):
         email = response.get("person", {}).get("email", "")
+        print(f"[EMAIL SAVE] Lead ID: {lead_id}, Email being saved: {email}")
         if email:
             updated_lead = (
                 await LeadRepository.update_lead(
                     db, lead_id, LeadUpdate(lead_email=email)
                 )
             ).get("responseData", {})
+            print(f"[EMAIL SAVE] Updated lead with email: {email}")
             if email != "UNAVAILABLE":
                 await UriTaskManagerService.update_user_feature_limit_specific_limit(
                     updated_lead.get("assigned_to", ""),
