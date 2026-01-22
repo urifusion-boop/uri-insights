@@ -301,7 +301,7 @@ class LazarusRepository:
         cursor = (
             db["lazarus_alerts"]
             .find(query)
-            .sort("created_date", -1)
+            .sort("created_at", -1)
             .skip(skip)
             .limit(limit)
         )

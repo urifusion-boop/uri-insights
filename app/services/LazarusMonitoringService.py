@@ -486,20 +486,15 @@ class LazarusMonitoringService:
                     "alert_type": alert_type,
                     "alert_message": signal_analysis.get("reason", f"{contact.name} is showing buying intent signals"),
                     "evidence": {
-                        "detected_date": datetime.utcnow().isoformat(),
                         "signal_source": signal_source,
                         "signal_type": signal_analysis.get("signal_type"),
                         "confidence": signal_analysis.get("confidence"),
                         "evidence_text": signal_analysis.get("evidence"),
-                        "tweets": all_content,  # Combined tweets + LinkedIn posts
-                        "old_value": None,
-                        "new_value": None,
+                        "tweet_text": signal_analysis.get("evidence"),  # Store evidence as tweet_text for compatibility
                     },
                     "suggested_pitch": suggested_pitch,
                     "status": LazarusAlertStatusEnum.NEW,
-                    "resurrected_lead_id": contact.source_lead_id,
-                    "created_date": datetime.utcnow(),
-                    "last_updated": datetime.utcnow(),
+                    "source_lead_id": contact.source_lead_id,
                 }
 
         return None
@@ -801,14 +796,15 @@ class LazarusMonitoringService:
                 else:
                     print(f"ℹ️  No buying signals detected")
 
-            # Update scan timestamps
+            # Update scan timestamps and alert count
             scan_date = datetime.utcnow()
             next_scan = scan_date + timedelta(days=contact.scan_frequency_days)
             await LazarusRepository.update_focus_contact(
                 db, focus_id, user_id, {
                     "last_scan_date": scan_date,
                     "next_scan_date": next_scan,
-                    "scan_count": contact.scan_count + 1
+                    "scan_count": contact.scan_count + 1,
+                    "alert_count": contact.alert_count + alerts_created
                 }
             )
 
