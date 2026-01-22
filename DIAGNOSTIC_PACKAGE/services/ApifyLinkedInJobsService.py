@@ -1,0 +1,281 @@
+"""
+ApifyLinkedInJobsService - Scrapes LinkedIn Jobs using Apify
+Pattern: Same as OpenAIApifyTwitterService but for job postings
+
+This service fetches job postings from LinkedIn Jobs using Apify actors.
+"""
+import asyncio
+from typing import List, Dict, Any, Optional
+from apify_client import ApifyClient
+import logging
+from datetime import datetime, timezone
+
+from app.core.config import settings
+
+logger = logging.getLogger(__name__)
+
+
+class ApifyLinkedInJobsService:
+    """
+    Service to fetch job postings from LinkedIn Jobs using Apify
+    Pattern: Same as OpenAIApifyTwitterService
+    """
+
+    def __init__(self):
+        """
+        Initialize the service with Apify client
+        """
+        if not settings.APIFY_API_TOKEN:
+            logger.warning("APIFY_API_TOKEN not configured. LinkedIn Jobs scraping will not work.")
+            self.apify_client = None
+        else:
+            self.apify_client = ApifyClient(settings.APIFY_API_TOKEN)
+
+    async def fetch_job_postings(
+        self,
+        search_query: str,
+        max_jobs: int = 15,
+        location: str = "Worldwide",
+        published_at: str = "Past Month",
+        solution_context: str = "",
+        infer_parameters: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Fetch job postings from LinkedIn Jobs using Apify with intelligent parameter inference
+
+        Args:
+            search_query: The search query (e.g., "DevOps Engineer")
+            max_jobs: Maximum number of jobs to fetch (default: 15)
+            location: Geographic location filter (default: "Worldwide")
+            published_at: Time filter (e.g., "Past Week", "Past Month", "Any Time")
+            solution_context: Solution description for intelligent inference
+            infer_parameters: Enable intelligent parameter inference (default: True)
+
+        Returns:
+            Dictionary containing jobs and metadata:
+            {
+                "success": True,
+                "total_jobs": 15,
+                "jobs": [{
+                    "title": "Senior Backend Engineer",
+                    "company": "TechCorp Ltd",
+                    "location": "Lagos, Nigeria",
+                    "description": "We are looking for...",
+                    "url": "https://linkedin.com/jobs/view/123",
+                    "posted_date": "2025-12-15T10:00:00Z",
+                    "salary": "$80,000 - $120,000"  # if available
+                }],
+                "search_query": "DevOps Engineer"
+            }
+        """
+        try:
+            # Check if client is initialized
+            if not self.apify_client:
+                return {
+                    "success": False,
+                    "error_message": "Apify client not initialized. Please configure APIFY_API_TOKEN.",
+                    "jobs": []
+                }
+
+            # Fetch jobs from Apify with inference
+            jobs_result = await self._fetch_jobs_from_apify(
+                search_query,
+                max_jobs,
+                location,
+                published_at,
+                solution_context,
+                infer_parameters
+            )
+
+            if not jobs_result["success"]:
+                return jobs_result
+
+            jobs = jobs_result["jobs"]
+
+            return {
+                "success": True,
+                "total_jobs": len(jobs),
+                "jobs": jobs,
+                "search_query": search_query
+            }
+
+        except Exception as e:
+            logger.error(f"Error in fetch_job_postings: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return {
+                "success": False,
+                "error_message": f"An error occurred: {str(e)}",
+                "jobs": []
+            }
+
+    async def _fetch_jobs_from_apify(
+        self,
+        search_query: str,
+        max_jobs: int,
+        location: str,
+        published_at: str = "Past Month",
+        solution_context: str = "",
+        infer_parameters: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Fetch job postings from Apify using LinkedIn Jobs scraper actor
+
+        Args:
+            search_query: Job search query
+            max_jobs: Maximum number of jobs to fetch
+            location: Geographic location
+
+        Returns:
+            Dictionary containing the fetched jobs
+        """
+        try:
+            # LinkedIn Jobs Scraper actor from Apify Store
+            # Actor: bebity/linkedin-jobs-scraper
+            # Docs: https://apify.com/bebity/linkedin-jobs-scraper
+            actor_id = "bebity/linkedin-jobs-scraper"
+
+            # Configure the base input for the actor
+            run_input = {
+                "keyword": search_query,
+                "maxItems": max_jobs,
+                "publishedAt": published_at,  # Time filter
+                "proxy": {
+                    "useApifyProxy": True,
+                    "apifyProxyGroups": ["RESIDENTIAL"]
+                }
+            }
+
+            # Only add location if specified (omit for worldwide search)
+            if location:
+                run_input["location"] = location
+
+            # Intelligently infer additional parameters from job keyword
+            if infer_parameters:
+                from app.services.JobBoardParameterHelper import infer_linkedin_parameters
+
+                inferred = infer_linkedin_parameters(search_query, solution_context)
+
+                # Add inferred parameters (only if they're not None)
+                if inferred.get("experience_level"):
+                    run_input["experienceLevel"] = inferred["experience_level"]
+                    logger.info(f"   🎯 Inferred experience level: {inferred['experience_level']}")
+
+                if inferred.get("on_site_remote"):
+                    run_input["workType"] = inferred["on_site_remote"]  # LinkedIn uses "workType" not "onSiteRemote"
+                    logger.info(f"   🏠 Inferred work arrangement: {inferred['on_site_remote']}")
+
+                if inferred.get("job_type"):
+                    run_input["contractType"] = inferred["job_type"]  # LinkedIn uses "contractType" not "jobType"
+                    logger.info(f"   📋 Inferred job type: {inferred['job_type']}")
+
+            # Run the actor in a thread to avoid blocking
+            location_display = location if location else "Worldwide"
+            logger.info(f"Starting Apify actor to fetch LinkedIn jobs for: {search_query} in {location_display}")
+
+            # Run actor synchronously in executor to avoid blocking event loop
+            loop = asyncio.get_event_loop()
+            run = await loop.run_in_executor(
+                None,
+                lambda: self.apify_client.actor(actor_id).call(run_input=run_input)
+            )
+
+            # Check if the run was successful
+            if run.get("status") != "SUCCEEDED":
+                error_msg = f"Apify actor run failed with status: {run.get('status', 'Unknown')}"
+                logger.error(error_msg)
+                return {
+                    "success": False,
+                    "error_message": error_msg,
+                    "jobs": []
+                }
+
+            # Get the results
+            items = []
+            try:
+                dataset_id = run["defaultDatasetId"]
+                for item in self.apify_client.dataset(dataset_id).iterate_items():
+                    items.append(item)
+
+                # Log the first item structure for debugging
+                if items:
+                    logger.debug(f"Sample LinkedIn job item structure: {list(items[0].keys())}")
+
+            except Exception as dataset_error:
+                logger.error(f"Error reading dataset: {str(dataset_error)}")
+                return {
+                    "success": False,
+                    "error_message": f"Failed to read results from Apify: {str(dataset_error)}",
+                    "jobs": []
+                }
+
+            # Process the results
+            jobs = []
+            for item in items[:max_jobs]:
+                try:
+                    # Extract job information (field names may vary by actor)
+                    job_data = {
+                        "title": item.get("title") or item.get("jobTitle") or "Unknown Title",
+                        "company": item.get("company") or item.get("companyName") or "Unknown Company",
+                        "location": item.get("location") or item.get("jobLocation") or location,
+                        "description": item.get("description") or item.get("jobDescription") or "",
+                        "url": item.get("url") or item.get("link") or item.get("jobUrl") or "",
+                        "posted_date": self._parse_posted_date(item.get("postedDate") or item.get("publishedAt")),
+                        "salary": item.get("salary") or item.get("salaryRange"),
+                        "source": "LinkedIn Jobs"
+                    }
+
+                    # Only add jobs with valid URLs and descriptions
+                    if job_data["url"] and job_data["description"]:
+                        jobs.append(job_data)
+                    else:
+                        logger.warning(f"Skipping job with missing URL or description: {job_data['title']}")
+
+                except Exception as item_error:
+                    logger.warning(f"Error processing job item: {str(item_error)}")
+                    continue
+
+            logger.info(f"Successfully fetched {len(jobs)} LinkedIn jobs")
+
+            return {
+                "success": True,
+                "jobs": jobs
+            }
+
+        except Exception as e:
+            logger.error(f"Error fetching jobs from Apify: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return {
+                "success": False,
+                "error_message": str(e),
+                "jobs": []
+            }
+
+    def _parse_posted_date(self, date_str: Optional[str]) -> str:
+        """
+        Parse posted date from various formats to ISO format
+
+        Args:
+            date_str: Date string from job posting
+
+        Returns:
+            ISO formatted date string or current date if parsing fails
+        """
+        if not date_str:
+            return datetime.now(timezone.utc).isoformat()
+
+        try:
+            # Try ISO format first
+            if "T" in date_str:
+                return date_str
+
+            # Try common date formats
+            # Add more formats as needed based on actual data
+            from dateutil import parser
+            parsed_date = parser.parse(date_str)
+            return parsed_date.isoformat()
+
+        except Exception as e:
+            logger.warning(f"Could not parse date '{date_str}': {str(e)}")
+            return datetime.now(timezone.utc).isoformat()

@@ -72,47 +72,9 @@ class LazarusMonitoringService:
         for user_id, user_contacts in user_batches.items():
             print(f"📦 Processing batch for user {user_id}: {len(user_contacts)} contacts")
 
-            # Separate contacts by monitoring source intelligently
-            from app.core.helpers.social_url_helper import SocialURLHelper
-
-            contacts_with_linkedin = []
-            contacts_with_twitter = []
-            contacts_with_tiktok = []
-            contacts_with_facebook = []
-
-            for contact in user_contacts:
-                # Priority 1: Explicit URL fields
-                if contact.linkedin_url:
-                    contacts_with_linkedin.append(contact)
-                elif contact.twitter_url:
-                    contacts_with_twitter.append(contact)
-                # Priority 2: Detect from social_handle
-                elif contact.social_handle:
-                    url_type = SocialURLHelper.detect_url_type(contact.social_handle)
-                    if url_type == "linkedin":
-                        contacts_with_linkedin.append(contact)
-                    elif url_type == "twitter":
-                        contacts_with_twitter.append(contact)
-                    elif url_type == "facebook":
-                        contacts_with_facebook.append(contact)
-                    elif url_type == "instagram":
-                        contacts_with_tiktok.append(contact)  # TikTok for now, will add Instagram later
-
-            # Log routing decision
-            print(f"🔀 Contact Routing:")
-            print(f"   LinkedIn: {len(contacts_with_linkedin)}, Twitter: {len(contacts_with_twitter)}, TikTok: {len(contacts_with_tiktok)}, Facebook: {len(contacts_with_facebook)}")
-            if contacts_with_linkedin:
-                for c in contacts_with_linkedin:
-                    print(f"   ✅ {c.name} → LinkedIn Scraper")
-            if contacts_with_twitter:
-                for c in contacts_with_twitter:
-                    print(f"   ✅ {c.name} → Twitter Scraper")
-            if contacts_with_tiktok:
-                for c in contacts_with_tiktok:
-                    print(f"   ✅ {c.name} → TikTok Scraper")
-            if contacts_with_facebook:
-                for c in contacts_with_facebook:
-                    print(f"   ✅ {c.name} → Facebook Scraper")
+            # Separate contacts by monitoring source (Twitter vs LinkedIn)
+            contacts_with_twitter = [c for c in user_contacts if c.social_handle or c.twitter_url]
+            contacts_with_linkedin = [c for c in user_contacts if c.linkedin_url]
 
             # Fetch Twitter posts (existing Origami method)
             twitter_results = []
@@ -131,41 +93,26 @@ class LazarusMonitoringService:
                         db, handles, all_keywords
                     )
 
-            # Fetch LinkedIn posts
+            # Fetch LinkedIn posts (new method)
             linkedin_posts_by_focus_id = {}
             if contacts_with_linkedin:
                 linkedin_posts_by_focus_id = await LazarusMonitoringService._fetch_linkedin_posts(
                     db, contacts_with_linkedin
                 )
 
-            # Fetch TikTok posts
-            tiktok_posts_by_focus_id = {}
-            if contacts_with_tiktok:
-                tiktok_posts_by_focus_id = await LazarusMonitoringService._fetch_tiktok_posts(
-                    db, contacts_with_tiktok
-                )
-
-            # Fetch Facebook posts
-            facebook_posts_by_focus_id = {}
-            if contacts_with_facebook:
-                facebook_posts_by_focus_id = await LazarusMonitoringService._fetch_facebook_posts(
-                    db, contacts_with_facebook
-                )
-
-            # Analyze each contact's results from ALL platforms
+            # Analyze each contact's results (both Twitter and LinkedIn)
             for contact in user_contacts:
-                # Get posts from each platform
-                contact_tweets = [r for r in twitter_results if r.get("handle") == contact.social_handle]
+                # Get Twitter results for this contact
+                contact_tweets = [
+                    r for r in twitter_results if r.get("handle") == contact.social_handle
+                ]
+
+                # Get LinkedIn posts for this contact
                 contact_linkedin_posts = linkedin_posts_by_focus_id.get(contact.focus_id, [])
-                contact_tiktok_posts = tiktok_posts_by_focus_id.get(contact.focus_id, [])
-                contact_facebook_posts = facebook_posts_by_focus_id.get(contact.focus_id, [])
 
-                # Combine all posts for analysis
-                all_posts = contact_linkedin_posts + contact_tiktok_posts + contact_facebook_posts
-
-                # Detect job changes and buying signals from ALL sources
+                # Detect job changes and buying signals from both sources
                 alert = await LazarusMonitoringService._analyze_focus_contact(
-                    db, contact, contact_tweets, all_posts
+                    db, contact, contact_tweets, contact_linkedin_posts
                 )
 
                 if alert:
@@ -310,68 +257,6 @@ class LazarusMonitoringService:
             logger.error(f"Error in _fetch_linkedin_posts: {str(e)}")
             import traceback
             traceback.print_exc()
-            return {}
-
-    @staticmethod
-    async def _fetch_tiktok_posts(
-        db: AsyncIOMotorDatabase, contacts_with_tiktok: List[FocusContact]
-    ) -> Dict[str, List[Dict[str, Any]]]:
-        """Fetch TikTok posts for contacts"""
-        if not contacts_with_tiktok:
-            return {}
-
-        try:
-            from app.services.OpenAIApifyTiktokService import OpenAIApifyTiktokService
-            tiktok_service = OpenAIApifyTiktokService()
-            posts_by_focus_id = {}
-
-            logger.info(f"🔍 Fetching TikTok posts for {len(contacts_with_tiktok)} contacts")
-
-            for contact in contacts_with_tiktok:
-                # Use keywords as hashtags for TikTok search
-                if contact.industry_keywords:
-                    keyword = contact.industry_keywords[0]  # Use first keyword
-                    result = await tiktok_service.fetch_posts_with_analysis(keyword, max_posts=10)
-                    if result.get("success"):
-                        posts_by_focus_id[contact.focus_id] = result.get("posts", [])
-
-            total_posts = sum(len(posts) for posts in posts_by_focus_id.values())
-            logger.info(f"✅ Fetched {total_posts} TikTok posts from {len(posts_by_focus_id)} contacts")
-            return posts_by_focus_id
-
-        except Exception as e:
-            logger.error(f"Error in _fetch_tiktok_posts: {str(e)}")
-            return {}
-
-    @staticmethod
-    async def _fetch_facebook_posts(
-        db: AsyncIOMotorDatabase, contacts_with_facebook: List[FocusContact]
-    ) -> Dict[str, List[Dict[str, Any]]]:
-        """Fetch Facebook posts for contacts"""
-        if not contacts_with_facebook:
-            return {}
-
-        try:
-            from app.services.OpenAIApifyFacebookService import OpenAIApifyFacebookService
-            facebook_service = OpenAIApifyFacebookService()
-            posts_by_focus_id = {}
-
-            logger.info(f"🔍 Fetching Facebook posts for {len(contacts_with_facebook)} contacts")
-
-            for contact in contacts_with_facebook:
-                # Use keywords for Facebook search
-                if contact.industry_keywords:
-                    keyword = " ".join(contact.industry_keywords[:2])  # Use first 2 keywords
-                    result = await facebook_service.fetch_posts_with_analysis(keyword, max_posts=10)
-                    if result.get("success"):
-                        posts_by_focus_id[contact.focus_id] = result.get("posts", [])
-
-            total_posts = sum(len(posts) for posts in posts_by_focus_id.values())
-            logger.info(f"✅ Fetched {total_posts} Facebook posts from {len(posts_by_focus_id)} contacts")
-            return posts_by_focus_id
-
-        except Exception as e:
-            logger.error(f"Error in _fetch_facebook_posts: {str(e)}")
             return {}
 
     @staticmethod

@@ -129,9 +129,7 @@ class OpenAIApifyTwitterService:
             Dictionary containing the fetched tweets
         """
         # Use a popular Twitter scraper actor from Apify Store
-        # Use unlimited version to avoid rate limits
-        # OLD (rate limited): actor_id = "61RPP7dywgiy0JPD0"  # apidojo/tweet-scraper (FREE - RATE LIMITED)
-        actor_id = "apidojo/twitter-scraper-lite"  # PAID - Unlimited, no rate limits
+        actor_id = "61RPP7dywgiy0JPD0"  # Twitter Scraper actor
 
         # Configure the input for the actor
         run_input = {
