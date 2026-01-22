@@ -519,6 +519,29 @@ async def scan_focus_contacts(
     )
 
 
+@router.post("/scan/focus-contact/{focus_id}")
+async def scan_single_focus_contact(
+    focus_id: str,
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """Scan a single specific focus contact immediately"""
+    result = await LazarusMonitoringService.scan_single_focus_contact(db, user_id, focus_id)
+
+    if not result.get("success"):
+        return UriResponse.custom_response(
+            result.get("message", "Scan failed"),
+            400,
+            result,
+        )
+
+    return UriResponse.custom_response(
+        "Focus contact scanned successfully",
+        200,
+        result,
+    )
+
+
 @router.post("/scan/company-monitors")
 async def scan_company_monitors(
     batch_size: int = Query(100),

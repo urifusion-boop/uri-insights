@@ -67,6 +67,7 @@ class LazarusMonitoringService:
 
         total_scanned = 0
         total_alerts = 0
+        all_fetched_posts = []  # Store sample posts to return to frontend
 
         # Process each user's batch
         for user_id, user_contacts in user_batches.items():
@@ -137,6 +138,9 @@ class LazarusMonitoringService:
                 linkedin_posts_by_focus_id = await LazarusMonitoringService._fetch_linkedin_posts(
                     db, contacts_with_linkedin
                 )
+                # Add sample posts to response
+                for posts in linkedin_posts_by_focus_id.values():
+                    all_fetched_posts.extend(posts[:3])  # First 3 posts from each contact
 
             # Fetch TikTok posts
             tiktok_posts_by_focus_id = {}
@@ -197,7 +201,11 @@ class LazarusMonitoringService:
                 total_scanned += 1
 
         print(f"✅ Focus Contact scan complete: {total_scanned} scanned, {total_alerts} alerts")
-        return {"scanned": total_scanned, "alerts_created": total_alerts}
+        return {
+            "scanned": total_scanned,
+            "alerts_created": total_alerts,
+            "sample_posts": all_fetched_posts[:10]  # Return max 10 sample posts
+        }
 
     @staticmethod
     async def _fetch_batch_tweets(
@@ -303,6 +311,16 @@ class LazarusMonitoringService:
 
             total_posts = sum(len(posts) for posts in posts_by_focus_id.values())
             logger.info(f"✅ Fetched {total_posts} LinkedIn posts from {len(posts_by_focus_id)} contacts")
+
+            # Log the actual posts for visibility
+            for focus_id, posts in posts_by_focus_id.items():
+                print(f"\n📝 LinkedIn Posts for contact {focus_id}:")
+                for i, post in enumerate(posts[:3], 1):  # Show first 3 posts
+                    print(f"   Post {i}: {post.get('text', 'No text')[:150]}...")
+                    print(f"   Author: {post.get('author', 'Unknown')}")
+                    print(f"   Date: {post.get('created_at', 'Unknown')}")
+                    print(f"   Engagement: {post.get('likes', 0)} likes, {post.get('comments', 0)} comments")
+                    print(f"   ---")
 
             return posts_by_focus_id
 
@@ -414,11 +432,19 @@ class LazarusMonitoringService:
 
         # Analyze tweets and LinkedIn posts for buying signals using AI
         if tweets or linkedin_posts:
+            print(f"\n🤖 Analyzing content for {contact.name}:")
+            print(f"   Tweets: {len(tweets)}")
+            print(f"   LinkedIn/Social posts: {len(linkedin_posts)}")
+
             signal_analysis = await LazarusMonitoringService._detect_buying_intent(
                 db, contact, tweets, linkedin_posts, user_signal_preferences
             )
 
             if signal_analysis:
+                print(f"🎯 SIGNAL DETECTED!")
+                print(f"   Type: {signal_analysis.get('signal_type')}")
+                print(f"   Confidence: {signal_analysis.get('confidence')}")
+                print(f"   Evidence: {signal_analysis.get('evidence', '')[:200]}...")
                 # Map signal_type to alert_type
                 signal_type_map = {
                     "pain": LazarusAlertTypeEnum.BUYING_INTENT,
@@ -629,6 +655,122 @@ class LazarusMonitoringService:
                 "funding": f"Hi {contact.name}, congratulations on the funding! Great time to discuss scaling together."
             }
             return fallback_pitches.get(signal_type, f"Hi {contact.name}, let's reconnect!")
+
+    # ============ SINGLE CONTACT SCANNING ============
+    @staticmethod
+    async def scan_single_focus_contact(db: AsyncIOMotorDatabase, user_id: str, focus_id: str):
+        """
+        Scan a single specific focus contact immediately
+        Used when user clicks "Scan Now" on a specific contact
+        """
+        print(f"🔍 Starting single contact scan for {focus_id}...")
+
+        # Get the specific contact
+        from app.repository.LazarusRepository import LazarusRepository
+        contact = await LazarusRepository.get_focus_contact_by_id(db, focus_id)
+
+        if not contact:
+            return {
+                "success": False,
+                "message": "Contact not found",
+                "scanned": 0,
+                "alerts_created": 0
+            }
+
+        # Verify ownership
+        if contact.user_id != user_id:
+            return {
+                "success": False,
+                "message": "Unauthorized access to contact",
+                "scanned": 0,
+                "alerts_created": 0
+            }
+
+        print(f"✅ Found contact: {contact.name}")
+
+        # Detect platform
+        from app.core.helpers.social_url_helper import SocialURLHelper
+
+        platform = None
+        if contact.linkedin_url:
+            platform = "linkedin"
+        elif contact.twitter_url:
+            platform = "twitter"
+        elif contact.social_handle:
+            url_type = SocialURLHelper.detect_url_type(contact.social_handle)
+            platform = url_type if url_type != "unknown" else None
+
+        if not platform:
+            return {
+                "success": False,
+                "message": "No valid social media URL found for this contact",
+                "scanned": 0,
+                "alerts_created": 0
+            }
+
+        print(f"🔀 Platform detected: {platform}")
+
+        # Fetch posts based on platform
+        posts = []
+        sample_posts = []
+
+        try:
+            if platform == "linkedin":
+                print(f"🚀 Fetching LinkedIn posts for {contact.name}...")
+                linkedin_posts = await LazarusMonitoringService._fetch_linkedin_posts(
+                    db, [contact]
+                )
+                if contact.focus_id in linkedin_posts:
+                    posts = linkedin_posts[contact.focus_id]
+                    sample_posts = posts[:3]  # First 3 for display
+                    print(f"✅ Fetched {len(posts)} LinkedIn posts")
+
+            elif platform == "twitter":
+                print(f"🚀 Fetching Twitter posts for {contact.name}...")
+                twitter_posts = await LazarusMonitoringService._fetch_twitter_posts(
+                    db, [contact]
+                )
+                if contact.focus_id in twitter_posts:
+                    posts = twitter_posts[contact.focus_id]
+                    sample_posts = posts[:3]
+                    print(f"✅ Fetched {len(posts)} tweets")
+
+            # Analyze posts for buying signals
+            alerts_created = 0
+            if posts:
+                print(f"🤖 Analyzing {len(posts)} posts with AI...")
+                analysis_result = await LazarusMonitoringService._analyze_posts_for_signals(
+                    db, contact, posts
+                )
+
+                if analysis_result.get("signal_detected"):
+                    alerts_created = 1
+                    print(f"🎯 Buying signal detected!")
+                else:
+                    print(f"ℹ️  No buying signals detected")
+
+            # Update scan timestamps
+            await LazarusRepository.update_focus_contact_scan_date(
+                db, focus_id, datetime.utcnow()
+            )
+
+            return {
+                "success": True,
+                "message": f"Scanned {contact.name} successfully",
+                "scanned": 1,
+                "alerts_created": alerts_created,
+                "sample_posts": sample_posts,
+                "platform": platform
+            }
+
+        except Exception as e:
+            logger.error(f"Error scanning contact {focus_id}: {str(e)}")
+            return {
+                "success": False,
+                "message": f"Scan failed: {str(e)}",
+                "scanned": 0,
+                "alerts_created": 0
+            }
 
     # ============ COMPANY MONITOR SCANNING ============
     @staticmethod
