@@ -482,6 +482,7 @@ class LazarusMonitoringService:
                     "user_id": contact.user_id,
                     "source_type": LazarusMonitorTypeEnum.FOCUS_CONTACT,
                     "source_id": contact.focus_id,
+                    "source_name": contact.name,  # Required field
                     "alert_type": alert_type,
                     "alert_message": signal_analysis.get("reason", f"{contact.name} is showing buying intent signals"),
                     "evidence": {
