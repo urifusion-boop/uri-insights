@@ -779,29 +779,58 @@ class LazarusMonitoringService:
                     )
 
                 if analysis_result:
-                    # Save the alert to database
-                    try:
-                        alert = LazarusAlert(**analysis_result)
-                        await db["lazarus_alerts"].insert_one(alert.dict(by_alias=True))
-                        alerts_created = 1
+                    # Check for duplicate alerts (same contact, same alert type, same content, within last 7 days)
+                    from datetime import timedelta
+                    seven_days_ago = datetime.utcnow() - timedelta(days=7)
 
-                        # Prepare alert data for frontend display
+                    # Get the evidence text from the new alert
+                    new_evidence_text = analysis_result.get('evidence', {}).get('evidence_text', '')
+
+                    existing_alert = await db["lazarus_alerts"].find_one({
+                        "user_id": contact.user_id,
+                        "source_id": contact.focus_id,
+                        "alert_type": analysis_result.get('alert_type'),
+                        "status": {"$in": [LazarusAlertStatusEnum.NEW, LazarusAlertStatusEnum.VIEWED]},
+                        "created_at": {"$gte": seven_days_ago},
+                        "evidence.evidence_text": new_evidence_text  # Check actual post content
+                    })
+
+                    if existing_alert:
+                        print(f"ℹ️  Duplicate alert detected - same content already alerted")
+                        print(f"   Existing alert from: {existing_alert.get('created_at')}")
+                        print(f"   Evidence: {new_evidence_text[:100]}...")
+                        # Still prepare alert data for frontend display
                         alert_data = {
                             "alert_type": analysis_result.get('alert_type'),
-                            "alert_message": analysis_result.get('alert_message'),
+                            "alert_message": "Alert already exists (duplicate detected)",
                             "suggested_pitch": analysis_result.get('suggested_pitch'),
-                            # Extract confidence from evidence if available
                             "confidence": analysis_result.get('evidence', {}).get('confidence'),
                             "signal_type": analysis_result.get('evidence', {}).get('signal_type')
                         }
+                    else:
+                        # Save the alert to database
+                        try:
+                            alert = LazarusAlert(**analysis_result)
+                            await db["lazarus_alerts"].insert_one(alert.dict(by_alias=True))
+                            alerts_created = 1
 
-                        print(f"🎯 Buying signal detected and alert created!")
-                        print(f"   Alert Type: {analysis_result.get('alert_type')}")
-                        print(f"   Alert Message: {analysis_result.get('alert_message')}")
-                        print(f"   Suggested Pitch: {analysis_result.get('suggested_pitch', 'N/A')[:100]}...")
-                    except Exception as e:
-                        logger.error(f"Failed to create alert: {str(e)}")
-                        print(f"❌ Failed to create alert: {str(e)}")
+                            # Prepare alert data for frontend display
+                            alert_data = {
+                                "alert_type": analysis_result.get('alert_type'),
+                                "alert_message": analysis_result.get('alert_message'),
+                                "suggested_pitch": analysis_result.get('suggested_pitch'),
+                                # Extract confidence from evidence if available
+                                "confidence": analysis_result.get('evidence', {}).get('confidence'),
+                                "signal_type": analysis_result.get('evidence', {}).get('signal_type')
+                            }
+
+                            print(f"🎯 Buying signal detected and alert created!")
+                            print(f"   Alert Type: {analysis_result.get('alert_type')}")
+                            print(f"   Alert Message: {analysis_result.get('alert_message')}")
+                            print(f"   Suggested Pitch: {analysis_result.get('suggested_pitch', 'N/A')[:100]}...")
+                        except Exception as e:
+                            logger.error(f"Failed to create alert: {str(e)}")
+                            print(f"❌ Failed to create alert: {str(e)}")
                 else:
                     print(f"ℹ️  No buying signals detected")
 

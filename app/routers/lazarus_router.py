@@ -348,9 +348,10 @@ async def get_alerts(
     alerts = await LazarusService.get_alerts(db, user_id, status, skip, limit)
 
     return UriResponse.custom_response(
-        "Alerts retrieved successfully",
-        200,
-        [jsonable_encoder(a) for a in alerts],
+        message="Alerts retrieved successfully",
+        error_code=200,
+        success=True,
+        data=[jsonable_encoder(a) for a in alerts],
     )
 
 
