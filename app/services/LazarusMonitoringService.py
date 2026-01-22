@@ -331,6 +331,49 @@ class LazarusMonitoringService:
             return {}
 
     @staticmethod
+    async def _fetch_twitter_posts(
+        db: AsyncIOMotorDatabase, contacts_with_twitter: List[FocusContact]
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Fetch Twitter/X posts for contacts with Twitter URLs
+        Returns: {focus_id: [posts]}
+        """
+        if not contacts_with_twitter:
+            return {}
+
+        try:
+            print(f"🐦 Fetching Twitter posts for {len(contacts_with_twitter)} contact(s)...")
+
+            # Collect handles and keywords
+            handles = [c.twitter_url.split('/')[-1] if c.twitter_url else c.social_handle.split('/')[-1]
+                      for c in contacts_with_twitter if c.twitter_url or c.social_handle]
+
+            all_keywords = []
+            for contact in contacts_with_twitter:
+                all_keywords.extend(contact.industry_keywords)
+
+            # Fetch using batch method
+            tweets = await LazarusMonitoringService._fetch_batch_tweets(db, handles, all_keywords)
+
+            # Map tweets back to contacts by focus_id
+            posts_by_focus_id = {}
+            for contact in contacts_with_twitter:
+                handle = contact.twitter_url.split('/')[-1] if contact.twitter_url else contact.social_handle.split('/')[-1]
+                contact_tweets = [t for t in tweets if t.get("handle") == handle]
+
+                if contact_tweets:
+                    posts_by_focus_id[contact.focus_id] = contact_tweets
+                    print(f"✅ Found {len(contact_tweets)} tweets for {contact.name}")
+
+            return posts_by_focus_id
+
+        except Exception as e:
+            logger.error(f"Error in _fetch_twitter_posts: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return {}
+
+    @staticmethod
     async def _fetch_tiktok_posts(
         db: AsyncIOMotorDatabase, contacts_with_tiktok: List[FocusContact]
     ) -> Dict[str, List[Dict[str, Any]]]:
