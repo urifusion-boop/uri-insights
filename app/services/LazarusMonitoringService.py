@@ -463,20 +463,25 @@ class LazarusMonitoringService:
                     db, contact, signal_analysis, tweets, linkedin_posts
                 )
 
-                # Determine signal source
+                # Determine signal source and platform
                 sources = []
-                if tweets:
-                    sources.append("Twitter/X")
+                primary_platform = None
                 if linkedin_posts:
                     sources.append("LinkedIn")
+                    primary_platform = "LinkedIn"
+                if tweets:
+                    sources.append("Twitter/X")
+                    if not primary_platform:
+                        primary_platform = "Twitter"
+
                 signal_source = " + ".join(sources) + " (AI Analysis)" if sources else "Unknown"
 
                 # Combine content for evidence
                 all_content = []
-                all_content.extend([t.get("text", "") for t in tweets[:3]])
                 all_content.extend([p.get("text", "") for p in linkedin_posts[:3]])
+                all_content.extend([t.get("text", "") for t in tweets[:3]])
 
-                # Create alert with AI analysis
+                # Create alert with AI analysis (platform-agnostic)
                 return {
                     "alert_id": str(uuid.uuid4()),
                     "user_id": contact.user_id,
@@ -490,7 +495,11 @@ class LazarusMonitoringService:
                         "signal_type": signal_analysis.get("signal_type"),
                         "confidence": signal_analysis.get("confidence"),
                         "evidence_text": signal_analysis.get("evidence"),
-                        "tweet_text": signal_analysis.get("evidence"),  # Store evidence as tweet_text for compatibility
+                        # Platform-agnostic fields
+                        "post_text": signal_analysis.get("evidence"),
+                        "post_platform": primary_platform,
+                        # Legacy field for backward compatibility
+                        "tweet_text": signal_analysis.get("evidence"),
                     },
                     "suggested_pitch": suggested_pitch,
                     "status": LazarusAlertStatusEnum.NEW,

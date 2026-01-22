@@ -196,7 +196,12 @@ class LazarusAlertEvidence(BaseModel):
     old_company: Optional[str] = None
     new_company: Optional[str] = None
 
-    # For social signals
+    # For social signals (platform-agnostic)
+    post_url: Optional[str] = None  # URL to the post (LinkedIn, Twitter, TikTok, Facebook)
+    post_text: Optional[str] = None  # Content of the post
+    post_platform: Optional[str] = None  # "LinkedIn", "Twitter", "TikTok", "Facebook"
+
+    # Legacy fields (backward compatibility)
     tweet_url: Optional[str] = None
     tweet_text: Optional[str] = None
 
@@ -208,6 +213,12 @@ class LazarusAlertEvidence(BaseModel):
 
     # For homepage changes
     detected_keywords: Optional[List[str]] = None
+
+    # AI Analysis fields (for buying signal detection)
+    signal_type: Optional[str] = None  # "pain", "switch", "hiring", "funding"
+    confidence: Optional[float] = None  # 0.0 to 1.0
+    evidence_text: Optional[str] = None  # AI-extracted evidence text
+    signal_source: Optional[str] = None  # "LinkedIn (AI Analysis)", "Twitter + LinkedIn (AI Analysis)", etc.
 
 
 class LazarusAlert(BaseModel):
