@@ -530,15 +530,17 @@ async def scan_single_focus_contact(
 
     if not result.get("success"):
         return UriResponse.custom_response(
-            result.get("message", "Scan failed"),
-            400,
-            result,
+            message=result.get("message", "Scan failed"),
+            error_code=400,
+            success=False,
+            data=result,
         )
 
     return UriResponse.custom_response(
-        "Focus contact scanned successfully",
-        200,
-        result,
+        message="Focus contact scanned successfully",
+        error_code=200,
+        success=True,
+        data=result,
     )
 
 
