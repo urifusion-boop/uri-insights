@@ -759,6 +759,7 @@ class LazarusMonitoringService:
 
             # Analyze posts for buying signals
             alerts_created = 0
+            alert_data = None
             if posts:
                 print(f"🤖 Analyzing {len(posts)} posts with AI...")
 
@@ -773,9 +774,29 @@ class LazarusMonitoringService:
                     )
 
                 if analysis_result:
-                    alerts_created = 1
-                    print(f"🎯 Buying signal detected!")
-                    print(f"   Type: {analysis_result.get('alert_type')}")
+                    # Save the alert to database
+                    try:
+                        alert = LazarusAlert(**analysis_result)
+                        await db["lazarus_alerts"].insert_one(alert.dict(by_alias=True))
+                        alerts_created = 1
+
+                        # Prepare alert data for frontend display
+                        alert_data = {
+                            "alert_type": analysis_result.get('alert_type'),
+                            "alert_message": analysis_result.get('alert_message'),
+                            "suggested_pitch": analysis_result.get('suggested_pitch'),
+                            # Extract confidence from evidence if available
+                            "confidence": analysis_result.get('evidence', {}).get('confidence'),
+                            "signal_type": analysis_result.get('evidence', {}).get('signal_type')
+                        }
+
+                        print(f"🎯 Buying signal detected and alert created!")
+                        print(f"   Alert Type: {analysis_result.get('alert_type')}")
+                        print(f"   Alert Message: {analysis_result.get('alert_message')}")
+                        print(f"   Suggested Pitch: {analysis_result.get('suggested_pitch', 'N/A')[:100]}...")
+                    except Exception as e:
+                        logger.error(f"Failed to create alert: {str(e)}")
+                        print(f"❌ Failed to create alert: {str(e)}")
                 else:
                     print(f"ℹ️  No buying signals detected")
 
@@ -790,7 +811,7 @@ class LazarusMonitoringService:
                 }
             )
 
-            return {
+            result = {
                 "success": True,
                 "message": f"Scanned {contact.name} successfully",
                 "scanned": 1,
@@ -798,6 +819,12 @@ class LazarusMonitoringService:
                 "sample_posts": sample_posts,
                 "platform": platform
             }
+
+            # Add alert data if available
+            if alert_data:
+                result["alert_data"] = alert_data
+
+            return result
 
         except Exception as e:
             logger.error(f"Error scanning contact {focus_id}: {str(e)}")
