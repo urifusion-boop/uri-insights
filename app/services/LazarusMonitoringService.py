@@ -722,9 +722,21 @@ class LazarusMonitoringService:
                 )
                 if contact.focus_id in linkedin_posts:
                     posts = linkedin_posts[contact.focus_id]
-                    # Add platform field to each post for frontend display
+                    # Add platform field and format author for frontend display
                     for post in posts:
                         post['platform'] = 'LinkedIn'
+                        # Convert author object to string
+                        if isinstance(post.get('author'), dict):
+                            author_obj = post['author']
+                            if 'name' in author_obj:
+                                post['author'] = author_obj['name']
+                            elif 'firstName' in author_obj and 'lastName' in author_obj:
+                                post['author'] = f"{author_obj['firstName']} {author_obj['lastName']}"
+                            else:
+                                post['author'] = 'Unknown'
+                        # Convert comments array to count
+                        if isinstance(post.get('comments'), list):
+                            post['comments'] = len(post['comments'])
                     sample_posts = posts[:3]  # First 3 for display
                     print(f"✅ Fetched {len(posts)} LinkedIn posts")
 
@@ -735,9 +747,13 @@ class LazarusMonitoringService:
                 )
                 if contact.focus_id in twitter_posts:
                     posts = twitter_posts[contact.focus_id]
-                    # Add platform field to each post for frontend display
+                    # Add platform field and ensure author is string
                     for post in posts:
                         post['platform'] = 'Twitter'
+                        # Ensure author is string
+                        if isinstance(post.get('author'), dict):
+                            author_obj = post['author']
+                            post['author'] = author_obj.get('username') or author_obj.get('name') or 'Unknown'
                     sample_posts = posts[:3]
                     print(f"✅ Fetched {len(posts)} tweets")
 
