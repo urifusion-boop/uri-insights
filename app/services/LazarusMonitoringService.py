@@ -722,6 +722,9 @@ class LazarusMonitoringService:
                 )
                 if contact.focus_id in linkedin_posts:
                     posts = linkedin_posts[contact.focus_id]
+                    # Add platform field to each post for frontend display
+                    for post in posts:
+                        post['platform'] = 'LinkedIn'
                     sample_posts = posts[:3]  # First 3 for display
                     print(f"✅ Fetched {len(posts)} LinkedIn posts")
 
@@ -732,6 +735,9 @@ class LazarusMonitoringService:
                 )
                 if contact.focus_id in twitter_posts:
                     posts = twitter_posts[contact.focus_id]
+                    # Add platform field to each post for frontend display
+                    for post in posts:
+                        post['platform'] = 'Twitter'
                     sample_posts = posts[:3]
                     print(f"✅ Fetched {len(posts)} tweets")
 
@@ -758,8 +764,14 @@ class LazarusMonitoringService:
                     print(f"ℹ️  No buying signals detected")
 
             # Update scan timestamps
-            await LazarusRepository.update_focus_contact_scan_date(
-                db, focus_id, datetime.utcnow()
+            scan_date = datetime.utcnow()
+            next_scan = scan_date + timedelta(days=contact.scan_frequency_days)
+            await LazarusRepository.update_focus_contact(
+                db, focus_id, user_id, {
+                    "last_scan_date": scan_date,
+                    "next_scan_date": next_scan,
+                    "scan_count": contact.scan_count + 1
+                }
             )
 
             return {
