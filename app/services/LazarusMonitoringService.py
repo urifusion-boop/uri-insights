@@ -21,6 +21,7 @@ from app.services.AIService import AIService
 from app.services.OpenAIApifyTwitterService import OpenAIApifyTwitterService
 from app.services.ApifyGoogleSearchService import ApifyGoogleSearchService
 from app.services.ApifyLinkedInJobsService import ApifyLinkedInJobsService
+from app.services.ApifyLinkedInPostScraperService import ApifyLinkedInPostScraperService
 from app.services.XUsersLookupService import XUsersLookupService
 from app.domain.requests.twitter_requests import CurrentUserLookupParams
 from app.domain.schemas.lazarus_schema import (
@@ -71,33 +72,47 @@ class LazarusMonitoringService:
         for user_id, user_contacts in user_batches.items():
             print(f"📦 Processing batch for user {user_id}: {len(user_contacts)} contacts")
 
-            # Build Origami query: (from:Handle1 OR from:Handle2) AND ("keywords")
-            handles = [
-                c.social_handle for c in user_contacts if c.social_handle
-            ]
+            # Separate contacts by monitoring source (Twitter vs LinkedIn)
+            contacts_with_twitter = [c for c in user_contacts if c.social_handle or c.twitter_url]
+            contacts_with_linkedin = [c for c in user_contacts if c.linkedin_url]
 
-            if not handles:
-                continue
+            # Fetch Twitter posts (existing Origami method)
+            twitter_results = []
+            if contacts_with_twitter:
+                # Build Origami query: (from:Handle1 OR from:Handle2) AND ("keywords")
+                handles = [c.social_handle for c in contacts_with_twitter if c.social_handle]
 
-            # Collect all industry keywords from all contacts
-            all_keywords = []
+                if handles:
+                    # Collect all industry keywords from all contacts
+                    all_keywords = []
+                    for contact in contacts_with_twitter:
+                        all_keywords.extend(contact.industry_keywords)
+
+                    # Batch process using Twitter/X API (or Apify)
+                    twitter_results = await LazarusMonitoringService._fetch_batch_tweets(
+                        db, handles, all_keywords
+                    )
+
+            # Fetch LinkedIn posts (new method)
+            linkedin_posts_by_focus_id = {}
+            if contacts_with_linkedin:
+                linkedin_posts_by_focus_id = await LazarusMonitoringService._fetch_linkedin_posts(
+                    db, contacts_with_linkedin
+                )
+
+            # Analyze each contact's results (both Twitter and LinkedIn)
             for contact in user_contacts:
-                all_keywords.extend(contact.industry_keywords)
-
-            # Batch process using Twitter/X API (or Apify)
-            results = await LazarusMonitoringService._fetch_batch_tweets(
-                db, handles, all_keywords
-            )
-
-            # Analyze each contact's results
-            for contact in user_contacts:
-                contact_results = [
-                    r for r in results if r.get("handle") == contact.social_handle
+                # Get Twitter results for this contact
+                contact_tweets = [
+                    r for r in twitter_results if r.get("handle") == contact.social_handle
                 ]
 
-                # Detect job changes and buying signals
+                # Get LinkedIn posts for this contact
+                contact_linkedin_posts = linkedin_posts_by_focus_id.get(contact.focus_id, [])
+
+                # Detect job changes and buying signals from both sources
                 alert = await LazarusMonitoringService._analyze_focus_contact(
-                    db, contact, contact_results
+                    db, contact, contact_tweets, contact_linkedin_posts
                 )
 
                 if alert:
@@ -186,11 +201,73 @@ class LazarusMonitoringService:
             return []
 
     @staticmethod
+    async def _fetch_linkedin_posts(
+        db: AsyncIOMotorDatabase, contacts_with_linkedin: List[FocusContact]
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Fetch LinkedIn posts for contacts with LinkedIn URLs
+        Returns posts grouped by contact's focus_id for easy mapping
+        """
+        if not contacts_with_linkedin:
+            return {}
+
+        try:
+            # Extract LinkedIn URLs from contacts
+            linkedin_urls = []
+            url_to_focus_id = {}  # Map URL back to contact
+
+            for contact in contacts_with_linkedin:
+                if contact.linkedin_url:
+                    linkedin_urls.append(contact.linkedin_url)
+                    url_to_focus_id[contact.linkedin_url] = contact.focus_id
+
+            if not linkedin_urls:
+                logger.warning("No valid LinkedIn URLs found in contacts")
+                return {}
+
+            logger.info(f"🔍 Fetching LinkedIn posts for {len(linkedin_urls)} contacts")
+
+            # Use ApifyLinkedInPostScraperService to fetch posts
+            linkedin_service = ApifyLinkedInPostScraperService()
+            result = await linkedin_service.fetch_linkedin_posts(
+                linkedin_urls=linkedin_urls,
+                deep_scrape=True,
+                limit_per_source=10  # 10 posts per contact (2-4 weeks of activity)
+            )
+
+            if not result.get("success"):
+                logger.warning(f"LinkedIn post fetch failed: {result.get('error_message', 'Unknown error')}")
+                return {}
+
+            posts_by_url = result.get("posts_by_url", {})
+
+            # Convert from URL-based mapping to focus_id-based mapping
+            posts_by_focus_id = {}
+            for url, posts in posts_by_url.items():
+                focus_id = url_to_focus_id.get(url)
+                if focus_id:
+                    posts_by_focus_id[focus_id] = posts
+
+            total_posts = sum(len(posts) for posts in posts_by_focus_id.values())
+            logger.info(f"✅ Fetched {total_posts} LinkedIn posts from {len(posts_by_focus_id)} contacts")
+
+            return posts_by_focus_id
+
+        except Exception as e:
+            logger.error(f"Error in _fetch_linkedin_posts: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return {}
+
+    @staticmethod
     async def _analyze_focus_contact(
-        db: AsyncIOMotorDatabase, contact: FocusContact, tweets: List[Dict[str, Any]]
+        db: AsyncIOMotorDatabase,
+        contact: FocusContact,
+        tweets: List[Dict[str, Any]],
+        linkedin_posts: List[Dict[str, Any]] = []
     ) -> Optional[Dict[str, Any]]:
         """
-        Analyze focus contact for signals
+        Analyze focus contact for signals from both Twitter and LinkedIn
         PRD Section 5.1: Detection Logic
         """
         # Fetch user's signal preferences from their settings
@@ -220,10 +297,10 @@ class LazarusMonitoringService:
         #     bio_changed = True
         #     new_bio_text = current_bio
 
-        # Analyze tweets for buying signals using AI
-        if tweets:
+        # Analyze tweets and LinkedIn posts for buying signals using AI
+        if tweets or linkedin_posts:
             signal_analysis = await LazarusMonitoringService._detect_buying_intent(
-                db, contact, tweets, user_signal_preferences
+                db, contact, tweets, linkedin_posts, user_signal_preferences
             )
 
             if signal_analysis:
@@ -242,8 +319,21 @@ class LazarusMonitoringService:
 
                 # Generate AI-powered pitch
                 suggested_pitch = await LazarusMonitoringService._generate_ai_pitch(
-                    db, contact, signal_analysis, tweets
+                    db, contact, signal_analysis, tweets, linkedin_posts
                 )
+
+                # Determine signal source
+                sources = []
+                if tweets:
+                    sources.append("Twitter/X")
+                if linkedin_posts:
+                    sources.append("LinkedIn")
+                signal_source = " + ".join(sources) + " (AI Analysis)" if sources else "Unknown"
+
+                # Combine content for evidence
+                all_content = []
+                all_content.extend([t.get("text", "") for t in tweets[:3]])
+                all_content.extend([p.get("text", "") for p in linkedin_posts[:3]])
 
                 # Create alert with AI analysis
                 return {
@@ -255,11 +345,11 @@ class LazarusMonitoringService:
                     "alert_message": signal_analysis.get("reason", f"{contact.name} is showing buying intent signals"),
                     "evidence": {
                         "detected_date": datetime.utcnow().isoformat(),
-                        "signal_source": "Twitter/X (AI Analysis)",
+                        "signal_source": signal_source,
                         "signal_type": signal_analysis.get("signal_type"),
                         "confidence": signal_analysis.get("confidence"),
                         "evidence_text": signal_analysis.get("evidence"),
-                        "tweets": [t.get("text", "") for t in tweets[:3]],
+                        "tweets": all_content,  # Combined tweets + LinkedIn posts
                         "old_value": None,
                         "new_value": None,
                     },
@@ -277,10 +367,11 @@ class LazarusMonitoringService:
         db: AsyncIOMotorDatabase,
         contact: FocusContact,
         tweets: List[Dict[str, Any]],
+        linkedin_posts: List[Dict[str, Any]],
         user_signal_preferences: List[str]
     ) -> Optional[Dict[str, Any]]:
-        """Use AI to detect buying intent in tweets based on user's signal preferences"""
-        if not tweets:
+        """Use AI to detect buying intent in tweets and LinkedIn posts based on user's signal preferences"""
+        if not tweets and not linkedin_posts:
             return None
 
         # Import here to avoid circular dependency
@@ -289,10 +380,18 @@ class LazarusMonitoringService:
         from app.domain.schemas.lazarus_schema import BuyingSignalAnalysis
 
         # Format tweets for AI analysis
-        tweet_texts = "\n\n".join([
-            f"Tweet {i+1}: {tweet.get('text', '')}"
-            for i, tweet in enumerate(tweets[:5])  # Analyze up to 5 recent tweets
-        ])
+        content_pieces = []
+
+        # Add tweets
+        for i, tweet in enumerate(tweets[:5]):  # Up to 5 tweets
+            content_pieces.append(f"Twitter Post {i+1}: {tweet.get('text', '')}")
+
+        # Add LinkedIn posts
+        for i, post in enumerate(linkedin_posts[:5]):  # Up to 5 LinkedIn posts
+            content_pieces.append(f"LinkedIn Post {i+1}: {post.get('text', '')}")
+
+        # Combine all content
+        combined_content = "\n\n".join(content_pieces)
 
         # Build AI prompt with user's signal preferences
         prompt = LazarusPrompt.ANALYZE_BUYING_SIGNALS.value.format(
@@ -300,7 +399,7 @@ class LazarusMonitoringService:
             current_company=contact.current_company or "Unknown",
             keywords=", ".join(contact.industry_keywords),
             signal_types=", ".join(user_signal_preferences),
-            tweets=tweet_texts
+            tweets=combined_content  # Now includes both Twitter and LinkedIn
         )
 
         # Get AI analysis
@@ -328,21 +427,26 @@ class LazarusMonitoringService:
             logger.error(f"AI buying intent detection failed: {e}")
             # Fallback to simple keyword matching if AI fails
             return await LazarusMonitoringService._fallback_keyword_detection(
-                tweets, contact.industry_keywords
+                tweets, linkedin_posts, contact.industry_keywords
             )
 
         return None
 
     @staticmethod
     async def _fallback_keyword_detection(
-        tweets: List[Dict[str, Any]], keywords: List[str]
+        tweets: List[Dict[str, Any]],
+        linkedin_posts: List[Dict[str, Any]],
+        keywords: List[str]
     ) -> Optional[Dict[str, Any]]:
         """Fallback: Simple keyword matching if AI fails"""
         buying_signals = ["looking for", "need", "recommend", "anyone know", "suggestions",
                          "alternative", "switch", "considering", "evaluate"]
 
-        for tweet in tweets:
-            text = tweet.get("text", "").lower()
+        # Check both tweets and LinkedIn posts
+        all_content = tweets + linkedin_posts
+
+        for item in all_content:
+            text = item.get("text", "").lower()
             for keyword in keywords:
                 if keyword.lower() in text:
                     if any(signal in text for signal in buying_signals):
@@ -359,18 +463,26 @@ class LazarusMonitoringService:
         db: AsyncIOMotorDatabase,
         contact: FocusContact,
         signal_analysis: Dict[str, Any],
-        tweets: List[Dict[str, Any]]
+        tweets: List[Dict[str, Any]],
+        linkedin_posts: List[Dict[str, Any]] = []
     ) -> Optional[str]:
-        """Generate AI-powered personalized pitch based on signal analysis"""
+        """Generate AI-powered personalized pitch based on signal analysis from Twitter and LinkedIn"""
         from app.services.AIService import AIService
         from app.domain.enums.ai_prompt import LazarusPrompt
 
         try:
-            # Format tweets for context
-            tweet_texts = "\n".join([
-                f"- {tweet.get('text', '')}"
-                for tweet in tweets[:3]
-            ])
+            # Format tweets and LinkedIn posts for context
+            content_texts = []
+
+            # Add tweets
+            for tweet in tweets[:3]:
+                content_texts.append(f"- (Twitter) {tweet.get('text', '')}")
+
+            # Add LinkedIn posts
+            for post in linkedin_posts[:3]:
+                content_texts.append(f"- (LinkedIn) {post.get('text', '')}")
+
+            combined_texts = "\n".join(content_texts)
 
             # Build AI prompt for pitch generation
             prompt = LazarusPrompt.GENERATE_PITCH.value.format(
@@ -378,7 +490,7 @@ class LazarusMonitoringService:
                 current_company=contact.current_company or "their company",
                 signal_type=signal_analysis.get("signal_type", "unknown"),
                 evidence=signal_analysis.get("evidence", ""),
-                recent_tweets=tweet_texts
+                recent_tweets=combined_texts  # Now includes both Twitter and LinkedIn
             )
 
             # Get AI-generated pitch

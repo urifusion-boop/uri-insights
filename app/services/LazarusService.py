@@ -6,6 +6,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.repository.LazarusRepository import LazarusRepository
 from app.repository.LeadRepository import LeadRepository
+from app.core.helpers.social_url_helper import SocialURLHelper
 from app.domain.schemas.lazarus_schema import (
     FocusContact,
     FocusContactCreate,
@@ -58,12 +59,35 @@ class LazarusService:
         # Use custom scan frequency or default to 7 days
         scan_frequency = contact_create.scan_frequency_days or 7
 
+        # Parse social_handle to detect LinkedIn/Twitter URLs intelligently
+        # If explicit linkedin_url or twitter_url provided, use those
+        # Otherwise, parse social_handle to extract them
+        linkedin_url = contact_create.linkedin_url
+        twitter_url = contact_create.twitter_url
+
+        if not linkedin_url and not twitter_url and contact_create.social_handle:
+            # Parse social_handle to detect which platform it is
+            parsed_urls = SocialURLHelper.parse_social_handle(contact_create.social_handle)
+            linkedin_url = parsed_urls.get("linkedin_url")
+            twitter_url = parsed_urls.get("twitter_url")
+
+            # Log the intelligent detection
+            detected_platform = "LinkedIn" if linkedin_url else "Twitter" if twitter_url else "Unknown"
+            print(f"[LAZARUS] Intelligent URL Detection:")
+            print(f"  Input: {contact_create.social_handle}")
+            print(f"  Detected Platform: {detected_platform}")
+            print(f"  LinkedIn URL: {linkedin_url}")
+            print(f"  Twitter URL: {twitter_url}")
+
         # Build focus contact data
         contact_data = {
             "focus_id": str(uuid.uuid4()),
             "user_id": user_id,
             "name": contact_create.name,
             "social_handle": contact_create.social_handle,
+            "linkedin_url": linkedin_url,
+            "twitter_url": twitter_url,
+            "current_company": contact_create.current_company,
             "last_bio_text": contact_create.last_bio_text,
             "last_bio_hash": last_bio_hash,
             "industry_keywords": contact_create.industry_keywords,
