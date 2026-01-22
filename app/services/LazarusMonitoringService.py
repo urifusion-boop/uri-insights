@@ -667,7 +667,7 @@ class LazarusMonitoringService:
 
         # Get the specific contact
         from app.repository.LazarusRepository import LazarusRepository
-        contact = await LazarusRepository.get_focus_contact_by_id(db, focus_id)
+        contact = await LazarusRepository.get_focus_contact_by_id(db, user_id, focus_id)
 
         if not contact:
             return {
