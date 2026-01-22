@@ -739,13 +739,21 @@ class LazarusMonitoringService:
             alerts_created = 0
             if posts:
                 print(f"🤖 Analyzing {len(posts)} posts with AI...")
-                analysis_result = await LazarusMonitoringService._analyze_posts_for_signals(
-                    db, contact, posts
-                )
 
-                if analysis_result.get("signal_detected"):
+                # Use the correct analysis method based on platform
+                if platform == "linkedin":
+                    analysis_result = await LazarusMonitoringService._analyze_focus_contact(
+                        db, contact, [], posts  # Empty tweets list, LinkedIn posts
+                    )
+                else:
+                    analysis_result = await LazarusMonitoringService._analyze_focus_contact(
+                        db, contact, posts, []  # Tweets, empty LinkedIn list
+                    )
+
+                if analysis_result:
                     alerts_created = 1
                     print(f"🎯 Buying signal detected!")
+                    print(f"   Type: {analysis_result.get('alert_type')}")
                 else:
                     print(f"ℹ️  No buying signals detected")
 
