@@ -344,26 +344,64 @@ class LazarusMonitoringService:
         try:
             print(f"🐦 Fetching Twitter posts for {len(contacts_with_twitter)} contact(s)...")
 
-            # Collect handles and keywords
-            handles = [c.twitter_url.split('/')[-1] if c.twitter_url else c.social_handle.split('/')[-1]
-                      for c in contacts_with_twitter if c.twitter_url or c.social_handle]
-
-            all_keywords = []
-            for contact in contacts_with_twitter:
-                all_keywords.extend(contact.industry_keywords)
-
-            # Fetch using batch method
-            tweets = await LazarusMonitoringService._fetch_batch_tweets(db, handles, all_keywords)
-
-            # Map tweets back to contacts by focus_id
+            # For single contact scan, fetch ALL recent posts without keyword filtering
             posts_by_focus_id = {}
-            for contact in contacts_with_twitter:
-                handle = contact.twitter_url.split('/')[-1] if contact.twitter_url else contact.social_handle.split('/')[-1]
-                contact_tweets = [t for t in tweets if t.get("handle") == handle]
 
-                if contact_tweets:
-                    posts_by_focus_id[contact.focus_id] = contact_tweets
-                    print(f"✅ Found {len(contact_tweets)} tweets for {contact.name}")
+            for contact in contacts_with_twitter:
+                # Extract handle from URL or social_handle
+                handle = None
+                if contact.twitter_url:
+                    handle = contact.twitter_url.rstrip('/').split('/')[-1]
+                elif contact.social_handle:
+                    handle = contact.social_handle.rstrip('/').split('/')[-1]
+
+                if not handle:
+                    print(f"❌ No Twitter handle found for {contact.name}")
+                    continue
+
+                # Remove @ if present
+                handle = handle.lstrip('@')
+
+                # Build query to get ALL recent posts from this user
+                query = f"from:{handle}"
+                print(f"   Fetching tweets with query: {query}")
+
+                try:
+                    twitter_service = OpenAIApifyTwitterService()
+                    result = await twitter_service.fetch_tweets_with_analysis(
+                        keyword=query,
+                        max_tweets=50,  # Get last 50 tweets
+                        analyze_sentiment=False
+                    )
+
+                    if result.get("success"):
+                        tweets = result.get("tweets", [])
+                        if tweets:
+                            # Format tweets
+                            formatted_tweets = []
+                            for tweet in tweets:
+                                author = tweet.get("author", {})
+                                formatted_tweets.append({
+                                    "handle": handle,
+                                    "text": tweet.get("text", ""),
+                                    "url": tweet.get("url", ""),
+                                    "created_at": tweet.get("created_at", ""),
+                                    "author": author,
+                                    "likes": tweet.get("likes", 0),
+                                    "retweets": tweet.get("retweets", 0),
+                                    "replies": tweet.get("replies", 0)
+                                })
+
+                            posts_by_focus_id[contact.focus_id] = formatted_tweets
+                            print(f"✅ Found {len(formatted_tweets)} tweets for {contact.name}")
+                        else:
+                            print(f"ℹ️  No tweets found for {contact.name}")
+                    else:
+                        print(f"❌ Twitter fetch failed for {contact.name}: {result.get('error_message')}")
+
+                except Exception as e:
+                    logger.error(f"Error fetching tweets for {contact.name}: {str(e)}")
+                    continue
 
             return posts_by_focus_id
 
