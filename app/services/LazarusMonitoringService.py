@@ -711,6 +711,7 @@ class LazarusMonitoringService:
         Scan a single specific focus contact immediately
         Used when user clicks "Scan Now" on a specific contact
         """
+        from datetime import timedelta
         print(f"🔍 Starting single contact scan for {focus_id}...")
 
         # Get the specific contact
@@ -823,7 +824,6 @@ class LazarusMonitoringService:
 
                 if analysis_result:
                     # Check for duplicate alerts (same contact, same alert type, same content, within last 7 days)
-                    from datetime import timedelta
                     seven_days_ago = datetime.utcnow() - timedelta(days=7)
 
                     # Get the evidence text from the new alert
