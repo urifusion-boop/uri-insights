@@ -42,6 +42,65 @@ logger = logging.getLogger(__name__)
 class LazarusMonitoringService:
     """Background service for weekly Lazarus scans using Origami Method"""
 
+    # ============ AI PRIORITY SCORING ============
+    @staticmethod
+    def calculate_priority_score(alert: Dict[str, Any]) -> tuple[int, str]:
+        """
+        Calculate AI priority score for an alert (0-100)
+
+        Factors:
+        - Signal confidence (0-40 points)
+        - Recency (0-30 points) - how recent the signal was detected
+        - Signal type priority (0-30 points)
+
+        Returns:
+            Tuple of (score, level) where level is "HOT", "WARM", or "COLD"
+        """
+        score = 0
+
+        # Factor 1: Signal confidence (0-40 points)
+        confidence = alert.get("evidence", {}).get("confidence", 0.5)
+        score += int(confidence * 40)
+
+        # Factor 2: Recency (0-30 points)
+        created_at = alert.get("created_at", datetime.utcnow())
+        if isinstance(created_at, str):
+            created_at = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+
+        hours_since_detection = (datetime.utcnow() - created_at).total_seconds() / 3600
+        if hours_since_detection < 4:
+            score += 30  # Very fresh - contact NOW
+        elif hours_since_detection < 24:
+            score += 20  # Within 24 hours
+        elif hours_since_detection < 72:
+            score += 10  # Within 3 days
+        # else: 0 points (older than 3 days)
+
+        # Factor 3: Signal type priority (0-30 points)
+        signal_type = alert.get("evidence", {}).get("signal_type", "").lower()
+        alert_type = alert.get("alert_type", "")
+
+        if signal_type == "switch" or "JOB_CHANGE" in str(alert_type):
+            score += 30  # Switch signals = highest priority (actively looking)
+        elif signal_type == "pain":
+            score += 25  # Pain signals = high priority (has a problem)
+        elif signal_type == "funding" or signal_type == "cash_injection":
+            score += 20  # Funding = medium-high priority (has budget)
+        elif signal_type == "hiring" or "HIRING_SPREE" in str(alert_type):
+            score += 15  # Hiring = medium priority (growing)
+        else:
+            score += 10  # Other signals
+
+        # Determine level
+        if score >= 80:
+            level = "HOT"
+        elif score >= 50:
+            level = "WARM"
+        else:
+            level = "COLD"
+
+        return (score, level)
+
     # ============ FOCUS CONTACT SCANNING ============
     @staticmethod
     async def scan_focus_contacts(db: AsyncIOMotorDatabase, batch_size: int = 100):
@@ -173,8 +232,14 @@ class LazarusMonitoringService:
                 )
 
                 if alert:
+                    # Calculate priority score
+                    alert_dict = alert.dict() if hasattr(alert, 'dict') else alert
+                    priority_score, priority_level = LazarusMonitoringService.calculate_priority_score(alert_dict)
+                    alert_dict["priority_score"] = priority_score
+                    alert_dict["priority_level"] = priority_level
+
                     # Create alert
-                    await LazarusRepository.create_alert(db, alert)
+                    await LazarusRepository.create_alert(db, alert_dict)
                     total_alerts += 1
 
                     # Increment alert count on contact
@@ -474,6 +539,89 @@ class LazarusMonitoringService:
             return {}
 
     @staticmethod
+    async def _auto_enrich_contact(
+        db: AsyncIOMotorDatabase,
+        contact: FocusContact
+    ):
+        """
+        Auto-enrich contact with LinkedIn Profile Scraper after alert creation
+        Phase 1: Contact Enrichment
+        """
+        try:
+            from app.services.LinkedInProfileScraperService import LinkedInProfileScraperService
+
+            logger.info(f"🔍 Auto-enriching contact: {contact.name}")
+
+            # Mark as pending
+            await LazarusRepository.update_focus_contact(
+                db, contact.focus_id, contact.user_id, {"enrichment_status": "pending"}
+            )
+
+            # Call enrichment service
+            scraper_service = LinkedInProfileScraperService()
+            enrichment_result = await scraper_service.enrich_profile(
+                linkedin_url=contact.linkedin_url,
+                timeout_seconds=90
+            )
+
+            if not enrichment_result.get("success"):
+                logger.warning(f"Enrichment failed for {contact.name}: {enrichment_result.get('error_message')}")
+                await LazarusRepository.update_focus_contact(
+                    db, contact.focus_id, contact.user_id, {
+                        "enrichment_status": "failed",
+                        "enriched_at": datetime.utcnow()
+                    }
+                )
+                return
+
+            # Extract enriched data
+            profile_data = enrichment_result.get("profile_data", {})
+
+            # Update contact with enriched data
+            enrichment_update = {
+                "email": enrichment_result.get("email"),
+                "phone": enrichment_result.get("phone"),
+                "profile_photo": profile_data.get("profile_photo"),
+                "headline": profile_data.get("headline"),
+                "location": profile_data.get("location"),
+                "connections_count": profile_data.get("connections_count"),
+                "about": profile_data.get("about"),
+                "work_experience": profile_data.get("work_experience"),
+                "education": profile_data.get("education"),
+                "skills": profile_data.get("skills"),
+                "languages": profile_data.get("languages"),
+                "certifications": profile_data.get("certifications"),
+                "enriched_at": datetime.utcnow(),
+                "enrichment_status": "completed"
+            }
+
+            # Update current_company if available
+            if profile_data.get("current_company"):
+                enrichment_update["current_company"] = profile_data.get("current_company")
+
+            await LazarusRepository.update_focus_contact(
+                db, contact.focus_id, contact.user_id, enrichment_update
+            )
+
+            logger.info(f"✅ Successfully auto-enriched contact: {contact.name}")
+            if enrichment_result.get("email"):
+                logger.info(f"   📧 Email: {enrichment_result.get('email')}")
+            if enrichment_result.get("phone"):
+                logger.info(f"   📱 Phone: {enrichment_result.get('phone')}")
+
+        except Exception as e:
+            logger.error(f"Error in auto-enrichment: {str(e)}")
+            try:
+                await LazarusRepository.update_focus_contact(
+                    db, contact.focus_id, contact.user_id, {
+                        "enrichment_status": "failed",
+                        "enriched_at": datetime.utcnow()
+                    }
+                )
+            except:
+                pass
+
+    @staticmethod
     async def _analyze_focus_contact(
         db: AsyncIOMotorDatabase,
         contact: FocusContact,
@@ -562,6 +710,29 @@ class LazarusMonitoringService:
                 all_content.extend([p.get("text", "") for p in linkedin_posts[:3]])
                 all_content.extend([t.get("text", "") for t in tweets[:3]])
 
+                # Get the primary post that triggered the signal (first post from primary platform)
+                primary_post = None
+                post_url = None
+                post_author = None
+                post_created_at = None
+                post_likes = None
+                post_comments = None
+
+                if primary_platform == "LinkedIn" and linkedin_posts:
+                    primary_post = linkedin_posts[0]
+                    post_url = primary_post.get("url") or primary_post.get("postUrl") or primary_post.get("link")
+                    post_author = primary_post.get("author", {}).get("name") if isinstance(primary_post.get("author"), dict) else primary_post.get("author")
+                    post_created_at = primary_post.get("created_at") or primary_post.get("postedAt")
+                    post_likes = primary_post.get("likes") or primary_post.get("numLikes")
+                    post_comments = primary_post.get("comments") or primary_post.get("numComments")
+                elif primary_platform == "Twitter" and tweets:
+                    primary_post = tweets[0]
+                    post_url = primary_post.get("url") or primary_post.get("tweet_url")
+                    post_author = primary_post.get("author", {}).get("username") if isinstance(primary_post.get("author"), dict) else primary_post.get("author")
+                    post_created_at = primary_post.get("created_at") or primary_post.get("createdAt")
+                    post_likes = primary_post.get("likes") or primary_post.get("likeCount")
+                    post_comments = primary_post.get("replies") or primary_post.get("replyCount")
+
                 # Create alert with AI analysis (platform-agnostic)
                 return {
                     "alert_id": str(uuid.uuid4()),
@@ -576,11 +747,17 @@ class LazarusMonitoringService:
                         "signal_type": signal_analysis.get("signal_type"),
                         "confidence": signal_analysis.get("confidence"),
                         "evidence_text": signal_analysis.get("evidence"),
-                        # Platform-agnostic fields
+                        # Platform-agnostic fields - THE POST THAT TRIGGERED THE ALERT
+                        "post_url": post_url,
                         "post_text": signal_analysis.get("evidence"),
                         "post_platform": primary_platform,
+                        "post_author": post_author,
+                        "post_created_at": post_created_at,
+                        "post_likes": post_likes,
+                        "post_comments": post_comments,
                         # Legacy field for backward compatibility
                         "tweet_text": signal_analysis.get("evidence"),
+                        "tweet_url": post_url if primary_platform == "Twitter" else None,
                     },
                     "suggested_pitch": suggested_pitch,
                     "status": LazarusAlertStatusEnum.NEW,
@@ -909,6 +1086,12 @@ class LazarusMonitoringService:
                             print(f"   Alert Type: {analysis_result.get('alert_type')}")
                             print(f"   Alert Message: {analysis_result.get('alert_message')}")
                             print(f"   Suggested Pitch: {analysis_result.get('suggested_pitch', 'N/A')[:100]}...")
+
+                            # Auto-enrich contact if alert created and not already enriched
+                            if contact.linkedin_url and not contact.enriched_at:
+                                print(f"🔍 Auto-enriching contact after alert creation...")
+                                await LazarusMonitoringService._auto_enrich_contact(db, contact)
+
                         except Exception as e:
                             logger.error(f"Failed to create alert: {str(e)}")
                             print(f"❌ Failed to create alert: {str(e)}")
@@ -994,7 +1177,13 @@ class LazarusMonitoringService:
             # Create alerts if detected
             for alert in [hiring_alert, cash_alert, pivot_alert, dead_alert]:
                 if alert:
-                    await LazarusRepository.create_alert(db, alert)
+                    # Calculate priority score
+                    alert_dict = alert.dict() if hasattr(alert, 'dict') else alert
+                    priority_score, priority_level = LazarusMonitoringService.calculate_priority_score(alert_dict)
+                    alert_dict["priority_score"] = priority_score
+                    alert_dict["priority_level"] = priority_level
+
+                    await LazarusRepository.create_alert(db, alert_dict)
                     total_alerts += 1
 
                     # Increment alert count

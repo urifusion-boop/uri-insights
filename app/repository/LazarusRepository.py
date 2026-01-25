@@ -588,6 +588,33 @@ class LazarusRepository:
             "last_resurrection_date": {"$gte": start_date}
         })
 
+        # Calculate real funnel metrics (for AdvancedAnalytics component)
+        # Get focus contacts and company monitors
+        focus_contacts = await db["focus_contacts"].count_documents({
+            "user_id": user_id,
+            "monitoring_status": "ACTIVE"
+        })
+        company_monitors = await db["company_monitors"].count_documents({
+            "user_id": user_id,
+            "monitoring_status": "ACTIVE"
+        })
+        contacts_monitored = focus_contacts + company_monitors
+
+        # Count scans completed in date range (actual scan attempts)
+        scans_completed = await db["focus_contacts"].count_documents({
+            "user_id": user_id,
+            "last_scan_date": {"$gte": start_date}
+        }) + await db["company_monitors"].count_documents({
+            "user_id": user_id,
+            "last_scan_date": {"$gte": start_date}
+        })
+
+        # Platform performance (count alerts by platform)
+        linkedin_alerts = len([a for a in all_alerts if a.get("evidence", {}).get("post_platform") == "LinkedIn"])
+        twitter_alerts = len([a for a in all_alerts if a.get("evidence", {}).get("post_platform") == "Twitter"])
+        facebook_alerts = len([a for a in all_alerts if a.get("evidence", {}).get("post_platform") == "Facebook"])
+        tiktok_alerts = len([a for a in all_alerts if a.get("evidence", {}).get("post_platform") == "TikTok"])
+
         return {
             # KPI Metrics
             "resurrection_rate": round(resurrection_rate, 1),
@@ -633,6 +660,23 @@ class LazarusRepository:
             # Plan info
             "plan_type": slots.plan_type,
             "should_upgrade": quota_utilization >= 90.0 and slots.plan_type == "BASIC",
+
+            # Phase 3: Real funnel metrics for AdvancedAnalytics component
+            "funnel_metrics": {
+                "contacts_monitored": contacts_monitored,
+                "scans_completed": scans_completed,
+                "alerts_created": total_alerts,
+                "contacts_reached": acted_upon,
+                "deals_resurrected": resurrected_leads,
+            },
+
+            # Platform performance breakdown
+            "platform_breakdown": {
+                "LinkedIn": linkedin_alerts,
+                "Twitter": twitter_alerts,
+                "Facebook": facebook_alerts,
+                "TikTok": tiktok_alerts,
+            }
         }
 
     # ============ HELPER METHODS FOR CRM SYNC ============

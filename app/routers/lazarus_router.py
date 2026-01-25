@@ -3,6 +3,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from typing import Optional, List
 from fastapi.encoders import jsonable_encoder
 import logging
+import uuid
 
 from app.dependencies import get_db_dependency
 from app.domain.responses.uri_response import UriResponse
@@ -13,6 +14,7 @@ from app.domain.schemas.lazarus_schema import (
     CompanyMonitorCreate,
     LazarusMonitoringStatusEnum,
     LazarusAlertStatusEnum,
+    LazarusMonitorTypeEnum,
     CSVUploadRow,
     DetectionRulesUpdate,
     KeywordExtractionRequest,
@@ -133,6 +135,135 @@ async def resume_focus_contact(
         return UriResponse.custom_response(result["message"], 404)
 
     return UriResponse.custom_response(result["message"], 200)
+
+
+@router.post("/focus-contacts/{focus_id}/enrich")
+async def enrich_focus_contact(
+    focus_id: str,
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Manually trigger LinkedIn profile enrichment for a focus contact
+    Phase 1: Contact Enrichment - Extracts email, phone, and profile data
+    """
+    from app.repository.LazarusRepository import LazarusRepository
+    from app.services.LinkedInProfileScraperService import LinkedInProfileScraperService
+    from datetime import datetime
+
+    # Get contact
+    contact = await LazarusRepository.get_focus_contact_by_id(db, focus_id, user_id)
+    if not contact:
+        return UriResponse.custom_response("Focus contact not found", 404)
+
+    # Check if LinkedIn URL exists
+    if not contact.linkedin_url:
+        return UriResponse.custom_response(
+            message="No LinkedIn URL found for this contact",
+            error_code=400,
+            success=False
+        )
+
+    logger.info(f"🔍 Enriching contact: {contact.name} ({focus_id})")
+
+    # Update status to pending
+    await LazarusRepository.update_focus_contact(
+        db, focus_id, user_id, {"enrichment_status": "pending"}
+    )
+
+    # Call LinkedIn Profile Scraper
+    scraper_service = LinkedInProfileScraperService()
+    enrichment_result = await scraper_service.enrich_profile(
+        linkedin_url=contact.linkedin_url,
+        timeout_seconds=90
+    )
+
+    if not enrichment_result.get("success"):
+        # Mark as failed
+        await LazarusRepository.update_focus_contact(
+            db, focus_id, user_id, {
+                "enrichment_status": "failed",
+                "enriched_at": datetime.utcnow()
+            }
+        )
+        return UriResponse.custom_response(
+            message=f"Enrichment failed: {enrichment_result.get('error_message', 'Unknown error')}",
+            error_code=500,
+            success=False
+        )
+
+    # Extract enriched data
+    profile_data = enrichment_result.get("profile_data", {})
+
+    # Update contact with enriched data
+    enrichment_update = {
+        "email": enrichment_result.get("email"),
+        "phone": enrichment_result.get("phone"),
+        "profile_photo": profile_data.get("profile_photo"),
+        "headline": profile_data.get("headline"),
+        "location": profile_data.get("location"),
+        "connections_count": profile_data.get("connections_count"),
+        "about": profile_data.get("about"),
+        "work_experience": profile_data.get("work_experience"),
+        "education": profile_data.get("education"),
+        "skills": profile_data.get("skills"),
+        "languages": profile_data.get("languages"),
+        "certifications": profile_data.get("certifications"),
+        "enriched_at": datetime.utcnow(),
+        "enrichment_status": "completed"
+    }
+
+    # Update current_company if we got it from enrichment
+    if profile_data.get("current_company"):
+        enrichment_update["current_company"] = profile_data.get("current_company")
+
+    updated = await LazarusRepository.update_focus_contact(
+        db, focus_id, user_id, enrichment_update
+    )
+
+    if not updated:
+        return UriResponse.custom_response("Failed to save enrichment data", 500)
+
+    logger.info(f"✅ Successfully enriched contact: {contact.name}")
+    if enrichment_result.get("email"):
+        logger.info(f"   📧 Email: {enrichment_result.get('email')}")
+    if enrichment_result.get("phone"):
+        logger.info(f"   📱 Phone: {enrichment_result.get('phone')}")
+
+    return UriResponse.custom_response(
+        message="Contact enriched successfully",
+        error_code=200,
+        success=True,
+        data={
+            "email": enrichment_result.get("email"),
+            "phone": enrichment_result.get("phone"),
+            "profile_data": profile_data
+        }
+    )
+
+
+@router.get("/focus-contacts/{focus_id}/detail")
+async def get_focus_contact_detail(
+    focus_id: str,
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Get full contact details including enrichment data
+    Phase 1: Contact Detail Page
+    """
+    from app.repository.LazarusRepository import LazarusRepository
+
+    contact = await LazarusRepository.get_focus_contact_by_id(db, focus_id, user_id)
+    if not contact:
+        return UriResponse.custom_response("Focus contact not found", 404)
+
+    return UriResponse.custom_response(
+        message="Contact details retrieved successfully",
+        error_code=200,
+        success=True,
+        data=jsonable_encoder(contact)
+    )
 
 
 # ============ DIAGNOSTIC TEST ENDPOINTS ============
@@ -383,6 +514,162 @@ async def dismiss_alert(
         return UriResponse.custom_response(result["message"], 404)
 
     return UriResponse.custom_response(result["message"], 200)
+
+
+@router.put("/alerts/{alert_id}/viewed")
+async def mark_alert_viewed(
+    alert_id: str,
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """Mark an alert as viewed"""
+    from app.repository.LazarusRepository import LazarusRepository
+    from datetime import datetime
+
+    updated = await LazarusRepository.update_alert_status(
+        db, alert_id, user_id, LazarusAlertStatusEnum.VIEWED
+    )
+
+    if not updated:
+        return UriResponse.custom_response("Alert not found", 404)
+
+    return UriResponse.custom_response(
+        message="Alert marked as viewed",
+        error_code=200,
+        success=True
+    )
+
+
+@router.put("/alerts/{alert_id}/resurrected")
+async def mark_alert_resurrected(
+    alert_id: str,
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Mark an alert as resurrected (deal won!)
+    Phase 1: Alert Workflow System
+    """
+    from app.repository.LazarusRepository import LazarusRepository
+    from datetime import datetime
+
+    # Get the alert
+    alert = await LazarusRepository.get_alert_by_id(db, alert_id, user_id)
+    if not alert:
+        return UriResponse.custom_response("Alert not found", 404)
+
+    # Update alert status - using ACTED as "resurrected" since schema doesn't have RESURRECTED enum
+    # In future, we can add RESURRECTED to the enum
+    updated = await LazarusRepository.update_alert_status(
+        db, alert_id, user_id, LazarusAlertStatusEnum.ACTED
+    )
+
+    # Also mark the contact/monitor as resurrected (update metrics)
+    if alert.source_type == LazarusMonitorTypeEnum.FOCUS_CONTACT:
+        await LazarusRepository.update_focus_contact(
+            db, alert.source_id, user_id, {
+                "marked_dead_date": None,  # No longer dead!
+                "monitoring_status": LazarusMonitoringStatusEnum.ACTIVE
+            }
+        )
+
+    return UriResponse.custom_response(
+        message="🎉 Alert marked as resurrected! Deal won!",
+        error_code=200,
+        success=True
+    )
+
+
+@router.post("/alerts/{alert_id}/outreach")
+async def log_outreach(
+    alert_id: str,
+    user_id: str = Query(...),
+    outreach_type: str = Query(...),  # "email", "phone", "whatsapp", "other"
+    notes: Optional[str] = Query(None),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Log an outreach attempt for an alert
+    Phase 1: Alert Workflow System
+    """
+    from app.repository.LazarusRepository import LazarusRepository
+    from datetime import datetime
+
+    # Get the alert
+    alert = await LazarusRepository.get_alert_by_id(db, alert_id, user_id)
+    if not alert:
+        return UriResponse.custom_response("Alert not found", 404)
+
+    # Create outreach log entry
+    outreach_log = {
+        "outreach_id": str(uuid.uuid4()),
+        "alert_id": alert_id,
+        "user_id": user_id,
+        "source_type": alert.source_type,
+        "source_id": alert.source_id,
+        "outreach_type": outreach_type,
+        "notes": notes,
+        "timestamp": datetime.utcnow()
+    }
+
+    # Store in new collection: lazarus_outreach_log
+    await db["lazarus_outreach_log"].insert_one(outreach_log)
+
+    # Auto-mark alert as contacted if this is first outreach
+    if alert.status == LazarusAlertStatusEnum.NEW or alert.status == LazarusAlertStatusEnum.VIEWED:
+        await LazarusRepository.update_alert_status(
+            db, alert_id, user_id, LazarusAlertStatusEnum.ACTED
+        )
+
+    logger.info(f"📞 Outreach logged: {outreach_type} for alert {alert_id}")
+
+    return UriResponse.custom_response(
+        message=f"Outreach logged successfully ({outreach_type})",
+        error_code=200,
+        success=True,
+        data={"outreach_id": outreach_log["outreach_id"]}
+    )
+
+
+@router.put("/alerts/{alert_id}/assign")
+async def assign_alert(
+    alert_id: str,
+    user_id: str = Query(...),
+    assigned_to_user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Assign an alert to a team member
+    Phase 2: Team Collaboration
+    """
+    from app.repository.LazarusRepository import LazarusRepository
+    from datetime import datetime
+
+    # Get the alert
+    alert = await LazarusRepository.get_alert_by_id(db, alert_id, user_id)
+    if not alert:
+        return UriResponse.custom_response("Alert not found", 404)
+
+    # Update assignment
+    update_data = {
+        "assigned_to": assigned_to_user_id,
+        "assigned_at": datetime.utcnow(),
+        "assigned_by": user_id
+    }
+
+    await db["lazarus_alerts"].update_one(
+        {"alert_id": alert_id, "user_id": user_id},
+        {"$set": update_data}
+    )
+
+    logger.info(f"👥 Alert {alert_id} assigned to {assigned_to_user_id} by {user_id}")
+
+    return UriResponse.custom_response(
+        message="Alert assigned successfully",
+        error_code=200,
+        success=True,
+        data=update_data
+    )
 
 
 # ============ SLOTS & METRICS ============
@@ -750,4 +1037,45 @@ async def get_analytics_data(
     analytics = await LazarusService.get_analytics_data(db, user_id, days)
     return UriResponse.custom_response(
         "Analytics data retrieved successfully", 200, analytics
+    )
+
+
+@router.post("/alerts/recalculate-priority")
+async def recalculate_alert_priorities(
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Recalculate priority scores for all NEW alerts
+    Useful for existing alerts that don't have priority scores yet
+    """
+    from app.services.LazarusMonitoringService import LazarusMonitoringService
+
+    # Get all NEW alerts for user
+    alerts = await db["lazarus_alerts"].find({
+        "user_id": user_id,
+        "status": "NEW"
+    }).to_list(None)
+
+    updated_count = 0
+    for alert in alerts:
+        # Calculate priority score
+        priority_score, priority_level = LazarusMonitoringService.calculate_priority_score(alert)
+
+        # Update alert
+        await db["lazarus_alerts"].update_one(
+            {"alert_id": alert["alert_id"]},
+            {"$set": {
+                "priority_score": priority_score,
+                "priority_level": priority_level
+            }}
+        )
+        updated_count += 1
+
+    logger.info(f"🔥 Recalculated priority for {updated_count} alerts for user {user_id}")
+
+    return UriResponse.custom_response(
+        f"Recalculated priority for {updated_count} alerts",
+        200,
+        {"updated_count": updated_count}
     )

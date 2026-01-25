@@ -95,6 +95,22 @@ class FocusContact(BaseModel):
     # Industry keywords for tweet monitoring
     industry_keywords: List[str] = []  # ["logistics", "inverter", "diesel"]
 
+    # Enrichment data (Phase 1: Contact Enrichment)
+    email: Optional[str] = None  # Extracted from LinkedIn Profile Scraper
+    phone: Optional[str] = None  # Extracted from LinkedIn Profile Scraper
+    profile_photo: Optional[str] = None  # Profile photo URL
+    headline: Optional[str] = None  # Current headline/position
+    location: Optional[str] = None  # Geographic location
+    connections_count: Optional[int] = None  # LinkedIn connections
+    about: Optional[str] = None  # About/bio section
+    work_experience: Optional[List[Dict[str, Any]]] = None  # Work history
+    education: Optional[List[Dict[str, Any]]] = None  # Education history
+    skills: Optional[List[str]] = None  # Skills
+    languages: Optional[List[str]] = None  # Languages
+    certifications: Optional[List[Dict[str, Any]]] = None  # Certifications
+    enriched_at: Optional[datetime] = None  # When enrichment was performed
+    enrichment_status: Optional[str] = None  # "pending", "completed", "failed"
+
     # Monitoring state
     monitoring_status: LazarusMonitoringStatusEnum = LazarusMonitoringStatusEnum.ACTIVE
     last_scan_date: Optional[datetime] = None
@@ -196,10 +212,14 @@ class LazarusAlertEvidence(BaseModel):
     old_company: Optional[str] = None
     new_company: Optional[str] = None
 
-    # For social signals (platform-agnostic)
+    # For social signals (platform-agnostic) - THE POST THAT TRIGGERED THE ALERT
     post_url: Optional[str] = None  # URL to the post (LinkedIn, Twitter, TikTok, Facebook)
     post_text: Optional[str] = None  # Content of the post
     post_platform: Optional[str] = None  # "LinkedIn", "Twitter", "TikTok", "Facebook"
+    post_author: Optional[str] = None  # Author name/username
+    post_created_at: Optional[str] = None  # When the post was created
+    post_likes: Optional[int] = None  # Number of likes
+    post_comments: Optional[int] = None  # Number of comments
 
     # Legacy fields (backward compatibility)
     tweet_url: Optional[str] = None
@@ -252,6 +272,15 @@ class LazarusAlert(BaseModel):
 
     # Link to original lead
     source_lead_id: Optional[str] = None
+
+    # Phase 2: Team Collaboration
+    assigned_to: Optional[str] = None  # User ID of assigned team member
+    assigned_at: Optional[datetime] = None  # When assignment was made
+    assigned_by: Optional[str] = None  # User ID who made the assignment
+
+    # Phase 3: AI Priority Scoring
+    priority_score: Optional[int] = None  # 0-100 score based on signal strength, recency, contact seniority
+    priority_level: Optional[str] = None  # "HOT" (80-100), "WARM" (50-79), "COLD" (0-49)
 
     # Metadata
     created_at: datetime = Field(default_factory=datetime.utcnow)
