@@ -76,18 +76,28 @@ class LazarusMonitoringService:
             score += 10  # Within 3 days
         # else: 0 points (older than 3 days)
 
-        # Factor 3: Signal type priority (0-30 points)
+        # Factor 3: Signal type priority (0-30 points) - Enhanced for 11 signals
         signal_type = alert.get("evidence", {}).get("signal_type", "").lower()
         alert_type = alert.get("alert_type", "")
 
-        if signal_type == "switch" or "JOB_CHANGE" in str(alert_type):
-            score += 30  # Switch signals = highest priority (actively looking)
-        elif signal_type == "pain":
-            score += 25  # Pain signals = high priority (has a problem)
-        elif signal_type == "funding" or signal_type == "cash_injection":
-            score += 20  # Funding = medium-high priority (has budget)
+        # Career Change Signals = HIGHEST priority (30 points)
+        if signal_type in ["promoted", "changed_jobs", "new_decision_maker"] or "PROMOTED" in str(alert_type) or "CHANGED_JOBS" in str(alert_type):
+            score += 30  # Fresh start, new budget, looking for tools
+        # Pain + Switch Signals = HIGH priority (25-28 points)
+        elif signal_type == "competitor_complaint":
+            score += 28  # Complaining about competitor = ready to switch NOW
+        elif signal_type in ["pain", "switch"] or "SWITCH" in str(alert_type):
+            score += 25  # Has problem or actively looking
+        # Business Growth Signals = MEDIUM-HIGH priority (20-22 points)
+        elif signal_type == "expansion" or "EXPANSION" in str(alert_type):
+            score += 22  # Scaling, has budget
+        elif signal_type in ["raised_funds", "funding"] or "CASH_INJECTION" in str(alert_type):
+            score += 20  # Has fresh capital
         elif signal_type == "hiring" or "HIRING_SPREE" in str(alert_type):
-            score += 15  # Hiring = medium priority (growing)
+            score += 18  # Growing team
+        # Engagement Signals = WARM priority (15 points)
+        elif signal_type in ["interacts_with_content", "likes_competitor"]:
+            score += 15  # Warm lead, knows about you
         else:
             score += 10  # Other signals
 
@@ -633,8 +643,15 @@ class LazarusMonitoringService:
         PRD Section 5.1: Detection Logic
         """
         # Fetch user's signal preferences from their settings
-        # Default to all signal types if no settings found
-        user_signal_preferences = ["pain", "switch", "hiring", "funding"]
+        # Default to all 9 content-based signal types (excluding metadata-based signals)
+        user_signal_preferences = [
+            # Career Change
+            "promoted", "changed_jobs", "new_decision_maker",
+            # Business Growth
+            "raised_funds", "hiring", "expansion",
+            # Pain/Interest
+            "pain", "competitor_complaint", "switch"
+        ]
 
         try:
             # Try to get user's AutoDetectionSettings
@@ -674,17 +691,32 @@ class LazarusMonitoringService:
                 print(f"   Type: {signal_analysis.get('signal_type')}")
                 print(f"   Confidence: {signal_analysis.get('confidence')}")
                 print(f"   Evidence: {signal_analysis.get('evidence', '')[:200]}...")
-                # Map signal_type to alert_type
+                # Map signal_type to alert_type (Enhanced with 11 signals)
                 signal_type_map = {
-                    "pain": LazarusAlertTypeEnum.BUYING_INTENT,
-                    "switch": LazarusAlertTypeEnum.BUYING_INTENT,
+                    # Career Change Signals
+                    "promoted": LazarusAlertTypeEnum.PROMOTED,
+                    "changed_jobs": LazarusAlertTypeEnum.CHANGED_JOBS,
+                    "new_decision_maker": LazarusAlertTypeEnum.NEW_DECISION_MAKER,
+
+                    # Business Growth Signals
+                    "raised_funds": LazarusAlertTypeEnum.CASH_INJECTION,
+                    "funding": LazarusAlertTypeEnum.CASH_INJECTION,  # alias
                     "hiring": LazarusAlertTypeEnum.HIRING_SPREE,
-                    "funding": LazarusAlertTypeEnum.CASH_INJECTION,
+                    "expansion": LazarusAlertTypeEnum.EXPANSION,
+
+                    # Pain Signals
+                    "pain": LazarusAlertTypeEnum.PAIN_SIGNAL,
+                    "competitor_complaint": LazarusAlertTypeEnum.COMPETITOR_COMPLAINT,
+
+                    # Engagement Signals
+                    "switch": LazarusAlertTypeEnum.SWITCH_SIGNAL,
+                    "likes_competitor": LazarusAlertTypeEnum.LIKES_COMPETITOR,
+                    "interacts_with_content": LazarusAlertTypeEnum.INTERACTS_WITH_CONTENT,
                 }
 
                 alert_type = signal_type_map.get(
                     signal_analysis.get("signal_type", "pain"),
-                    LazarusAlertTypeEnum.BUYING_INTENT
+                    LazarusAlertTypeEnum.BUYING_INTENT  # fallback
                 )
 
                 # Generate AI-powered pitch
@@ -1164,6 +1196,11 @@ class LazarusMonitoringService:
                 db, monitor
             )
 
+            # Detect expansion (new offices, market entry)
+            expansion_alert = await LazarusMonitoringService._detect_expansion(
+                db, monitor
+            )
+
             # Detect homepage changes (pivot detection)
             pivot_alert = await LazarusMonitoringService._detect_strategic_pivot(
                 db, monitor
@@ -1175,7 +1212,7 @@ class LazarusMonitoringService:
             )
 
             # Create alerts if detected
-            for alert in [hiring_alert, cash_alert, pivot_alert, dead_alert]:
+            for alert in [hiring_alert, cash_alert, expansion_alert, pivot_alert, dead_alert]:
                 if alert:
                     # Calculate priority score
                     alert_dict = alert.dict() if hasattr(alert, 'dict') else alert
@@ -1348,6 +1385,69 @@ class LazarusMonitoringService:
 
         except Exception as e:
             logger.error(f"Error detecting cash injection for {monitor.company_name}: {str(e)}")
+            return None
+
+    @staticmethod
+    async def _detect_expansion(
+        db: AsyncIOMotorDatabase, monitor: CompanyMonitor
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Detect company expansion via Google News
+        Triggers on: new office openings, market entry, geographic expansion
+        """
+        try:
+            google_service = ApifyGoogleSearchService()
+
+            # Build dork query for expansion signals
+            dork_query = f'"{monitor.company_name}" ("expanding" OR "new office" OR "opening in" OR "expansion" OR "entering market" OR "opens new")'
+
+            logger.info(f"🔍 Searching for expansion signals: {dork_query}")
+
+            country_code = monitor.country_code if hasattr(monitor, 'country_code') and monitor.country_code else "us"
+
+            results = await google_service.search(
+                dork_query=dork_query,
+                max_results=10,
+                country_code=country_code
+            )
+
+            # Look for recent expansion news (within 30 days)
+            if results and len(results) > 0:
+                recent_news = [r for r in results if r.source_date and
+                               (datetime.utcnow() - r.source_date.replace(tzinfo=None)).days <= 30]
+
+                if recent_news:
+                    news_item = recent_news[0]
+
+                    logger.info(f"📈 EXPANSION DETECTED: {monitor.company_name} - {news_item.title}")
+
+                    return {
+                        "alert_id": str(uuid.uuid4()),
+                        "user_id": monitor.user_id,
+                        "source_type": LazarusMonitorTypeEnum.COMPANY,
+                        "source_id": monitor.monitor_id,
+                        "alert_type": LazarusAlertTypeEnum.EXPANSION,
+                        "alert_message": f"Growth Alert: {monitor.company_name} is expanding operations",
+                        "evidence": {
+                            "detected_date": datetime.utcnow().isoformat(),
+                            "signal_source": f"Google News - {news_item.url}",
+                            "old_value": None,
+                            "new_value": news_item.title,
+                            "tweets": [news_item.snippet],
+                            "signal_type": "expansion",
+                            "confidence": 0.85
+                        },
+                        "suggested_pitch": f"Congratulations on {monitor.company_name}'s expansion! Growing teams often need solutions like ours - let's chat.",
+                        "status": LazarusAlertStatusEnum.NEW,
+                        "resurrected_lead_id": monitor.source_lead_id,
+                        "created_date": datetime.utcnow(),
+                        "last_updated": datetime.utcnow(),
+                    }
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Error detecting expansion for {monitor.company_name}: {str(e)}")
             return None
 
     @staticmethod

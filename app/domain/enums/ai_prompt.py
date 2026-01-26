@@ -709,30 +709,66 @@ Context:
 - Industry Keywords: {keywords}
 - Signal Types to Detect: {signal_types}
 
-Tweets to analyze:
+Posts to analyze:
 {tweets}
 
-Signal Type Definitions:
-- "pain": Expressing frustration, complaints, problems with current tools/solutions
-- "switch": Looking for alternatives, considering switching, asking for recommendations
-- "hiring": Company is hiring, expanding team, job postings
-- "funding": Company received investment, raised capital, announced funding
+Signal Type Definitions (11 Categories):
+
+🎯 CAREER CHANGE SIGNALS (Highest Priority):
+- "promoted": Person announces they've been promoted to a new role/title (VP, Director, Manager, etc.)
+  Examples: "Excited to announce my promotion to VP of Sales!", "New role alert: Director of Engineering"
+- "changed_jobs": Person switched companies or started a new position at a different company
+  Examples: "Thrilled to join Acme Corp as Head of Marketing", "Day 1 at my new role"
+- "new_decision_maker": Person explicitly mentions they're now responsible for decisions/budget in a relevant area
+  Examples: "Now leading our tech stack decisions", "Responsible for vendor selection"
+
+💰 BUSINESS GROWTH SIGNALS (Budget Available):
+- "raised_funds": Company announced funding, investment, or capital raise
+  Examples: "We raised $10M Series A!", "Excited to announce our seed round"
+- "hiring": Company is hiring for roles related to your solution, team expansion
+  Examples: "We're hiring 5 engineers!", "Join our growing sales team"
+- "expansion": Company announces office expansion, new market entry, or scaling operations
+  Examples: "Opening our London office!", "Expanding to APAC region", "Doubled our team size"
+
+😫 PAIN SIGNALS (Active Problem):
+- "pain": Expressing frustration, complaints, or problems with current tools/solutions you can solve
+  Examples: "Our CRM is so slow", "Wasting hours on manual data entry", "This tool is frustrating"
+- "competitor_complaint": Specifically complaining about or expressing dissatisfaction with a competitor's product
+  Examples: "Salesforce is too expensive", "HubSpot's UI is confusing", "Tired of [competitor] bugs"
+
+🔥 ENGAGEMENT SIGNALS (Warm/Interested):
+- "switch": Actively looking for alternatives, asking for recommendations, considering switching tools
+  Examples: "Anyone know a good alternative to X?", "Evaluating new solutions", "Time to switch"
+- "likes_competitor": This signal requires metadata analysis (not text-based). Skip for now.
+- "interacts_with_content": This signal requires metadata analysis (not text-based). Skip for now.
 
 Task:
-Analyze the tweets and determine if ANY of the specified signal types are present.
+Analyze the posts and determine if ANY of the specified signal types are present.
 Consider:
 1. Does the content mention any of the industry keywords?
-2. Does it express pain points or dissatisfaction?
-3. Is the person asking for recommendations or alternatives?
-4. Is there indication of budget/buying authority?
-5. Are there hiring or funding announcements?
+2. Are there explicit career changes, promotions, or new responsibilities mentioned?
+3. Are there funding announcements, hiring posts, or expansion news?
+4. Does it express pain points, frustration, or dissatisfaction?
+5. Is the person asking for recommendations or alternatives?
+6. Is there indication of budget/buying authority?
+7. Look for EXACT phrases like "promoted", "new role", "joining", "we raised", "we're hiring", "expanding to"
+
+IMPORTANT DETECTION RULES:
+- For "promoted": Look for words like "promoted", "new title", "new position", "VP", "Director", "Head of"
+- For "changed_jobs": Look for "joining", "new role at", "excited to announce", "day 1 at"
+- For "raised_funds": Look for "$", "raised", "funding", "Series A/B/C", "investment", "capital"
+- For "hiring": Look for "we're hiring", "join our team", "open positions", "looking for"
+- For "expansion": Look for "expanding", "opening", "new office", "scaling", "growing to"
+- For "pain": Look for negative emotions: "frustrated", "slow", "broken", "wasting time", "annoying"
+- For "competitor_complaint": Look for competitor names + negative words
+- For "switch": Look for "alternative", "recommendations", "switching from", "looking for"
 
 Return a JSON object with:
 {{
     "signal_detected": boolean,
-    "signal_type": "pain" | "switch" | "hiring" | "funding" | null,
+    "signal_type": "promoted" | "changed_jobs" | "new_decision_maker" | "raised_funds" | "hiring" | "expansion" | "pain" | "competitor_complaint" | "switch" | null,
     "confidence": 0.0 to 1.0,
-    "evidence": "quote from tweet that triggered detection",
+    "evidence": "exact quote from post that triggered detection",
     "reason": "brief explanation of why this is a buying signal"
 }}
 

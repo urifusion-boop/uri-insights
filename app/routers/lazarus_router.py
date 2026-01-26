@@ -199,6 +199,7 @@ async def enrich_focus_contact(
     enrichment_update = {
         "email": enrichment_result.get("email"),
         "phone": enrichment_result.get("phone"),
+        "linkedin_url": contact.linkedin_url,  # Preserve the LinkedIn URL we used to scrape
         "profile_photo": profile_data.get("profile_photo"),
         "headline": profile_data.get("headline"),
         "location": profile_data.get("location"),
@@ -254,10 +255,20 @@ async def get_focus_contact_detail(
     """
     from app.repository.LazarusRepository import LazarusRepository
 
+    logger.info(f"🔍 Looking for focus contact: focus_id={focus_id}, user_id={user_id}")
     contact = await LazarusRepository.get_focus_contact_by_id(db, focus_id, user_id)
+
     if not contact:
+        logger.warning(f"❌ Focus contact not found: focus_id={focus_id}, user_id={user_id}")
+        # Check if it exists for any user (debugging)
+        any_contact = await db["focus_contacts"].find_one({"focus_id": focus_id})
+        if any_contact:
+            logger.warning(f"⚠️ Contact exists but for different user: {any_contact.get('user_id')}")
+        else:
+            logger.warning(f"⚠️ Contact does not exist in database at all")
         return UriResponse.custom_response("Focus contact not found", 404)
 
+    logger.info(f"✅ Contact found: {contact.name}")
     return UriResponse.custom_response(
         message="Contact details retrieved successfully",
         error_code=200,

@@ -36,18 +36,32 @@ class LazarusMonitoringStatusEnum(str, Enum):
 
 
 class LazarusAlertTypeEnum(str, Enum):
-    """Types of resurrection signals (PRD Section 3)"""
-    # Focus Contact Alerts
-    JOB_EXIT = "JOB_EXIT"  # Removed company from bio
-    CHAMPION_MOVE = "CHAMPION_MOVE"  # Moved to new company
-    PAIN_SIGNAL = "PAIN_SIGNAL"  # Complaining about competitor
-    BUYING_INTENT = "BUYING_INTENT"  # Asking for recommendations
+    """Types of resurrection signals (Enhanced with 11 signal types)"""
+    # Focus Contact Alerts - Career Change (Highest Priority)
+    JOB_EXIT = "JOB_EXIT"  # Removed company from bio (legacy)
+    CHAMPION_MOVE = "CHAMPION_MOVE"  # Moved to new company (legacy)
+    PROMOTED = "PROMOTED"  # Promoted to new role/title
+    CHANGED_JOBS = "CHANGED_JOBS"  # Switched companies
+    NEW_DECISION_MAKER = "NEW_DECISION_MAKER"  # Now responsible for decisions/budget
 
-    # Company Alerts
+    # Focus Contact Alerts - Pain/Interest Signals
+    PAIN_SIGNAL = "PAIN_SIGNAL"  # Complaining about current tools (legacy)
+    BUYING_INTENT = "BUYING_INTENT"  # Asking for recommendations (legacy)
+    COMPETITOR_COMPLAINT = "COMPETITOR_COMPLAINT"  # Complaining about competitor
+    SWITCH_SIGNAL = "SWITCH_SIGNAL"  # Looking for alternatives
+
+    # Company Alerts - Business Growth
     HIRING_SPREE = "HIRING_SPREE"  # Added multiple job postings
     CASH_INJECTION = "CASH_INJECTION"  # Received funding
+    EXPANSION = "EXPANSION"  # Office expansion, new market entry
+
+    # Company Alerts - Other
     STRATEGIC_PIVOT = "STRATEGIC_PIVOT"  # Changed product/service offering
     COMPANY_DEAD = "COMPANY_DEAD"  # Website offline (obituary)
+
+    # Engagement Signals (metadata-based, handled separately)
+    LIKES_COMPETITOR = "LIKES_COMPETITOR"  # Liked/engaged with competitor post
+    INTERACTS_WITH_CONTENT = "INTERACTS_WITH_CONTENT"  # Engaged with user's content
 
 
 class LazarusAlertStatusEnum(str, Enum):
@@ -464,9 +478,9 @@ class ScanResponse(BaseModel):
 # ========================================
 
 class BuyingSignalAnalysis(BaseModel):
-    """AI analysis result for buying signal detection"""
+    """AI analysis result for buying signal detection (Enhanced with 11 signals)"""
     signal_detected: bool
-    signal_type: Optional[str] = None  # "pain", "switch", "hiring", "funding"
+    signal_type: Optional[str] = None  # "promoted", "changed_jobs", "new_decision_maker", "raised_funds", "hiring", "expansion", "pain", "competitor_complaint", "switch", "likes_competitor", "interacts_with_content"
     confidence: float
     evidence: Optional[str] = None
     reason: Optional[str] = None
