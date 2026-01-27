@@ -9,6 +9,7 @@ from app.dependencies import get_db_dependency
 from app.domain.responses.uri_response import UriResponse
 from app.services.LazarusService import LazarusService
 from app.services.LazarusMonitoringService import LazarusMonitoringService
+from app.repository.LazarusRepository import LazarusRepository
 from app.domain.schemas.lazarus_schema import (
     FocusContactCreate,
     CompanyMonitorCreate,
@@ -1132,3 +1133,127 @@ async def recalculate_alert_priorities(
         200,
         {"updated_count": updated_count}
     )
+
+
+# ============ SCANNED CONTENT ============
+@router.get("/scanned-content")
+async def get_scanned_content(
+    user_id: str = Query(...),
+    skip: int = Query(0),
+    limit: int = Query(50),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Get all scanned content (posts and profile scans) for Phase 2: Scanned Content Tab
+
+    Returns:
+    - Posts that triggered alerts (grouped by contact/company)
+    - Profile scan history (when scans occurred and what was found)
+    """
+    from app.repository.LazarusRepository import LazarusRepository
+    from datetime import datetime
+
+    try:
+        # Get all alerts for this user (all statuses) to show posts that triggered them
+        all_alerts = await db["lazarus_alerts"].find({
+            "user_id": user_id
+        }).sort("created_date", -1).limit(limit).skip(skip).to_list(None)
+
+        # Get all focus contacts and company monitors for this user
+        focus_contacts = await LazarusRepository.get_focus_contacts_by_user(db, user_id)
+        company_monitors = await LazarusRepository.get_company_monitors_by_user(db, user_id)
+
+        # Build posts list from alerts with evidence
+        scanned_posts = []
+        for alert in all_alerts:
+            evidence = alert.get("evidence", {})
+            if evidence.get("post_text") or evidence.get("tweet_text"):
+                post = {
+                    "post_id": alert.get("alert_id"),
+                    "source_type": alert.get("source_type"),
+                    "source_id": alert.get("source_id"),
+                    "source_name": alert.get("source_name"),
+                    "platform": evidence.get("post_platform", "Unknown"),
+                    "text": evidence.get("post_text") or evidence.get("tweet_text"),
+                    "author": evidence.get("post_author"),
+                    "url": evidence.get("post_url") or evidence.get("tweet_url"),
+                    "created_at": evidence.get("post_created_at"),
+                    "likes": evidence.get("post_likes", 0),
+                    "comments": evidence.get("post_comments", 0),
+                    "alert_type": alert.get("alert_type"),
+                    "alert_created": alert.get("created_date"),
+                    "signal_type": evidence.get("signal_type"),
+                    "confidence": evidence.get("confidence"),
+                }
+                scanned_posts.append(post)
+
+        # Build profile scans list (scan history)
+        profile_scans = []
+
+        # Focus contacts scan history
+        for contact in focus_contacts:
+            if contact.get("last_scan_date"):
+                scan = {
+                    "scan_id": f"{contact.get('focus_id')}_{contact.get('last_scan_date')}",
+                    "source_type": "FOCUS_CONTACT",
+                    "source_id": contact.get("focus_id"),
+                    "source_name": contact.get("name"),
+                    "scan_date": contact.get("last_scan_date"),
+                    "next_scan_date": contact.get("next_scan_date"),
+                    "scan_count": contact.get("scan_count", 0),
+                    "alert_count": contact.get("alert_count", 0),
+                    "scan_frequency_days": contact.get("scan_frequency_days", 7),
+                    "status": contact.get("monitoring_status"),
+                    "platforms": [],
+                }
+
+                # Determine platforms being monitored
+                if contact.get("linkedin_url"):
+                    scan["platforms"].append("LinkedIn")
+                if contact.get("twitter_url") or contact.get("social_handle"):
+                    scan["platforms"].append("Twitter")
+
+                profile_scans.append(scan)
+
+        # Company monitors scan history
+        for monitor in company_monitors:
+            if monitor.get("last_scan_date"):
+                scan = {
+                    "scan_id": f"{monitor.get('monitor_id')}_{monitor.get('last_scan_date')}",
+                    "source_type": "COMPANY_MONITOR",
+                    "source_id": monitor.get("monitor_id"),
+                    "source_name": monitor.get("company_name"),
+                    "scan_date": monitor.get("last_scan_date"),
+                    "next_scan_date": monitor.get("next_scan_date"),
+                    "scan_count": monitor.get("scan_count", 0),
+                    "alert_count": monitor.get("alert_count", 0),
+                    "scan_frequency_days": monitor.get("scan_frequency_days", 7),
+                    "status": monitor.get("monitoring_status"),
+                    "platforms": ["LinkedIn", "Company Website"],
+                }
+                profile_scans.append(scan)
+
+        # Sort profile scans by most recent first
+        profile_scans.sort(key=lambda x: x.get("scan_date") or datetime.min, reverse=True)
+
+        return UriResponse.custom_response(
+            message="Scanned content retrieved successfully",
+            error_code=200,
+            success=True,
+            data={
+                "posts": scanned_posts,
+                "profile_scans": profile_scans[:limit],
+                "total_posts": len(scanned_posts),
+                "total_scans": len(profile_scans),
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"❌ Error fetching scanned content: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return UriResponse.custom_response(
+            message=f"Failed to fetch scanned content: {str(e)}",
+            error_code=500,
+            success=False
+        )
