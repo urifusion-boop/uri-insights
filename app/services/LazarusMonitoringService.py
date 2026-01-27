@@ -860,38 +860,31 @@ class LazarusMonitoringService:
                 }
 
         except Exception as e:
-            logger.error(f"AI buying intent detection failed: {e}")
-            # Fallback to simple keyword matching if AI fails
-            return await LazarusMonitoringService._fallback_keyword_detection(
-                tweets, linkedin_posts, contact.industry_keywords
-            )
+            logger.error(f"❌ AI buying intent detection failed for {contact.name}: {e}")
+            logger.error(f"   Contact ID: {contact.focus_id}")
+            logger.error(f"   Posts analyzed: {len(tweets)} tweets, {len(linkedin_posts)} LinkedIn posts")
 
-        return None
+            # Store failure for monitoring and retry
+            try:
+                await db["ai_detection_failures"].insert_one({
+                    "contact_id": contact.focus_id,
+                    "contact_name": contact.name,
+                    "user_id": contact.user_id,
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                    "post_count": len(tweets) + len(linkedin_posts),
+                    "timestamp": datetime.utcnow(),
+                    "retry_count": 0,
+                    "next_retry": datetime.utcnow() + timedelta(hours=2)
+                })
+                logger.info(f"   Logged failure for retry in 2 hours")
+            except Exception as log_error:
+                logger.error(f"   Failed to log AI failure: {log_error}")
 
-    @staticmethod
-    async def _fallback_keyword_detection(
-        tweets: List[Dict[str, Any]],
-        linkedin_posts: List[Dict[str, Any]],
-        keywords: List[str]
-    ) -> Optional[Dict[str, Any]]:
-        """Fallback: Simple keyword matching if AI fails"""
-        buying_signals = ["looking for", "need", "recommend", "anyone know", "suggestions",
-                         "alternative", "switch", "considering", "evaluate"]
+            # Return None - better no alert than wrong alert
+            # Contact will be retried on next scan
+            return None
 
-        # Check both tweets and LinkedIn posts
-        all_content = tweets + linkedin_posts
-
-        for item in all_content:
-            text = item.get("text", "").lower()
-            for keyword in keywords:
-                if keyword.lower() in text:
-                    if any(signal in text for signal in buying_signals):
-                        return {
-                            "signal_type": "switch",
-                            "confidence": 0.6,
-                            "evidence": text[:200],
-                            "reason": "Keyword match with buying signal phrase"
-                        }
         return None
 
     @staticmethod
