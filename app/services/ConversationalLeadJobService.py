@@ -927,7 +927,16 @@ class ConversationalLeadJobService:
 
                 # PRD Section 5: Job Boards - Use INDEPENDENT job keyword tracking
                 if has_job_boards:
+                    print(f"\n🔍 JOB BOARDS DEBUG:")
+                    print(f"   has_job_boards: {has_job_boards}")
+                    print(f"   only_job_boards: {only_job_boards}")
+                    print(f"   keyword_limits: {keyword_limits}")
+
                     job_boards_limit = keyword_limits.get("job_boards", 0)
+                    print(f"   job_boards_limit: {job_boards_limit}")
+                    print(f"   job_board_keywords: {job_board_keywords}")
+                    print(f"   current keyword: '{keyword}'")
+                    print(f"   job_keyword_index: {job_keyword_index}")
 
                     # SCENARIO 3: Only job boards - current keyword IS the job keyword
                     # SCENARIO 2: Both social + job - use independent job_keyword_index counter
@@ -936,17 +945,33 @@ class ConversationalLeadJobService:
 
                     if only_job_boards:
                         # SCENARIO 3: Current keyword is a job keyword
+                        print(f"   SCENARIO 3: Only job boards mode")
+                        print(f"      keyword '{keyword}' in job_board_keywords? {keyword in job_board_keywords}")
+                        print(f"      job_boards_limit > 0? {job_boards_limit > 0}")
+
                         if keyword in job_board_keywords and job_boards_limit > 0:
                             should_fetch_job_boards = True
                             job_keyword_to_use = keyword
                             job_keyword_attempt = job_board_keywords.index(keyword) + 1
+                            print(f"      ✅ Will fetch job boards!")
+                        else:
+                            print(f"      ❌ NOT fetching job boards")
                     else:
                         # SCENARIO 2: Use independent counter for job keywords
+                        print(f"   SCENARIO 2: Social + job boards OR social only")
+                        print(f"      job_keyword_index ({job_keyword_index}) < len(job_board_keywords) ({len(job_board_keywords)})? {job_keyword_index < len(job_board_keywords)}")
+                        print(f"      job_boards_limit > 0? {job_boards_limit > 0}")
+
                         if job_keyword_index < len(job_board_keywords) and job_boards_limit > 0:
                             should_fetch_job_boards = True
                             job_keyword_to_use = job_board_keywords[job_keyword_index]
                             job_keyword_attempt = job_keyword_index + 1
                             job_keyword_index += 1  # Increment for next iteration
+                            print(f"      ✅ Will fetch job boards with keyword: '{job_keyword_to_use}'")
+                        else:
+                            print(f"      ❌ NOT fetching job boards")
+
+                    print(f"   should_fetch_job_boards: {should_fetch_job_boards}")
 
                     if should_fetch_job_boards:
                         solution_context = lead_form.get("solution_context", "")
