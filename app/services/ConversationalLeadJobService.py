@@ -326,6 +326,96 @@ class LeadFilter:
         return filtered_leads
 
 
+class PostTimeFilter:
+    """
+    FEATURE #3: Filter raw posts by time BEFORE AI analysis (cost savings)
+    Filters tweets, Facebook posts, TikTok posts based on user's post_age_filter selection
+    """
+
+    @staticmethod
+    def filter_posts_by_time(
+        posts: List[Dict],
+        post_age_filter: str,
+        date_field: str = "created_at"
+    ) -> List[Dict]:
+        """
+        Filter raw social media posts by creation date BEFORE AI analysis.
+
+        Args:
+            posts: List of post dictionaries (tweets, Facebook posts, TikTok posts)
+            post_age_filter: Time range string from lead form ("24h", "7d", "30d", "3m", "6m", "1y", "all")
+            date_field: Name of the date field in post dict (default: "created_at")
+
+        Returns:
+            Filtered list of posts within the time range
+
+        Example:
+            tweets = [
+                {"text": "Need AWS help", "created_at": "2025-01-26T10:00:00Z"},  # 1 day old
+                {"text": "Looking for cloud", "created_at": "2024-12-01T10:00:00Z"}  # 57 days old
+            ]
+            filtered = PostTimeFilter.filter_posts_by_time(tweets, "7d")
+            # Returns: [first tweet only] (second is >7 days old)
+        """
+        if not post_age_filter or post_age_filter == "all":
+            return posts  # No time filter
+
+        # Calculate cutoff date using existing LeadFilter infrastructure
+        cutoff_date = LeadFilter.calculate_cutoff_date(post_age_filter)
+        if not cutoff_date:
+            return posts
+
+        filtered_posts = []
+        filtered_out_count = 0
+        unknown_date_count = 0
+
+        for post in posts:
+            post_date_str = post.get(date_field, "")
+
+            if not post_date_str:
+                # No date - INCLUDE the post (don't filter it out)
+                filtered_posts.append(post)
+                unknown_date_count += 1
+                continue
+
+            try:
+                # Parse date string to datetime
+                post_date = ConversationalLeadJobService._convert_twitter_date(post_date_str)
+
+                # Check if this is a default/invalid timestamp (1970)
+                if post_date.year == 1970:
+                    # Unknown date - INCLUDE the post
+                    filtered_posts.append(post)
+                    unknown_date_count += 1
+                    continue
+
+                # Filter by cutoff date
+                if post_date >= cutoff_date:
+                    filtered_posts.append(post)
+                else:
+                    filtered_out_count += 1
+                    # Log filtered post for debugging
+                    author = post.get("author", post.get("username", "Unknown"))
+                    text_preview = post.get("text", post.get("caption", ""))[:50]
+                    days_old = (datetime.now(timezone.utc) - post_date).days
+                    print(f"      🕒 Filtered (>{post_age_filter}): @{author} - '{text_preview}...' ({days_old} days old)")
+
+            except Exception as e:
+                # Error parsing date - INCLUDE the post (don't filter it out)
+                filtered_posts.append(post)
+                unknown_date_count += 1
+                continue
+
+        # Log summary
+        if filtered_out_count > 0:
+            print(f"   🕒 Time filter: {filtered_out_count} posts filtered (older than {post_age_filter})")
+            print(f"   ✅ {len(filtered_posts)} posts passed time filter → sending to AI")
+        if unknown_date_count > 0:
+            print(f"   ⚠️ {unknown_date_count} posts have unknown dates - including them")
+
+        return filtered_posts
+
+
 class ContentDeduplicator:
     """
     Handles content-based deduplication to detect retweets, shares, and reposts.
@@ -762,7 +852,12 @@ class ConversationalLeadJobService:
                     fetch_tasks.append(
                         asyncio.wait_for(
                             ConversationalLeadJobService._fetch_twitter_leads(
-                                twitter_keyword, user_id, lead_form.get("lead_form_id"), lead_form.get("form_title", ""), max_posts=twitter_limit
+                                twitter_keyword,
+                                user_id,
+                                lead_form.get("lead_form_id"),
+                                lead_form.get("form_title", ""),
+                                max_posts=twitter_limit,
+                                post_age_filter=lead_form.get("post_age_filter", "all")
                             ),
                             timeout=social_platform_timeout
                         )
@@ -779,7 +874,12 @@ class ConversationalLeadJobService:
                     fetch_tasks.append(
                         asyncio.wait_for(
                             ConversationalLeadJobService._fetch_facebook_leads(
-                                facebook_keyword, user_id, lead_form.get("lead_form_id"), lead_form.get("form_title", ""), max_posts=facebook_limit
+                                facebook_keyword,
+                                user_id,
+                                lead_form.get("lead_form_id"),
+                                lead_form.get("form_title", ""),
+                                max_posts=facebook_limit,
+                                post_age_filter=lead_form.get("post_age_filter", "all")
                             ),
                             timeout=social_platform_timeout
                         )
@@ -796,7 +896,12 @@ class ConversationalLeadJobService:
                     fetch_tasks.append(
                         asyncio.wait_for(
                             ConversationalLeadJobService._fetch_tiktok_leads(
-                                tiktok_keyword, user_id, lead_form.get("lead_form_id"), lead_form.get("form_title", ""), max_posts=tiktok_limit
+                                tiktok_keyword,
+                                user_id,
+                                lead_form.get("lead_form_id"),
+                                lead_form.get("form_title", ""),
+                                max_posts=tiktok_limit,
+                                post_age_filter=lead_form.get("post_age_filter", "all")
                             ),
                             timeout=social_platform_timeout
                         )
@@ -1322,7 +1427,8 @@ class ConversationalLeadJobService:
         user_id: str,
         lead_form_id: Optional[str] = None,
         form_title: str = "",
-        max_posts: int = 25
+        max_posts: int = 25,
+        post_age_filter: str = "all"
     ) -> List[LeadCreate]:
         """Fetch leads from Twitter using Apify with smart search query"""
         try:
@@ -1332,6 +1438,11 @@ class ConversationalLeadJobService:
             print(f"   Twitter API response success: {response.get('success')}")
             tweets = response.get("tweets", [])
             print(f"   Found {len(tweets)} tweets")
+
+            # FEATURE #3: Filter tweets by time BEFORE converting to leads
+            if post_age_filter and post_age_filter != "all":
+                tweets = PostTimeFilter.filter_posts_by_time(tweets, post_age_filter, date_field="created_at")
+                print(f"   After time filter ({post_age_filter}): {len(tweets)} tweets")
 
             # DEBUG: Log first tweet structure to see available fields
             if tweets and len(tweets) > 0:
@@ -1392,7 +1503,8 @@ class ConversationalLeadJobService:
         user_id: str,
         lead_form_id: Optional[str] = None,
         form_title: str = "",
-        max_posts: int = 25
+        max_posts: int = 25,
+        post_age_filter: str = "all"
     ) -> List[LeadCreate]:
         """Fetch leads from Facebook using Apify with smart search query"""
         try:
@@ -1402,6 +1514,11 @@ class ConversationalLeadJobService:
             print(f"   Facebook API response success: {response.get('success')}")
             posts = response.get("posts", [])
             print(f"   Found {len(posts)} posts")
+
+            # FEATURE #3: Filter posts by time BEFORE converting to leads
+            if post_age_filter and post_age_filter != "all":
+                posts = PostTimeFilter.filter_posts_by_time(posts, post_age_filter, date_field="created_at")
+                print(f"   After time filter ({post_age_filter}): {len(posts)} posts")
 
             # DEBUG: Log first post structure to see available fields
             if posts and len(posts) > 0:
@@ -1478,7 +1595,8 @@ class ConversationalLeadJobService:
         user_id: str,
         lead_form_id: Optional[str] = None,
         form_title: str = "",
-        max_posts: int = 25
+        max_posts: int = 25,
+        post_age_filter: str = "all"
     ) -> List[LeadCreate]:
         """Fetch leads from TikTok using Apify with smart search query"""
         try:
@@ -1488,6 +1606,12 @@ class ConversationalLeadJobService:
             print(f"   TikTok API response success: {response.get('success')}")
             posts = response.get("posts", [])
             print(f"   Found {len(posts)} posts")
+
+            # FEATURE #3: Filter posts by time BEFORE converting to leads
+            # Note: TikTok uses "createTime" field instead of "created_at"
+            if post_age_filter and post_age_filter != "all":
+                posts = PostTimeFilter.filter_posts_by_time(posts, post_age_filter, date_field="createTime")
+                print(f"   After time filter ({post_age_filter}): {len(posts)} posts")
 
             # DEBUG: Log first post structure to see available fields
             if posts and len(posts) > 0:
