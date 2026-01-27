@@ -759,10 +759,18 @@ class LazarusMonitoringService:
                 all_posts_ordered.extend(tweets[:5])  # Up to 5 tweets
                 all_posts_ordered.extend(linkedin_posts[:5])  # Up to 5 LinkedIn posts
 
+                logger.info(f"🔍 POST INDEX DEBUG:")
+                logger.info(f"   AI returned index: {triggering_index}")
+                logger.info(f"   Total posts available: {len(all_posts_ordered)}")
+                logger.info(f"   Tweets count: {len(tweets[:5])}, LinkedIn count: {len(linkedin_posts[:5])}")
+                logger.info(f"   Primary platform: {primary_platform}")
+
                 # Get the specific post by index
                 if triggering_index is not None and 0 <= triggering_index < len(all_posts_ordered):
                     primary_post = all_posts_ordered[triggering_index]
-                    logger.info(f"✅ Found triggering post at index {triggering_index}")
+                    # Log which post was selected
+                    post_preview = (primary_post.get("text") or primary_post.get("content") or "")[:80]
+                    logger.info(f"✅ Found triggering post at index {triggering_index}: {post_preview}...")
                 else:
                     # Fallback: use the first post from primary platform
                     logger.warning(f"⚠️ AI did not return valid post index (got {triggering_index}), falling back to first post from {primary_platform}")
