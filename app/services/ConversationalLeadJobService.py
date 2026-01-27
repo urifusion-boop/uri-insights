@@ -731,12 +731,25 @@ class ConversationalLeadJobService:
             # Build prioritized keyword list
             # SCENARIO 3: If ONLY job boards enabled, use job_keywords directly
             if only_job_boards:
+                print(f"🎯 Job boards ONLY mode detected")
+                print(f"   job_keywords from form: {job_keywords}")
+                print(f"   keywords from form: {keywords}")
+                print(f"   implied_keywords from form: {implied_keywords}")
+
                 if job_keywords and len(job_keywords) > 0:
                     prioritized_keywords = list(job_keywords)
-                    print(f"🎯 Job boards ONLY mode: Using {len(prioritized_keywords)} job keywords: {prioritized_keywords}")
+                    print(f"✅ Using {len(prioritized_keywords)} job keywords: {prioritized_keywords}")
                 else:
-                    print(f"⚠️ Job boards enabled but no job_keywords available")
-                    return stats
+                    print(f"❌ ERROR: Job boards enabled but no job_keywords available!")
+                    print(f"   This should not happen - job_keywords should be auto-generated")
+                    print(f"   Fallback: Using regular keywords instead")
+                    # FALLBACK: Use regular keywords if job_keywords missing
+                    if keywords and len(keywords) > 0:
+                        prioritized_keywords = list(keywords)
+                        print(f"   Fallback successful: Using {len(prioritized_keywords)} regular keywords")
+                    else:
+                        print(f"   ❌ No keywords available at all - cannot proceed")
+                        return stats
             else:
                 # SCENARIO 1 & 2: Social platforms enabled (alone or with job boards)
                 # Strategy: Start with best keywords, continue until 150 posts reached
