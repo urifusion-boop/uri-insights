@@ -633,15 +633,26 @@ class ConversationalLeadJobService:
             platform_configs = lead_form.get("platform_configs", [])
             keywords = lead_form.get("keywords", [])
             implied_keywords = lead_form.get("implied_keywords", [])
+            job_keywords = lead_form.get("job_keywords", [])
 
             # Combine direct and implied keywords for comprehensive search
             all_search_keywords = keywords + (implied_keywords or [])
 
-            if not all_search_keywords or len(all_search_keywords) == 0:
-                print(f"No keywords provided for lead form {lead_form.get('lead_form_id')}")
+            # CRITICAL FIX: Allow job boards-only scenarios even if social keywords are empty!
+            # Check if ANY keywords exist (social OR job board keywords)
+            has_any_keywords = (all_search_keywords and len(all_search_keywords) > 0) or (job_keywords and len(job_keywords) > 0)
+
+            if not has_any_keywords:
+                print(f"❌ ERROR: No keywords provided for lead form {lead_form.get('lead_form_id')}")
+                print(f"   keywords: {keywords}")
+                print(f"   implied_keywords: {implied_keywords}")
+                print(f"   job_keywords: {job_keywords}")
+                print(f"   You must provide either social keywords OR job keywords!")
                 return stats
 
-            print(f"🔍 Search keywords: {len(keywords)} direct + {len(implied_keywords or [])} implied = {len(all_search_keywords)} total")
+            print(f"🔍 Search keywords:")
+            print(f"   Social: {len(keywords)} direct + {len(implied_keywords or [])} implied = {len(all_search_keywords)} total")
+            print(f"   Job boards: {len(job_keywords)} keywords")
 
             # Collect all enabled platforms (normalize to lowercase for comparison)
             enabled_platforms = {
@@ -669,8 +680,7 @@ class ConversationalLeadJobService:
             buying_signals = lead_form.get("buying_signals", [])
             prioritized_keywords = []
 
-            # PRD Section 5: Separate job keywords for Job Boards platform
-            job_keywords = lead_form.get("job_keywords", [])
+            # job_keywords already extracted above at line 636
 
             def select_keywords_by_word_count(keyword_list, target_count=4):
                 """
