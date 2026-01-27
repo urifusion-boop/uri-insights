@@ -92,6 +92,48 @@ async def get_focus_contacts(
     )
 
 
+@router.put("/focus-contacts/{focus_id}")
+async def update_focus_contact(
+    focus_id: str,
+    update_data: FocusContactCreate,
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """Update focus contact details (name, social_handle, keywords, etc.)"""
+    try:
+        # Convert Pydantic model to dict and filter out None values
+        update_dict = {k: v for k, v in update_data.dict().items() if v is not None}
+
+        # Don't allow changing user_id
+        if "user_id" in update_dict:
+            del update_dict["user_id"]
+
+        updated_contact = await LazarusRepository.update_focus_contact(
+            db, focus_id, user_id, update_dict
+        )
+
+        if not updated_contact:
+            return UriResponse.custom_response(
+                message="Focus contact not found or you don't have permission to update it",
+                error_code=404,
+                success=False
+            )
+
+        return UriResponse.custom_response(
+            message="Focus contact updated successfully",
+            error_code=200,
+            success=True,
+            data=jsonable_encoder(updated_contact)
+        )
+    except Exception as e:
+        logger.error(f"Error updating focus contact: {str(e)}")
+        return UriResponse.custom_response(
+            message=f"Failed to update focus contact: {str(e)}",
+            error_code=500,
+            success=False
+        )
+
+
 @router.delete("/focus-contacts/{focus_id}")
 async def remove_focus_contact(
     focus_id: str,
