@@ -515,10 +515,7 @@ class LazarusRepository:
 
         # Calculate resurrection rate (PRD 7.1: % of alerts acted upon)
         total_alerts = len(all_alerts)
-        acted_upon = len([a for a in all_alerts if a.get("status") in [
-            LazarusAlertStatusEnum.CONTACTED,
-            LazarusAlertStatusEnum.RESURRECTED
-        ]])
+        acted_upon = len([a for a in all_alerts if a.get("status") == LazarusAlertStatusEnum.ACTED])
         dismissed = len([a for a in all_alerts if a.get("status") == LazarusAlertStatusEnum.DISMISSED])
         pending = len([a for a in all_alerts if a.get("status") == LazarusAlertStatusEnum.NEW])
 

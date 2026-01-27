@@ -1160,8 +1160,12 @@ async def get_scanned_content(
         }).sort("created_date", -1).limit(limit).skip(skip).to_list(None)
 
         # Get all focus contacts and company monitors for this user
-        focus_contacts = await LazarusRepository.get_focus_contacts_by_user(db, user_id)
-        company_monitors = await LazarusRepository.get_company_monitors_by_user(db, user_id)
+        focus_contacts_list = await LazarusRepository.get_focus_contacts_by_user(db, user_id)
+        company_monitors_list = await LazarusRepository.get_company_monitors_by_user(db, user_id)
+
+        # Convert Pydantic models to dicts
+        focus_contacts = [jsonable_encoder(c) for c in focus_contacts_list]
+        company_monitors = [jsonable_encoder(m) for m in company_monitors_list]
 
         # Build posts list from alerts with evidence
         scanned_posts = []
