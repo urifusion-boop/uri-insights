@@ -657,9 +657,11 @@ class ConversationalLeadJobService:
             all_leads: List[LeadCreate] = []
 
             print(f"📋 Enabled platforms: {list(enabled_platforms.keys())}")
-            print(f"   Checking for Twitter: '{BrowsercloudPlatformEnum.TWITTER.value}'")
-            print(f"   Checking for Facebook: '{BrowsercloudPlatformEnum.FACEBOOK.value}'")
-            print(f"   Checking for TikTok: '{BrowsercloudPlatformEnum.TIKTOK.value}'")
+            print(f"   Checking for Twitter: '{BrowsercloudPlatformEnum.TWITTER.value}' (lowercase: '{BrowsercloudPlatformEnum.TWITTER.value.lower()}')")
+            print(f"   Checking for Facebook: '{BrowsercloudPlatformEnum.FACEBOOK.value}' (lowercase: '{BrowsercloudPlatformEnum.FACEBOOK.value.lower()}')")
+            print(f"   Checking for TikTok: '{BrowsercloudPlatformEnum.TIKTOK.value}' (lowercase: '{BrowsercloudPlatformEnum.TIKTOK.value.lower()}')")
+            print(f"   Checking for Job Boards: '{BrowsercloudPlatformEnum.JOB_BOARDS.value}' (lowercase: '{BrowsercloudPlatformEnum.JOB_BOARDS.value.lower()}')")
+            print(f"   Job Boards enabled? {BrowsercloudPlatformEnum.JOB_BOARDS.value.lower() in enabled_platforms}")
 
             # MULTI-KEYWORD STRATEGY - Mix direct and implied keywords with smart prioritization
             # Strategy: Use 8 keywords total - 4 direct + 4 implied
