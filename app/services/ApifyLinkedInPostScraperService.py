@@ -203,9 +203,14 @@ class ApifyLinkedInPostScraperService:
 
                 logger.info(f"📦 Retrieved {len(items)} items from Apify dataset")
 
-                # Log the first item structure for debugging
+                # Log the first item structure for debugging (COMPREHENSIVE)
                 if items:
-                    logger.debug(f"Sample LinkedIn post item structure: {list(items[0].keys())}")
+                    logger.info(f"🔍 APIFY LINKEDIN POST - Sample item keys: {list(items[0].keys())}")
+                    logger.info(f"🔍 APIFY LINKEDIN POST - Full first item: {items[0]}")
+
+                    # Log URL-related fields specifically
+                    url_fields = {k: v for k, v in items[0].items() if 'url' in k.lower() or 'link' in k.lower() or 'permalink' in k.lower()}
+                    logger.info(f"🔍 APIFY LINKEDIN POST - URL fields found: {url_fields}")
 
             except Exception as dataset_error:
                 logger.error(f"Error reading dataset: {str(dataset_error)}")

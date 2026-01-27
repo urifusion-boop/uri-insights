@@ -484,6 +484,7 @@ class BuyingSignalAnalysis(BaseModel):
     confidence: float
     evidence: Optional[str] = None
     reason: Optional[str] = None
+    triggering_post_index: Optional[int] = None  # Which post triggered the signal (0-indexed, e.g., "Twitter Post 1" = index 0)
 
 
 class KeywordExtractionResult(BaseModel):

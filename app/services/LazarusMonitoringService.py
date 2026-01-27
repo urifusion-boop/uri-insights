@@ -742,28 +742,55 @@ class LazarusMonitoringService:
                 all_content.extend([p.get("text", "") for p in linkedin_posts[:3]])
                 all_content.extend([t.get("text", "") for t in tweets[:3]])
 
-                # Get the primary post that triggered the signal (first post from primary platform)
+                # Get the exact post that triggered the signal using AI-provided index
                 primary_post = None
                 post_url = None
+                post_text = None
                 post_author = None
                 post_created_at = None
                 post_likes = None
                 post_comments = None
 
-                if primary_platform == "LinkedIn" and linkedin_posts:
-                    primary_post = linkedin_posts[0]
-                    post_url = primary_post.get("url") or primary_post.get("postUrl") or primary_post.get("link")
-                    post_author = primary_post.get("author", {}).get("name") if isinstance(primary_post.get("author"), dict) else primary_post.get("author")
-                    post_created_at = primary_post.get("created_at") or primary_post.get("postedAt")
-                    post_likes = primary_post.get("likes") or primary_post.get("numLikes")
-                    post_comments = primary_post.get("comments") or primary_post.get("numComments")
-                elif primary_platform == "Twitter" and tweets:
-                    primary_post = tweets[0]
-                    post_url = primary_post.get("url") or primary_post.get("tweet_url")
-                    post_author = primary_post.get("author", {}).get("username") if isinstance(primary_post.get("author"), dict) else primary_post.get("author")
-                    post_created_at = primary_post.get("created_at") or primary_post.get("createdAt")
-                    post_likes = primary_post.get("likes") or primary_post.get("likeCount")
-                    post_comments = primary_post.get("replies") or primary_post.get("replyCount")
+                # AI returns the index of the triggering post
+                triggering_index = signal_analysis.get("triggering_post_index")
+
+                # Combine all posts in order: tweets first, then LinkedIn posts (matching AI prompt order)
+                all_posts_ordered = []
+                all_posts_ordered.extend(tweets[:5])  # Up to 5 tweets
+                all_posts_ordered.extend(linkedin_posts[:5])  # Up to 5 LinkedIn posts
+
+                # Get the specific post by index
+                if triggering_index is not None and 0 <= triggering_index < len(all_posts_ordered):
+                    primary_post = all_posts_ordered[triggering_index]
+                    logger.info(f"✅ Found triggering post at index {triggering_index}")
+                else:
+                    # Fallback: use the first post from primary platform
+                    logger.warning(f"⚠️ AI did not return valid post index (got {triggering_index}), falling back to first post from {primary_platform}")
+                    if primary_platform == "LinkedIn" and linkedin_posts:
+                        primary_post = linkedin_posts[0]
+                    elif primary_platform == "Twitter" and tweets:
+                        primary_post = tweets[0]
+
+                # Extract post data based on which platform it's from
+                if primary_post:
+                    # Determine if this is a LinkedIn or Twitter post
+                    is_linkedin = primary_post in linkedin_posts if linkedin_posts else False
+                    is_twitter = primary_post in tweets if tweets else False
+
+                    if is_linkedin:
+                        post_url = primary_post.get("url") or primary_post.get("postUrl") or primary_post.get("link")
+                        post_text = primary_post.get("text") or primary_post.get("content")
+                        post_author = primary_post.get("author", {}).get("name") if isinstance(primary_post.get("author"), dict) else primary_post.get("author")
+                        post_created_at = primary_post.get("created_at") or primary_post.get("postedAt")
+                        post_likes = primary_post.get("likes") or primary_post.get("numLikes")
+                        post_comments = primary_post.get("comments") or primary_post.get("numComments")
+                    elif is_twitter:
+                        post_url = primary_post.get("url") or primary_post.get("tweet_url")
+                        post_text = primary_post.get("text") or primary_post.get("content")
+                        post_author = primary_post.get("author", {}).get("username") if isinstance(primary_post.get("author"), dict) else primary_post.get("author")
+                        post_created_at = primary_post.get("created_at") or primary_post.get("createdAt")
+                        post_likes = primary_post.get("likes") or primary_post.get("likeCount")
+                        post_comments = primary_post.get("replies") or primary_post.get("replyCount")
 
                 # Create alert with AI analysis (platform-agnostic)
                 return {
@@ -781,14 +808,14 @@ class LazarusMonitoringService:
                         "evidence_text": signal_analysis.get("evidence"),
                         # Platform-agnostic fields - THE POST THAT TRIGGERED THE ALERT
                         "post_url": post_url,
-                        "post_text": signal_analysis.get("evidence"),
+                        "post_text": post_text,  # ACTUAL post content
                         "post_platform": primary_platform,
                         "post_author": post_author,
                         "post_created_at": post_created_at,
                         "post_likes": post_likes,
                         "post_comments": post_comments,
                         # Legacy field for backward compatibility
-                        "tweet_text": signal_analysis.get("evidence"),
+                        "tweet_text": post_text,  # ACTUAL post content
                         "tweet_url": post_url if primary_platform == "Twitter" else None,
                     },
                     "suggested_pitch": suggested_pitch,

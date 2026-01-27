@@ -769,8 +769,16 @@ Return a JSON object with:
     "signal_type": "promoted" | "changed_jobs" | "new_decision_maker" | "raised_funds" | "hiring" | "expansion" | "pain" | "competitor_complaint" | "switch" | null,
     "confidence": 0.0 to 1.0,
     "evidence": "exact quote from post that triggered detection",
-    "reason": "brief explanation of why this is a buying signal"
+    "reason": "brief explanation of why this is a buying signal",
+    "triggering_post_index": index of the post that triggered this signal (0 for Twitter Post 1, 1 for Twitter Post 2, etc.). Use the post number from the input.
 }}
+
+CRITICAL: You MUST provide the "triggering_post_index" field. Look at which post contains the signal:
+- Twitter Post 1 → index 0
+- Twitter Post 2 → index 1
+- LinkedIn Post 1 → index for first LinkedIn (count Twitter posts first)
+- LinkedIn Post 2 → next index after first LinkedIn
+Example: If you have 3 Twitter posts and 2 LinkedIn posts, and the signal is in "LinkedIn Post 2", the index should be 4 (0,1,2 for Twitter, 3 for LinkedIn Post 1, 4 for LinkedIn Post 2).
 
 Only return TRUE if you have high confidence (>0.7) that this is a genuine buying signal.
 """
