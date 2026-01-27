@@ -104,9 +104,20 @@ The reasoning should be a single, clear sentence that follows this pattern exact
         job_description: str,
         job_title: str,
         company_name: str,
-        solution_context: str
+        solution_context: str,
+        keywords: Optional[List[str]] = None
     ) -> str:
         """Build the analysis prompt (similar to IntentAnalysisService._build_analysis_prompt)"""
+
+        # FEATURE #2: Add keywords to prompt if provided (similar to IntentAnalysisService)
+        keywords_section = ""
+        if keywords and len(keywords) > 0:
+            keywords_section = f"""
+USER'S SPECIFIC KEYWORDS (use these to score relevance more accurately):
+{', '.join(keywords)}
+⚠️ IMPORTANT: If the job description contains NONE of these keywords, the problem_solution_match should be LOW (< 0.3).
+
+"""
 
         return f"""Analyze this job posting to determine if it's a sales opportunity:
 
@@ -120,7 +131,7 @@ JOB DESCRIPTION:
 USER'S SOLUTION CONTEXT (what they sell):
 {solution_context}
 
----
+{keywords_section}---
 
 ANALYSIS REQUIRED:
 1. Does this hiring need indicate a problem the user's solution can solve?
@@ -141,7 +152,8 @@ Remember:
         job_title: str,
         company_name: str,
         solution_context: str,
-        model: str = "gpt-4o-mini"
+        model: str = "gpt-4o-mini",
+        keywords: Optional[List[str]] = None
     ) -> JobSignalResult:
         """
         Analyze a job posting for commercial opportunity
@@ -154,6 +166,7 @@ Remember:
             company_name: Company posting the job
             solution_context: User's solution description from lead form
             model: AI model to use (default: gpt-4o-mini)
+            keywords: User's keywords for more accurate relevance scoring (optional, FEATURE #2)
 
         Returns:
             JobSignalResult with scores and reasoning
@@ -161,7 +174,7 @@ Remember:
 
         # Build prompt (same pattern as IntentAnalysisService)
         prompt = JobSignalAnalysisService._build_analysis_prompt(
-            job_description, job_title, company_name, solution_context
+            job_description, job_title, company_name, solution_context, keywords
         )
 
         # Build AI model (EXACT same pattern as IntentAnalysisService)

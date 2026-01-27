@@ -856,7 +856,9 @@ class ConversationalLeadJobService:
                                         solution_context,
                                         max_jobs=job_boards_limit,
                                         location=lead_form.get("location"),
-                                        post_age_filter=lead_form.get("post_age_filter", "all")
+                                        post_age_filter=lead_form.get("post_age_filter", "all"),
+                                        keywords=lead_form.get("keywords", []),
+                                        implied_keywords=lead_form.get("implied_keywords", [])
                                     ),
                                     timeout=job_board_timeout  # Longer timeout for job scraping + AI analysis
                                 )
@@ -1056,7 +1058,9 @@ class ConversationalLeadJobService:
                             solution_context,
                             max_jobs=job_boards_remaining,
                             location=lead_form.get("location"),
-                            post_age_filter=lead_form.get("post_age_filter", "all")
+                            post_age_filter=lead_form.get("post_age_filter", "all"),
+                            keywords=lead_form.get("keywords", []),
+                            implied_keywords=lead_form.get("implied_keywords", [])
                         )
 
                         # Extract qualified leads and total fetched from result dict
@@ -1861,7 +1865,9 @@ class ConversationalLeadJobService:
         solution_context: str = "",
         max_jobs: int = 20,
         location: Optional[List[str]] = None,
-        post_age_filter: str = "all"
+        post_age_filter: str = "all",
+        keywords: Optional[List[str]] = None,
+        implied_keywords: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """
         Fetch and analyze job postings from LinkedIn Jobs and Jobberman
@@ -1875,6 +1881,8 @@ class ConversationalLeadJobService:
             max_jobs: Maximum number of jobs to fetch
             location: Location filter list (e.g., ["Lagos", "Nigeria"])
             post_age_filter: Time range filter (e.g., "7d", "30d", "all")
+            keywords: User's direct keywords for pre-filtering (optional)
+            implied_keywords: User's implied keywords for pre-filtering (optional)
 
         Returns:
             Dict with:
@@ -1997,18 +2005,39 @@ class ConversationalLeadJobService:
             deduplicated_jobs = ConversationalLeadJobService._deduplicate_jobs(all_jobs)
             print(f"   After deduplication: {len(deduplicated_jobs)} unique jobs")
 
+            # FEATURE #2: Client-side keyword pre-filter (before AI analysis)
+            all_filter_keywords = []
+            if keywords:
+                all_filter_keywords.extend(keywords)
+            if implied_keywords:
+                all_filter_keywords.extend(implied_keywords)
+
+            if all_filter_keywords:
+                print(f"   🔍 Pre-filtering with {len(all_filter_keywords)} keywords before AI analysis")
+                keyword_filtered_jobs = ConversationalLeadJobService._filter_jobs_by_keyword_relevance(
+                    deduplicated_jobs, all_filter_keywords
+                )
+                filtered_count = len(deduplicated_jobs) - len(keyword_filtered_jobs)
+                print(f"   ✂️ Filtered out {filtered_count} jobs with zero keyword matches (cost savings: ${filtered_count * 0.0001:.4f})")
+                print(f"   ✅ {len(keyword_filtered_jobs)} jobs passed keyword filter → sending to AI")
+                jobs_to_analyze = keyword_filtered_jobs
+            else:
+                print(f"   ⚠️ No keywords provided - analyzing all jobs without pre-filtering")
+                jobs_to_analyze = deduplicated_jobs
+
             # Analyze each job posting with AI
             qualified_signals = []
             filtered_signals = []  # NEW: Collect filtered jobs for spam
 
-            for job in deduplicated_jobs[:max_jobs]:  # Limit to max_jobs
+            for job in jobs_to_analyze[:max_jobs]:  # Limit to max_jobs
                 try:
-                    # Run AI analysis
+                    # Run AI analysis WITH keywords (Part 2 of hybrid approach)
                     analysis = await JobSignalAnalysisService.analyze_job_posting(
                         job_description=job.get("description", ""),
                         job_title=job.get("title", ""),
                         company_name=job.get("company", ""),
-                        solution_context=solution_context
+                        solution_context=solution_context,
+                        keywords=all_filter_keywords if all_filter_keywords else None
                     )
 
                     # Create lead object (same for both qualified and filtered)
@@ -2165,6 +2194,58 @@ class ConversationalLeadJobService:
                 unique_jobs.append(job)
 
         return unique_jobs
+
+    @staticmethod
+    def _filter_jobs_by_keyword_relevance(jobs: List[Dict], keywords: List[str]) -> List[Dict]:
+        """
+        FEATURE #2: Client-side keyword pre-filter (before AI analysis)
+
+        Filter job postings by keyword relevance to reduce AI analysis costs.
+        Only jobs with at least ONE keyword match in title or description pass through.
+
+        This is a FAST pre-filter - the AI will still do intelligent scoring
+        on the jobs that pass this filter.
+
+        Args:
+            jobs: List of job dictionaries with "title" and "description" fields
+            keywords: List of keywords to match (case-insensitive)
+
+        Returns:
+            List of jobs that contain at least 1 keyword
+
+        Example:
+            keywords = ["AWS", "cloud", "Kubernetes"]
+            job1 = {"description": "Manage AWS infrastructure"}  # PASS (has "AWS")
+            job2 = {"description": "Maintain VMware servers"}     # FAIL (no keywords)
+        """
+        if not keywords:
+            return jobs
+
+        # Normalize keywords to lowercase for case-insensitive matching
+        keywords_lower = [kw.lower() for kw in keywords if kw and kw.strip()]
+
+        if not keywords_lower:
+            return jobs
+
+        filtered_jobs = []
+
+        for job in jobs:
+            title = job.get("title", "").lower()
+            description = job.get("description", "").lower()
+            combined_text = f"{title} {description}"
+
+            # Check if ANY keyword appears in title or description
+            has_match = any(keyword in combined_text for keyword in keywords_lower)
+
+            if has_match:
+                filtered_jobs.append(job)
+            else:
+                # Log filtered out jobs for debugging
+                company = job.get("company", "Unknown")
+                job_title = job.get("title", "Unknown")
+                print(f"      ✂️ Filtered: {company} - {job_title} (zero keyword matches)")
+
+        return filtered_jobs
 
     @staticmethod
     def _convert_twitter_date(twitter_date: str) -> datetime:
