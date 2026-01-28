@@ -1171,13 +1171,45 @@ async def get_scanned_content(
         focus_contacts = [jsonable_encoder(c) for c in focus_contacts_list]
         company_monitors = [jsonable_encoder(m) for m in company_monitors_list]
 
-        # Build posts list from alerts with evidence
+        # Build posts list from alerts - expand scanned_posts if available
         scanned_posts = []
         for alert in all_alerts:
             evidence = alert.get("evidence", {})
-            if evidence.get("post_text") or evidence.get("tweet_text"):
+
+            # New: If scanned_posts array exists, use it to show ALL scanned posts
+            if evidence.get("scanned_posts"):
+                triggering_index = evidence.get("triggering_post_index")
+                for scanned_post in evidence.get("scanned_posts", []):
+                    # Mark if this is the triggering post
+                    is_triggering = (scanned_post.get("post_index") == triggering_index)
+
+                    post = {
+                        "post_id": f"{alert.get('alert_id')}_{scanned_post.get('post_index')}",
+                        "alert_id": alert.get("alert_id"),
+                        "source_type": alert.get("source_type"),
+                        "source_id": alert.get("source_id"),
+                        "source_name": alert.get("source_name"),
+                        "platform": scanned_post.get("post_platform"),
+                        "text": scanned_post.get("post_text"),
+                        "author": scanned_post.get("post_author"),
+                        "url": scanned_post.get("post_url"),
+                        "created_at": scanned_post.get("post_created_at"),
+                        "likes": scanned_post.get("post_likes", 0),
+                        "comments": scanned_post.get("post_comments", 0),
+                        "alert_type": alert.get("alert_type"),
+                        "alert_created": alert.get("created_at"),
+                        "signal_type": evidence.get("signal_type"),
+                        "confidence": evidence.get("confidence"),
+                        "is_triggering_post": is_triggering,
+                        "post_index": scanned_post.get("post_index"),
+                    }
+                    scanned_posts.append(post)
+
+            # Fallback: Legacy alerts without scanned_posts array
+            elif evidence.get("post_text") or evidence.get("tweet_text"):
                 post = {
                     "post_id": alert.get("alert_id"),
+                    "alert_id": alert.get("alert_id"),
                     "source_type": alert.get("source_type"),
                     "source_id": alert.get("source_id"),
                     "source_name": alert.get("source_name"),
@@ -1189,9 +1221,10 @@ async def get_scanned_content(
                     "likes": evidence.get("post_likes", 0),
                     "comments": evidence.get("post_comments", 0),
                     "alert_type": alert.get("alert_type"),
-                    "alert_created": alert.get("created_date"),
+                    "alert_created": alert.get("created_at"),
                     "signal_type": evidence.get("signal_type"),
                     "confidence": evidence.get("confidence"),
+                    "is_triggering_post": True,
                 }
                 scanned_posts.append(post)
 
