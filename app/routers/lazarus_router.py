@@ -1165,12 +1165,9 @@ async def get_scanned_content(
         # Get all scan history for this user, sorted by most recent first
         scan_history_records = await db["scan_history"].find({
             "user_id": user_id
-        }).sort("scan_date", -1).limit(limit).skip(skip).to_list(None)
+        }).sort("scan_date", -1).to_list(None)
 
-        # Get total count for pagination
-        total_scans = await db["scan_history"].count_documents({"user_id": user_id})
-
-        # Build grouped scan history data
+        # Build grouped scan history data from new scan_history collection
         scan_groups = []
 
         for scan in scan_history_records:
@@ -1213,14 +1210,73 @@ async def get_scanned_content(
 
             scan_groups.append(scan_group)
 
+        # BACKWARD COMPATIBILITY: Convert old alerts with scanned_posts to scan_groups format
+        # This shows historical scanned content that was saved in alerts before scan_history existed
+        old_alerts = await db["lazarus_alerts"].find({
+            "user_id": user_id,
+            "evidence.scanned_posts": {"$exists": True, "$ne": []}
+        }).sort("created_at", -1).to_list(None)
+
+        for alert in old_alerts:
+            evidence = alert.get("evidence", {})
+            alert_scanned_posts = evidence.get("scanned_posts", [])
+
+            if not alert_scanned_posts:
+                continue
+
+            # Build scanned posts for legacy alert
+            scanned_posts = []
+            triggering_index = evidence.get("triggering_post_index")
+
+            for post in alert_scanned_posts:
+                is_triggering = (post.get("post_index") == triggering_index)
+
+                scanned_posts.append({
+                    "post_id": f"{alert.get('alert_id')}_{post.get('post_index')}",
+                    "post_url": post.get("post_url"),
+                    "post_text": post.get("post_text"),
+                    "post_platform": post.get("post_platform"),
+                    "post_author": post.get("post_author"),
+                    "post_created_at": post.get("post_created_at"),
+                    "post_likes": post.get("post_likes", 0),
+                    "post_comments": post.get("post_comments", 0),
+                    "post_index": post.get("post_index"),
+                    "is_triggering_post": is_triggering,
+                })
+
+            # Build scan group from legacy alert
+            scan_group = {
+                "scan_id": alert.get("alert_id"),
+                "source_type": alert.get("source_type"),
+                "source_id": alert.get("source_id"),
+                "source_name": alert.get("source_name"),
+                "scan_date": alert.get("created_at"),
+                "platform": evidence.get("post_platform", "Unknown"),
+                "posts_scanned_count": len(scanned_posts),
+                "scanned_posts": scanned_posts,
+                "signal_detected": True,  # Old alerts always had signals
+                "alert_id": alert.get("alert_id"),
+                "signal_type": evidence.get("signal_type"),
+                "confidence": evidence.get("confidence"),
+                "triggering_post_index": triggering_index,
+            }
+
+            scan_groups.append(scan_group)
+
+        # Sort all scan groups by scan_date (most recent first)
+        scan_groups.sort(key=lambda x: x.get("scan_date") or datetime.min, reverse=True)
+
+        # Apply pagination
+        paginated_scan_groups = scan_groups[skip:skip + limit]
+
         return UriResponse.custom_response(
             message="Scanned content retrieved successfully",
             error_code=200,
             success=True,
             data={
-                "scan_groups": scan_groups,
-                "total_scans": total_scans,
-                "total_posts": sum(sg.get("posts_scanned_count", 0) for sg in scan_groups),
+                "scan_groups": paginated_scan_groups,
+                "total_scans": len(scan_groups),
+                "total_posts": sum(sg.get("posts_scanned_count", 0) for sg in paginated_scan_groups),
             }
         )
 
