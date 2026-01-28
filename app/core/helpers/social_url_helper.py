@@ -84,7 +84,13 @@ class SocialURLHelper:
         # LinkedIn partial URL -> full URL
         if url_type == "linkedin":
             if "/in/" in url_str or "/company/" in url_str:
-                return f"https://www.linkedin.com{url_str}" if not url_str.startswith("linkedin.com") else f"https://{url_str}"
+                # Handle cases like "linkedin.com/in/username" or "/in/username"
+                if url_str.startswith("linkedin.com"):
+                    return f"https://www.{url_str}"
+                elif url_str.startswith("/in/") or url_str.startswith("/company/"):
+                    return f"https://www.linkedin.com{url_str}"
+                else:
+                    return f"https://www.linkedin.com/in/{url_str}"
 
         # Can't normalize
         return url_str if "." in url_str else None

@@ -128,9 +128,69 @@ class LazarusService:
                 },
             )
 
+        # Auto-trigger enrichment if LinkedIn URL is provided
+        # This ensures profile photo, email, and other data are immediately available
+        if linkedin_url:
+            from app.services.LinkedInProfileScraperService import LinkedInProfileScraperService
+            from datetime import datetime
+
+            print(f"[LAZARUS] Auto-enriching new contact: {contact_create.name}")
+            print(f"[LAZARUS] LinkedIn URL: {linkedin_url}")
+
+            try:
+                # Update status to pending
+                await LazarusRepository.update_focus_contact(
+                    db, contact_data["focus_id"], user_id, {"enrichment_status": "pending"}
+                )
+
+                # Call LinkedIn Profile Scraper
+                scraper_service = LinkedInProfileScraperService()
+                enrichment_result = await scraper_service.enrich_profile(
+                    linkedin_url=linkedin_url,
+                    timeout_seconds=90
+                )
+
+                if enrichment_result.get("success"):
+                    profile_data = enrichment_result.get("profile", {})
+
+                    # Update contact with enriched data
+                    update_data = {
+                        "profile_photo_url": profile_data.get("profile_photo_url"),
+                        "email": profile_data.get("email"),
+                        "phone": profile_data.get("phone"),
+                        "current_company": profile_data.get("current_company") or contact_data.get("current_company"),
+                        "current_title": profile_data.get("current_title"),
+                        "enrichment_status": "completed",
+                        "enriched_at": datetime.utcnow()
+                    }
+
+                    # Remove None values
+                    update_data = {k: v for k, v in update_data.items() if v is not None}
+
+                    await LazarusRepository.update_focus_contact(
+                        db, contact_data["focus_id"], user_id, update_data
+                    )
+
+                    print(f"[LAZARUS] ✅ Auto-enrichment successful for {contact_create.name}")
+                else:
+                    # Mark as failed but don't block contact creation
+                    await LazarusRepository.update_focus_contact(
+                        db, contact_data["focus_id"], user_id, {
+                            "enrichment_status": "failed",
+                            "enriched_at": datetime.utcnow()
+                        }
+                    )
+                    print(f"[LAZARUS] ⚠️  Auto-enrichment failed: {enrichment_result.get('error_message')}")
+
+            except Exception as e:
+                print(f"[LAZARUS] ⚠️  Auto-enrichment error: {str(e)}")
+                # Don't fail the whole operation if enrichment fails
+                import traceback
+                traceback.print_exc()
+
         return {
             "success": True,
-            "message": "Focus contact added successfully",
+            "message": "Focus contact added successfully" + (" and enrichment started" if linkedin_url else ""),
             "focus_id": contact_data["focus_id"],
             "slots_used": slots.used_slots + 1,
             "slots_available": slots.max_slots - (slots.used_slots + 1),
