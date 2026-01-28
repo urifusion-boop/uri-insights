@@ -588,6 +588,19 @@ class LazarusMonitoringService:
             profile_data = enrichment_result.get("profile_data", {})
 
             # Update contact with enriched data
+            # Extract skill titles from objects if needed
+            skills_data = profile_data.get("skills")
+            if skills_data and isinstance(skills_data, list):
+                # Convert {'title': 'Skill Name'} to just 'Skill Name'
+                skills_list = []
+                for skill in skills_data:
+                    if isinstance(skill, dict) and 'title' in skill:
+                        skills_list.append(skill['title'])
+                    elif isinstance(skill, str):
+                        skills_list.append(skill)
+            else:
+                skills_list = None
+
             enrichment_update = {
                 "email": enrichment_result.get("email"),
                 "phone": enrichment_result.get("phone"),
@@ -598,7 +611,7 @@ class LazarusMonitoringService:
                 "about": profile_data.get("about"),
                 "work_experience": profile_data.get("work_experience"),
                 "education": profile_data.get("education"),
-                "skills": profile_data.get("skills"),
+                "skills": skills_list,
                 "languages": profile_data.get("languages"),
                 "certifications": profile_data.get("certifications"),
                 "enriched_at": datetime.utcnow(),
