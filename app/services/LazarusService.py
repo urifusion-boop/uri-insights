@@ -132,7 +132,6 @@ class LazarusService:
         # This ensures profile photo, email, and other data are immediately available
         if linkedin_url:
             from app.services.LinkedInProfileScraperService import LinkedInProfileScraperService
-            from datetime import datetime
 
             print(f"[LAZARUS] Auto-enriching new contact: {contact_create.name}")
             print(f"[LAZARUS] LinkedIn URL: {linkedin_url}")
