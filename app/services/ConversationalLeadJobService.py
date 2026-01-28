@@ -1031,6 +1031,7 @@ class ConversationalLeadJobService:
                 platform_successes = 0
                 keyword_job_boards_fetched = 0  # Track job boards fetched for THIS keyword only
                 keyword_filtered_leads = []  # NEW: Track filtered leads for spam
+                print(f"   🐛 DEBUG: Initialized keyword_filtered_leads for keyword '{keyword}'")
 
                 if fetch_tasks:
                     print(f"   ⚡ Fetching from {len(fetch_tasks)} platform(s) concurrently...")
@@ -1057,6 +1058,7 @@ class ConversationalLeadJobService:
                             job_boards_total_fetched += total_fetched  # Accumulate across all keywords
                             keyword_job_boards_fetched += total_fetched  # Track for THIS keyword only
                             print(f"   ✅ Platform {idx+1} returned {len(qualified)} qualified leads ({total_fetched} total fetched, {len(filtered)} filtered)")
+                            print(f"   🐛 DEBUG: keyword_filtered_leads now has {len(keyword_filtered_leads)} items after extending")
                             platform_successes += 1
                         elif isinstance(result, list):
                             # Social media returns list of leads
@@ -1149,7 +1151,9 @@ class ConversationalLeadJobService:
                         print(f"   ⚠️ No leads passed filters for this keyword")
 
                 # === NEW: Save filtered job board leads to spam ===
+                print(f"   🐛 DEBUG: About to check spam save - keyword_filtered_leads has {len(keyword_filtered_leads)} items")
                 if keyword_filtered_leads:
+                    print(f"   🐛 DEBUG: Condition MET - calling _save_filtered_to_spam with {len(keyword_filtered_leads)} leads")
                     try:
                         await ConversationalLeadJobService._save_filtered_to_spam(
                             db=db,
@@ -1162,8 +1166,13 @@ class ConversationalLeadJobService:
                             commercial_relevance_threshold=0.3,
                             solution_context=solution_context
                         )
+                        print(f"   🐛 DEBUG: Successfully completed _save_filtered_to_spam call")
                     except Exception as spam_error:
                         print(f"   ⚠️ Error saving filtered job boards to spam: {str(spam_error)}")
+                        import traceback
+                        traceback.print_exc()
+                else:
+                    print(f"   🐛 DEBUG: Condition NOT MET - skipping spam save (keyword_filtered_leads is empty)")
 
                 # Continue with all keywords to maximize results (no early stopping)
 
@@ -2258,6 +2267,7 @@ class ConversationalLeadJobService:
                         # NEW: Collect filtered job for spam
                         filtered_signals.append(lead)
                         print(f"   ❌ FILTERED: {job.get('company')} - {job.get('title')} | Relevance:{analysis.commercial_relevance:.2f} (below 0.3 threshold)")
+                        print(f"   🐛 DEBUG: Added to filtered_signals, count now: {len(filtered_signals)}")
 
                 except Exception as analysis_error:
                     print(f"   ⚠️ Error analyzing job {job.get('title')}: {str(analysis_error)}")
@@ -2267,6 +2277,7 @@ class ConversationalLeadJobService:
 
             # NEW: Return filtered signals for spam saving
             # This will be passed back to the caller
+            print(f"   🐛 DEBUG: Returning from _fetch_job_board_signals - qualified:{len(qualified_signals)}, filtered:{len(filtered_signals)}, total:{len(deduplicated_jobs)}")
 
             # Return both total fetched and qualified leads
             # Counter will use total_fetched to track raw posts (like social media)
@@ -2479,10 +2490,14 @@ class ConversationalLeadJobService:
         Returns:
             None (saves to spam collection)
         """
+        print(f"   🐛 DEBUG: _save_filtered_to_spam called with {len(filtered_leads) if filtered_leads else 0} leads")
+
         if not filtered_leads:
+            print(f"   🐛 DEBUG: No filtered leads to save - returning early")
             return
 
         spam_leads = []
+        print(f"   🐛 DEBUG: Starting to process {len(filtered_leads)} filtered leads for spam")
 
         for lead in filtered_leads:
             # Build spam lead based on filter stage
@@ -2601,8 +2616,10 @@ class ConversationalLeadJobService:
             spam_leads.append(spam_lead)
 
         # Save to spam collection
+        print(f"   🐛 DEBUG: About to call SpamLeadRepository.save_spam_leads_batch with {len(spam_leads)} spam leads")
         await SpamLeadRepository.save_spam_leads_batch(db, spam_leads)
         print(f"💾 SPAM: Saved {len(spam_leads)} filtered leads to spam collection (reason: {spam_reason})")
+        print(f"   🐛 DEBUG: Successfully saved {len(spam_leads)} spam leads to database")
 
     @staticmethod
     async def _analyze_single_lead_with_spam(
