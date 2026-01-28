@@ -129,6 +129,10 @@ class LinkedInProfileScraperService:
                 "profileUrls": [linkedin_url],  # Array of profile URLs
             }
 
+            # Add LinkedIn session cookie if available (required for authentication)
+            if hasattr(settings, 'LINKEDIN_SESSION_COOKIE') and settings.LINKEDIN_SESSION_COOKIE:
+                run_input["sessionCookie"] = settings.LINKEDIN_SESSION_COOKIE
+
             logger.info(f"🔍 Enriching LinkedIn profile: {linkedin_url}")
 
             # Run actor synchronously in executor to avoid blocking event loop

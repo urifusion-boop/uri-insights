@@ -904,7 +904,8 @@ class LazarusMonitoringService:
                     "signal_type": result.signal_type,
                     "confidence": result.confidence,
                     "evidence": result.evidence,
-                    "reason": result.reason
+                    "reason": result.reason,
+                    "triggering_post_index": result.triggering_post_index
                 }
 
         except Exception as e:
