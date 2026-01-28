@@ -1148,144 +1148,79 @@ async def get_scanned_content(
     db: AsyncIOMotorDatabase = Depends(get_db_dependency),
 ):
     """
-    Get all scanned content (posts and profile scans) for Phase 2: Scanned Content Tab
+    Get all scanned content for Phase 2: Scanned Content Tab
+
+    NEW: Retrieves from scan_history collection which saves ALL scanned posts
+    Groups by contact and time period for organized display
 
     Returns:
-    - Posts that triggered alerts (grouped by contact/company)
-    - Profile scan history (when scans occurred and what was found)
+    - All scan history records with posts (grouped by contact and date)
+    - Signal detection status for each scan
     """
     from app.repository.LazarusRepository import LazarusRepository
     from datetime import datetime
+    from collections import defaultdict
 
     try:
-        # Get all alerts for this user (all statuses) to show posts that triggered them
-        all_alerts = await db["lazarus_alerts"].find({
+        # Get all scan history for this user, sorted by most recent first
+        scan_history_records = await db["scan_history"].find({
             "user_id": user_id
-        }).sort("created_date", -1).limit(limit).skip(skip).to_list(None)
+        }).sort("scan_date", -1).limit(limit).skip(skip).to_list(None)
 
-        # Get all focus contacts and company monitors for this user
-        focus_contacts_list = await LazarusRepository.get_focus_contacts_by_user(db, user_id)
-        company_monitors_list = await LazarusRepository.get_company_monitors_by_user(db, user_id)
+        # Get total count for pagination
+        total_scans = await db["scan_history"].count_documents({"user_id": user_id})
 
-        # Convert Pydantic models to dicts
-        focus_contacts = [jsonable_encoder(c) for c in focus_contacts_list]
-        company_monitors = [jsonable_encoder(m) for m in company_monitors_list]
+        # Build grouped scan history data
+        scan_groups = []
 
-        # Build posts list from alerts - expand scanned_posts if available
-        scanned_posts = []
-        for alert in all_alerts:
-            evidence = alert.get("evidence", {})
+        for scan in scan_history_records:
+            # Build scanned posts for this scan
+            scanned_posts = []
+            triggering_index = scan.get("triggering_post_index")
 
-            # New: If scanned_posts array exists, use it to show ALL scanned posts
-            if evidence.get("scanned_posts"):
-                triggering_index = evidence.get("triggering_post_index")
-                for scanned_post in evidence.get("scanned_posts", []):
-                    # Mark if this is the triggering post
-                    is_triggering = (scanned_post.get("post_index") == triggering_index)
+            for post in scan.get("scanned_posts", []):
+                is_triggering = (post.get("post_index") == triggering_index)
 
-                    post = {
-                        "post_id": f"{alert.get('alert_id')}_{scanned_post.get('post_index')}",
-                        "alert_id": alert.get("alert_id"),
-                        "source_type": alert.get("source_type"),
-                        "source_id": alert.get("source_id"),
-                        "source_name": alert.get("source_name"),
-                        "platform": scanned_post.get("post_platform"),
-                        "text": scanned_post.get("post_text"),
-                        "author": scanned_post.get("post_author"),
-                        "url": scanned_post.get("post_url"),
-                        "created_at": scanned_post.get("post_created_at"),
-                        "likes": scanned_post.get("post_likes", 0),
-                        "comments": scanned_post.get("post_comments", 0),
-                        "alert_type": alert.get("alert_type"),
-                        "alert_created": alert.get("created_at"),
-                        "signal_type": evidence.get("signal_type"),
-                        "confidence": evidence.get("confidence"),
-                        "is_triggering_post": is_triggering,
-                        "post_index": scanned_post.get("post_index"),
-                    }
-                    scanned_posts.append(post)
+                scanned_posts.append({
+                    "post_id": f"{scan.get('_id')}_{post.get('post_index')}",
+                    "post_url": post.get("post_url"),
+                    "post_text": post.get("post_text"),
+                    "post_platform": post.get("post_platform"),
+                    "post_author": post.get("post_author"),
+                    "post_created_at": post.get("post_created_at"),
+                    "post_likes": post.get("post_likes", 0),
+                    "post_comments": post.get("post_comments", 0),
+                    "post_index": post.get("post_index"),
+                    "is_triggering_post": is_triggering,
+                })
 
-            # Fallback: Legacy alerts without scanned_posts array
-            elif evidence.get("post_text") or evidence.get("tweet_text"):
-                post = {
-                    "post_id": alert.get("alert_id"),
-                    "alert_id": alert.get("alert_id"),
-                    "source_type": alert.get("source_type"),
-                    "source_id": alert.get("source_id"),
-                    "source_name": alert.get("source_name"),
-                    "platform": evidence.get("post_platform", "Unknown"),
-                    "text": evidence.get("post_text") or evidence.get("tweet_text"),
-                    "author": evidence.get("post_author"),
-                    "url": evidence.get("post_url") or evidence.get("tweet_url"),
-                    "created_at": evidence.get("post_created_at"),
-                    "likes": evidence.get("post_likes", 0),
-                    "comments": evidence.get("post_comments", 0),
-                    "alert_type": alert.get("alert_type"),
-                    "alert_created": alert.get("created_at"),
-                    "signal_type": evidence.get("signal_type"),
-                    "confidence": evidence.get("confidence"),
-                    "is_triggering_post": True,
-                }
-                scanned_posts.append(post)
+            # Build scan group
+            scan_group = {
+                "scan_id": str(scan.get("_id")),
+                "source_type": scan.get("source_type"),
+                "source_id": scan.get("source_id"),
+                "source_name": scan.get("source_name"),
+                "scan_date": scan.get("scan_date"),
+                "platform": scan.get("platform"),
+                "posts_scanned_count": scan.get("posts_scanned_count", 0),
+                "scanned_posts": scanned_posts,
+                "signal_detected": scan.get("signal_detected", False),
+                "alert_id": scan.get("alert_id"),
+                "signal_type": scan.get("signal_type"),
+                "confidence": scan.get("confidence"),
+                "triggering_post_index": triggering_index,
+            }
 
-        # Build profile scans list (scan history)
-        profile_scans = []
-
-        # Focus contacts scan history
-        for contact in focus_contacts:
-            if contact.get("last_scan_date"):
-                scan = {
-                    "scan_id": f"{contact.get('focus_id')}_{contact.get('last_scan_date')}",
-                    "source_type": "FOCUS_CONTACT",
-                    "source_id": contact.get("focus_id"),
-                    "source_name": contact.get("name"),
-                    "scan_date": contact.get("last_scan_date"),
-                    "next_scan_date": contact.get("next_scan_date"),
-                    "scan_count": contact.get("scan_count", 0),
-                    "alert_count": contact.get("alert_count", 0),
-                    "scan_frequency_days": contact.get("scan_frequency_days", 7),
-                    "status": contact.get("monitoring_status"),
-                    "platforms": [],
-                }
-
-                # Determine platforms being monitored
-                if contact.get("linkedin_url"):
-                    scan["platforms"].append("LinkedIn")
-                if contact.get("twitter_url") or contact.get("social_handle"):
-                    scan["platforms"].append("Twitter")
-
-                profile_scans.append(scan)
-
-        # Company monitors scan history
-        for monitor in company_monitors:
-            if monitor.get("last_scan_date"):
-                scan = {
-                    "scan_id": f"{monitor.get('monitor_id')}_{monitor.get('last_scan_date')}",
-                    "source_type": "COMPANY_MONITOR",
-                    "source_id": monitor.get("monitor_id"),
-                    "source_name": monitor.get("company_name"),
-                    "scan_date": monitor.get("last_scan_date"),
-                    "next_scan_date": monitor.get("next_scan_date"),
-                    "scan_count": monitor.get("scan_count", 0),
-                    "alert_count": monitor.get("alert_count", 0),
-                    "scan_frequency_days": monitor.get("scan_frequency_days", 7),
-                    "status": monitor.get("monitoring_status"),
-                    "platforms": ["LinkedIn", "Company Website"],
-                }
-                profile_scans.append(scan)
-
-        # Sort profile scans by most recent first
-        profile_scans.sort(key=lambda x: x.get("scan_date") or datetime.min, reverse=True)
+            scan_groups.append(scan_group)
 
         return UriResponse.custom_response(
             message="Scanned content retrieved successfully",
             error_code=200,
             success=True,
             data={
-                "posts": scanned_posts,
-                "profile_scans": profile_scans[:limit],
-                "total_posts": len(scanned_posts),
-                "total_scans": len(profile_scans),
+                "scan_groups": scan_groups,
+                "total_scans": total_scans,
+                "total_posts": sum(sg.get("posts_scanned_count", 0) for sg in scan_groups),
             }
         )
 

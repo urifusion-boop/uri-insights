@@ -56,6 +56,13 @@ class LazarusRepository:
             # Lazarus Slots indexes
             await db["lazarus_slots"].create_index([("user_id", 1)], unique=True)
 
+            # Scan History indexes
+            await db["scan_history"].create_index([("user_id", 1)])
+            await db["scan_history"].create_index([("source_id", 1)])
+            await db["scan_history"].create_index([("scan_date", -1)])  # Latest first
+            await db["scan_history"].create_index([("signal_detected", 1)])
+            await db["scan_history"].create_index([("alert_id", 1)])
+
             print("✅ Lazarus Protocol indexes created successfully")
         except pymongo.errors.PyMongoError as e:
             print(f"❌ Error creating Lazarus indexes: {str(e)}")

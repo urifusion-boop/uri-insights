@@ -230,6 +230,40 @@ class ScannedPost(BaseModel):
     post_index: int  # Index in the combined list (for matching with AI triggering_post_index)
 
 
+class ScanHistory(BaseModel):
+    """
+    Scan history record - saves ALL scanned posts regardless of whether they triggered alerts
+    Groups posts by contact and time period for the Scanned Content tab
+    """
+    scan_id: str = Field(default_factory=lambda: str(uuid.uuid4()), alias="_id")
+    user_id: str
+    source_type: LazarusMonitorTypeEnum  # "FOCUS_CONTACT" or "COMPANY_MONITOR"
+    source_id: str  # focus_id or monitor_id
+    source_name: str  # contact name or company name
+
+    # Scan metadata
+    scan_date: datetime = Field(default_factory=datetime.utcnow)
+    platform: str  # "LinkedIn", "Twitter"
+    posts_scanned_count: int = 0
+
+    # Scanned posts
+    scanned_posts: List[ScannedPost] = []
+
+    # Signal detection result
+    signal_detected: bool = False
+    alert_id: Optional[str] = None  # Link to alert if signal was detected
+    signal_type: Optional[str] = None  # "promoted", "changed_jobs", "pain_point", etc.
+    confidence: Optional[float] = None  # 0.0 to 1.0
+    triggering_post_index: Optional[int] = None  # Which post triggered the alert
+
+    # Timestamps
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    class Config:
+        populate_by_name = True
+        json_encoders = {datetime: lambda v: v.isoformat() if v else None}
+
+
 class LazarusAlertEvidence(BaseModel):
     """Evidence for the resurrection signal"""
     # For job changes

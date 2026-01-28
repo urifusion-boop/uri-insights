@@ -1144,8 +1144,34 @@ class LazarusMonitoringService:
             # Analyze posts for buying signals
             alerts_created = 0
             alert_data = None
+            scan_history_id = None
+
             if posts:
                 print(f"🤖 Analyzing {len(posts)} posts with AI...")
+
+                # Build scanned_posts array for saving (regardless of signal detection)
+                from app.domain.schemas.lazarus_schema import ScannedPost, ScanHistory
+                scanned_posts_data = []
+
+                for i, post in enumerate(posts[:10]):  # Save up to 10 posts
+                    post_url = post.get("url") or post.get("postUrl") or post.get("tweet_url") or post.get("link")
+                    post_text = post.get("text") or post.get("content")
+
+                    if post_url and post_text:
+                        scanned_posts_data.append({
+                            "post_url": post_url,
+                            "post_text": post_text,
+                            "post_platform": "LinkedIn" if platform == "linkedin" else "Twitter",
+                            "post_author": (
+                                post.get("author", {}).get("name") if isinstance(post.get("author"), dict) and platform == "linkedin"
+                                else post.get("author", {}).get("username") if isinstance(post.get("author"), dict)
+                                else post.get("author")
+                            ),
+                            "post_created_at": post.get("created_at") or post.get("postedAt") or post.get("createdAt"),
+                            "post_likes": post.get("likes") or post.get("numLikes") or post.get("likeCount") or 0,
+                            "post_comments": post.get("comments") or post.get("numComments") or post.get("replyCount") or 0,
+                            "post_index": i
+                        })
 
                 # Use the correct analysis method based on platform
                 if platform == "linkedin":
@@ -1156,6 +1182,32 @@ class LazarusMonitoringService:
                     analysis_result = await LazarusMonitoringService._analyze_focus_contact(
                         db, contact, posts, []  # Tweets, empty LinkedIn list
                     )
+
+                # Save scan history REGARDLESS of signal detection
+                try:
+                    scan_history = ScanHistory(
+                        user_id=contact.user_id,
+                        source_type=LazarusMonitorTypeEnum.FOCUS_CONTACT,
+                        source_id=contact.focus_id,
+                        source_name=contact.name,
+                        scan_date=datetime.utcnow(),
+                        platform="LinkedIn" if platform == "linkedin" else "Twitter",
+                        posts_scanned_count=len(scanned_posts_data),
+                        scanned_posts=scanned_posts_data,
+                        signal_detected=bool(analysis_result),
+                        alert_id=analysis_result.get('alert_id') if analysis_result else None,
+                        signal_type=analysis_result.get('evidence', {}).get('signal_type') if analysis_result else None,
+                        confidence=analysis_result.get('evidence', {}).get('confidence') if analysis_result else None,
+                        triggering_post_index=analysis_result.get('evidence', {}).get('triggering_post_index') if analysis_result else None,
+                    )
+
+                    result = await db["scan_history"].insert_one(scan_history.dict(by_alias=True))
+                    scan_history_id = str(result.inserted_id)
+                    print(f"📋 Saved scan history with {len(scanned_posts_data)} posts (scan_id: {scan_history_id})")
+
+                except Exception as e:
+                    logger.error(f"Failed to save scan history: {str(e)}")
+                    print(f"⚠️  Failed to save scan history: {str(e)}")
 
                 if analysis_result:
                     # Check for duplicate alerts (same contact, same alert type, same content, within last 7 days)
@@ -1191,6 +1243,13 @@ class LazarusMonitoringService:
                             alert = LazarusAlert(**analysis_result)
                             await db["lazarus_alerts"].insert_one(alert.dict(by_alias=True))
                             alerts_created = 1
+
+                            # Update scan_history with alert_id
+                            if scan_history_id:
+                                await db["scan_history"].update_one(
+                                    {"_id": scan_history_id},
+                                    {"$set": {"alert_id": analysis_result.get('alert_id')}}
+                                )
 
                             # Prepare alert data for frontend display
                             alert_data = {
