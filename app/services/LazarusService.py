@@ -79,6 +79,11 @@ class LazarusService:
             print(f"  LinkedIn URL: {linkedin_url}")
             print(f"  Twitter URL: {twitter_url}")
 
+        # Clean LinkedIn URL to remove tracking parameters
+        if linkedin_url:
+            linkedin_url = SocialURLHelper.clean_linkedin_url(linkedin_url)
+            print(f"[LAZARUS] Cleaned LinkedIn URL: {linkedin_url}")
+
         # Build focus contact data
         contact_data = {
             "focus_id": str(uuid.uuid4()),
@@ -152,25 +157,44 @@ class LazarusService:
                 if enrichment_result.get("success"):
                     profile_data = enrichment_result.get("profile", {})
 
-                    # Update contact with enriched data
-                    update_data = {
-                        "profile_photo_url": profile_data.get("profile_photo_url"),
-                        "email": profile_data.get("email"),
-                        "phone": profile_data.get("phone"),
-                        "current_company": profile_data.get("current_company") or contact_data.get("current_company"),
-                        "current_title": profile_data.get("current_title"),
-                        "enrichment_status": "completed",
-                        "enriched_at": datetime.utcnow()
-                    }
+                    # Check if any actual profile data was retrieved
+                    has_profile_data = any([
+                        profile_data.get("profile_photo_url"),
+                        profile_data.get("email"),
+                        profile_data.get("phone"),
+                        profile_data.get("current_company"),
+                        profile_data.get("current_title")
+                    ])
 
-                    # Remove None values
-                    update_data = {k: v for k, v in update_data.items() if v is not None}
+                    if has_profile_data:
+                        # Update contact with enriched data
+                        update_data = {
+                            "profile_photo_url": profile_data.get("profile_photo_url"),
+                            "email": profile_data.get("email"),
+                            "phone": profile_data.get("phone"),
+                            "current_company": profile_data.get("current_company") or contact_data.get("current_company"),
+                            "current_title": profile_data.get("current_title"),
+                            "enrichment_status": "completed",
+                            "enriched_at": datetime.utcnow()
+                        }
 
-                    await LazarusRepository.update_focus_contact(
-                        db, contact_data["focus_id"], user_id, update_data
-                    )
+                        # Remove None values
+                        update_data = {k: v for k, v in update_data.items() if v is not None}
 
-                    print(f"[LAZARUS] ✅ Auto-enrichment successful for {contact_create.name}")
+                        await LazarusRepository.update_focus_contact(
+                            db, contact_data["focus_id"], user_id, update_data
+                        )
+
+                        print(f"[LAZARUS] ✅ Auto-enrichment successful for {contact_create.name}")
+                    else:
+                        # API returned success but no profile data (profile inaccessible/private)
+                        await LazarusRepository.update_focus_contact(
+                            db, contact_data["focus_id"], user_id, {
+                                "enrichment_status": "failed",
+                                "enriched_at": datetime.utcnow()
+                            }
+                        )
+                        print(f"[LAZARUS] ⚠️  Profile inaccessible or private - no data retrieved")
                 else:
                     # Mark as failed but don't block contact creation
                     await LazarusRepository.update_focus_contact(

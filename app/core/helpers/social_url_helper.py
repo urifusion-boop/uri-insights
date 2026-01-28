@@ -6,11 +6,56 @@ and extract relevant identifiers.
 """
 import re
 from typing import Optional, Dict, Any
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse, parse_qs
 
 
 class SocialURLHelper:
     """Helper for detecting and parsing social media URLs"""
+
+    @staticmethod
+    def clean_linkedin_url(url: str) -> str:
+        """
+        Clean LinkedIn URL by removing tracking parameters
+
+        Removes parameters like:
+        - lipi (LinkedIn Platform Insights tracking)
+        - trk (tracking token)
+        - trackingId
+        - refId
+
+        Args:
+            url: LinkedIn URL (possibly with tracking params)
+
+        Returns:
+            Clean LinkedIn URL without tracking parameters
+
+        Example:
+            Input: https://www.linkedin.com/in/john?lipi=urn%3Ali%3Apage%3Ad_flagship3...
+            Output: https://www.linkedin.com/in/john
+        """
+        if not url or "linkedin.com" not in url.lower():
+            return url
+
+        try:
+            parsed = urlparse(url)
+
+            # Remove query parameters (everything after ?)
+            clean_url = urlunparse((
+                parsed.scheme,
+                parsed.netloc,
+                parsed.path,
+                '',  # params
+                '',  # query (removed)
+                ''   # fragment
+            ))
+
+            # Remove trailing slash if present
+            clean_url = clean_url.rstrip('/')
+
+            return clean_url
+        except Exception:
+            # If parsing fails, return original URL
+            return url
 
     @staticmethod
     def detect_url_type(url_or_handle: str) -> str:
