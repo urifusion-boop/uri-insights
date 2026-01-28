@@ -1145,6 +1145,10 @@ class LazarusMonitoringService:
             alerts_created = 0
             alert_data = None
             scan_history_id = None
+            scanned_posts_data = []
+
+            # Import schemas for scan history (always needed, even with 0 posts)
+            from app.domain.schemas.lazarus_schema import ScannedPost, ScanHistory
 
             if posts:
                 print(f"🤖 Analyzing {len(posts)} posts with AI...")
