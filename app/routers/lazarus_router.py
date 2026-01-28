@@ -935,6 +935,10 @@ async def update_auto_detection_rules(
         db, user_id, rules_update.dict(exclude_unset=True)
     )
 
+    # Remove MongoDB _id before encoding
+    if result and "_id" in result:
+        result.pop("_id")
+
     return UriResponse.custom_response(
         "Auto-detection rules updated successfully",
         200,
