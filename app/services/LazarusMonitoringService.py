@@ -1004,11 +1004,16 @@ class LazarusMonitoringService:
             combined_texts = "\n".join(content_texts)
 
             # Build AI prompt for pitch generation
+            signal_type = signal_analysis.get("signal_type", "unknown")
+            signal_type_display = signal_type.replace("_", " ").title()
+
             prompt = LazarusPrompt.GENERATE_PITCH.value.format(
                 contact_name=contact.name,
                 current_company=contact.current_company or "their company",
-                signal_type=signal_analysis.get("signal_type", "unknown"),
+                alert_type=signal_type_display,
+                alert_message=signal_analysis.get("reason", f"Detected {signal_type_display} signal"),
                 evidence=signal_analysis.get("evidence", ""),
+                business_context="our solution helps businesses improve their processes",
                 recent_tweets=combined_texts  # Now includes both Twitter and LinkedIn
             )
 
