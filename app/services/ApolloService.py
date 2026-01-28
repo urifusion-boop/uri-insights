@@ -170,8 +170,14 @@ class ApolloService:
                     )
 
                 case LeadFormTypeEnum.ORGANIZATION:
-                    # Placeholder for org enrichment logic
-                    org_results = await ApolloService.enrich_organization(grouped_leads)
+                    # Handle organization enrichment (email/phone reveal)
+                    if len(grouped_leads) == 1:
+                        grouped_leads = grouped_leads[0]
+                    org_results = (
+                        await ApolloService.handle_organization_enrichment_request(
+                            grouped_leads, db, reveal_email, reveal_phone, webhook_url
+                        )
+                    )
                     results.extend(
                         org_results if isinstance(org_results, list) else [org_results]
                     )
@@ -328,6 +334,100 @@ class ApolloService:
 
         return await ApolloService._process_person_phone_enrichment_response(
             db, lead_id, phone, response
+        )
+
+    @staticmethod
+    async def handle_organization_enrichment_request(
+        leads: Union[List[dict], dict],
+        db: AsyncIOMotorDatabase,
+        reveal_email: bool = False,
+        reveal_phone: bool = False,
+        webhook_url: Optional[str] = None,
+    ):
+        """
+        Handle organization enrichment similar to person enrichment.
+        Calls Apollo API and saves the enriched data back to the database.
+        """
+        if not leads:
+            return UriResponse.custom_response("Lead(s) not found for enrichment.", 404)
+
+        if isinstance(leads, list):
+            return await ApolloService.handle_multiple_organization_leads_enrichment(
+                leads,
+                db,
+                reveal_email,
+                reveal_phone,
+                webhook_url,
+            )
+        else:
+            # Single organization lead
+            return await ApolloService.handle_single_organization_lead_enrichment(
+                leads, db, reveal_email, reveal_phone, webhook_url
+            )
+
+    @staticmethod
+    async def handle_multiple_organization_leads_enrichment(
+        leads: List[dict],
+        db: AsyncIOMotorDatabase,
+        reveal_email: bool = False,
+        reveal_phone: bool = False,
+        webhook_url: Optional[str] = None,
+    ):
+        """Handle multiple organization leads enrichment concurrently"""
+        enrichment_tasks = [
+            ApolloService.handle_single_organization_lead_enrichment(
+                lead=lead,
+                db=db,
+                reveal_email=reveal_email,
+                reveal_phone=reveal_phone,
+                webhook_url=webhook_url
+            )
+            for lead in leads
+        ]
+        task_responses = await asyncio.gather(*enrichment_tasks, return_exceptions=True)
+        results = [
+            task for task in task_responses if not isinstance(task, Exception)
+        ]
+        return results
+
+    @staticmethod
+    async def handle_single_organization_lead_enrichment(
+        lead: dict,
+        db: AsyncIOMotorDatabase,
+        reveal_email: bool = False,
+        reveal_phone: bool = False,
+        webhook_url: Optional[str] = None,
+    ):
+        """
+        Enrich a single organization lead.
+        Similar to person enrichment but for organizations.
+        """
+        if not lead:
+            return UriResponse.custom_response("Lead not found for enrichment.", 404)
+
+        lead_id = lead.get("lead_id", "")
+        website_url = lead.get("website_url", "")
+
+        print(f"[ORG ENRICHMENT] Lead: {lead.get('company_name', 'Unknown')}")
+        print(f"[ORG ENRICHMENT] Website: {website_url}")
+        print(f"[ORG ENRICHMENT] reveal_email={reveal_email}, reveal_phone={reveal_phone}")
+
+        if not website_url:
+            print(f"[ORG ENRICHMENT] ⚠️ No website URL found for organization")
+            return UriResponse.custom_response("No domain found for this lead.", 404)
+
+        # Call Apollo API to enrich organization
+        response = await ApolloService.handle_single_org_enrichement(lead)
+
+        print(f"[ORG ENRICHMENT] Apollo Response: {response}")
+
+        # Process and persist the enriched data
+        return await ApolloService._process_organization_enrichment_response(
+            db=db,
+            lead_id=lead_id,
+            response=response,
+            reveal_phone=reveal_phone,
+            reveal_email=reveal_email,
         )
 
     @staticmethod
@@ -601,32 +701,101 @@ class ApolloService:
         reveal_phone: bool = False,
         reveal_email: bool = False,
     ):
-        phone = response.get("organization", {}).get("phone", "")
-        website_url = response.get("organization", {}).get("website_url", "")
-        extracted_email = await ApolloService.get_org_email_from_website(website_url)
-        update_data = LeadUpdate()
-        if reveal_phone and phone:
-            update_data.phone = phone
-        if reveal_email and extracted_email != "None":
-            update_data.lead_email = extracted_email
+        """
+        Process Apollo organization enrichment response and save to database.
+        Similar to _process_person_email_enrichment_response but for organizations.
+        """
+        organization = response.get("organization", {})
+        phone = organization.get("phone", "")
 
+        # Apollo organization API returns contact info differently than person API
+        # Organizations may have: primary_phone, phone, or sanitized_phone
+        if not phone:
+            phone = organization.get("primary_phone", "")
+        if not phone:
+            phone = organization.get("sanitized_phone", "")
+
+        # For organizations, email is typically in the format info@domain.com, contact@domain.com
+        # Apollo may provide this in the organization object or we construct it from domain
+        email = organization.get("email", "")
+        if not email:
+            # Try to get from organization contact fields
+            email = organization.get("organization_email", "")
+
+        # If still no email, try to extract from primary domain
+        if not email and reveal_email:
+            primary_domain = organization.get("primary_domain", "")
+            website_url = organization.get("website_url", "")
+
+            print(f"[ORG EMAIL] No direct email from Apollo. Domain: {primary_domain}, Website: {website_url}")
+
+            if primary_domain:
+                # Common organizational email patterns
+                email = f"info@{primary_domain}"
+                print(f"[ORG EMAIL] Generated generic email: {email}")
+            elif website_url:
+                # Extract domain from website URL as fallback
+                try:
+                    from urllib.parse import urlparse
+                    parsed = urlparse(website_url)
+                    domain = parsed.netloc.replace('www.', '')
+                    if domain:
+                        email = f"info@{domain}"
+                        print(f"[ORG EMAIL] Generated email from URL: {email}")
+                except:
+                    pass
+
+        print(f"[ORG ENRICHMENT] Processing response for lead_id: {lead_id}")
+        print(f"[ORG ENRICHMENT] Phone: {phone or 'None'}")
+        print(f"[ORG ENRICHMENT] Email: {email or 'None'}")
+        print(f"[ORG ENRICHMENT] reveal_phone={reveal_phone}, reveal_email={reveal_email}")
+
+        # Build update data
+        update_data = LeadUpdate()
+
+        if reveal_phone:
+            if phone:
+                update_data.phone = phone
+                print(f"[ORG ENRICHMENT] Will update phone: {phone}")
+            else:
+                update_data.phone = "UNAVAILABLE"
+                print(f"[ORG ENRICHMENT] No phone found, setting to UNAVAILABLE")
+
+        if reveal_email:
+            if email:
+                update_data.lead_email = email
+                print(f"[ORG ENRICHMENT] Will update email: {email}")
+            else:
+                update_data.lead_email = "UNAVAILABLE"
+                print(f"[ORG ENRICHMENT] No email found, setting to UNAVAILABLE")
+
+        # Save to database if we have any data to update
         if update_data.phone or update_data.lead_email:
             updated_lead = (
                 await LeadRepository.update_lead(db, lead_id, update_data)
             ).get("responseData", {})
 
-            if reveal_phone:
+            print(f"[ORG ENRICHMENT] ✅ Updated lead in database")
+
+            # Update feature limits
+            if reveal_phone and phone and phone != "UNAVAILABLE":
                 await UriTaskManagerService.update_user_feature_limit_specific_limit(
                     updated_lead.get("assigned_to", ""),
                     EndpointsEnum.LEAD_ENRICHMENT_PHONE.value,
                     0,
                 )
-            if reveal_email:
+                print(f"[ORG ENRICHMENT] ✅ Updated phone feature limit")
+
+            if reveal_email and email and email != "UNAVAILABLE":
                 await UriTaskManagerService.update_user_feature_limit_specific_limit(
                     updated_lead.get("assigned_to", ""),
                     EndpointsEnum.LEAD_ENRICHMENT_EMAIL.value,
                     0,
                 )
+                print(f"[ORG ENRICHMENT] ✅ Updated email feature limit")
+        else:
+            print(f"[ORG ENRICHMENT] ⚠️ No data to update")
+
         return response
 
     @staticmethod
