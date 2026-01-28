@@ -235,7 +235,6 @@ class ScanHistory(BaseModel):
     Scan history record - saves ALL scanned posts regardless of whether they triggered alerts
     Groups posts by contact and time period for the Scanned Content tab
     """
-    scan_id: str = Field(default_factory=lambda: str(uuid.uuid4()), alias="_id")
     user_id: str
     source_type: LazarusMonitorTypeEnum  # "FOCUS_CONTACT" or "COMPANY_MONITOR"
     source_id: str  # focus_id or monitor_id
