@@ -813,6 +813,44 @@ class LazarusMonitoringService:
                         post_likes = primary_post.get("likes") or primary_post.get("likeCount")
                         post_comments = primary_post.get("replies") or primary_post.get("replyCount")
 
+                # Build scanned_posts array with all posts that were analyzed
+                from app.domain.schemas.lazarus_schema import ScannedPost
+                scanned_posts = []
+
+                # Add all tweets
+                for i, tweet in enumerate(tweets[:5]):
+                    tweet_url = tweet.get("url") or tweet.get("tweet_url")
+                    tweet_text = tweet.get("text") or tweet.get("content")
+                    if tweet_url and tweet_text:
+                        scanned_posts.append({
+                            "post_url": tweet_url,
+                            "post_text": tweet_text,
+                            "post_platform": "Twitter",
+                            "post_author": tweet.get("author", {}).get("username") if isinstance(tweet.get("author"), dict) else tweet.get("author"),
+                            "post_created_at": tweet.get("created_at") or tweet.get("createdAt"),
+                            "post_likes": tweet.get("likes") or tweet.get("likeCount"),
+                            "post_comments": tweet.get("replies") or tweet.get("replyCount"),
+                            "post_index": i  # Index in all_posts_ordered
+                        })
+
+                # Add all LinkedIn posts
+                for i, linkedin_post in enumerate(linkedin_posts[:5]):
+                    linkedin_url = linkedin_post.get("url") or linkedin_post.get("postUrl") or linkedin_post.get("link")
+                    linkedin_text = linkedin_post.get("text") or linkedin_post.get("content")
+                    if linkedin_url and linkedin_text:
+                        scanned_posts.append({
+                            "post_url": linkedin_url,
+                            "post_text": linkedin_text,
+                            "post_platform": "LinkedIn",
+                            "post_author": linkedin_post.get("author", {}).get("name") if isinstance(linkedin_post.get("author"), dict) else linkedin_post.get("author"),
+                            "post_created_at": linkedin_post.get("created_at") or linkedin_post.get("postedAt"),
+                            "post_likes": linkedin_post.get("likes") or linkedin_post.get("numLikes"),
+                            "post_comments": linkedin_post.get("comments") or linkedin_post.get("numComments"),
+                            "post_index": len(tweets[:5]) + i  # Offset by number of tweets
+                        })
+
+                logger.info(f"📋 Created scanned_posts array with {len(scanned_posts)} posts")
+
                 # Create alert with AI analysis (platform-agnostic)
                 return {
                     "alert_id": str(uuid.uuid4()),
@@ -835,6 +873,9 @@ class LazarusMonitoringService:
                         "post_created_at": post_created_at,
                         "post_likes": post_likes,
                         "post_comments": post_comments,
+                        # All scanned posts and triggering index
+                        "scanned_posts": scanned_posts,
+                        "triggering_post_index": triggering_index,
                         # Legacy field for backward compatibility
                         "tweet_text": post_text,  # ACTUAL post content
                         "tweet_url": post_url if primary_platform == "Twitter" else None,

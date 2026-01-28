@@ -218,6 +218,18 @@ class CompanyMonitor(BaseModel):
 # LAZARUS ALERTS (Resurrection Signals)
 # ========================================
 
+class ScannedPost(BaseModel):
+    """Individual post that was scanned during alert detection"""
+    post_url: str
+    post_text: str
+    post_platform: str  # "LinkedIn", "Twitter"
+    post_author: Optional[str] = None
+    post_created_at: Optional[str] = None
+    post_likes: Optional[int] = None
+    post_comments: Optional[int] = None
+    post_index: int  # Index in the combined list (for matching with AI triggering_post_index)
+
+
 class LazarusAlertEvidence(BaseModel):
     """Evidence for the resurrection signal"""
     # For job changes
@@ -234,6 +246,10 @@ class LazarusAlertEvidence(BaseModel):
     post_created_at: Optional[str] = None  # When the post was created
     post_likes: Optional[int] = None  # Number of likes
     post_comments: Optional[int] = None  # Number of comments
+
+    # ALL posts that were scanned (for displaying in scanned content tab)
+    scanned_posts: Optional[List[ScannedPost]] = []
+    triggering_post_index: Optional[int] = None  # Which post in scanned_posts triggered the alert
 
     # Legacy fields (backward compatibility)
     tweet_url: Optional[str] = None
