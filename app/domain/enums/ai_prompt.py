@@ -709,6 +709,92 @@ Context:
 - Industry Keywords: {keywords}
 - Signal Types to Detect: {signal_types}
 
+⚠️⚠️⚠️ CRITICAL: SMART BUYING SIGNAL DETECTION ⚠️⚠️⚠️
+
+A "BUYING SIGNAL" = Person shows readiness/interest to PURCHASE a product/service
+You MUST distinguish: Is person SELLING (promoting) or BUYING (needing)?
+
+═══════════════════════════════════════════════════════════════════
+🎯 THE GOLDEN RULE: INTENT & DIRECTION ANALYSIS
+═══════════════════════════════════════════════════════════════════
+
+❌ IGNORE - PROMOTIONAL/OUTBOUND Posts (Person is ADVOCATING/SELLING):
+   ├─ Recommending products to others
+   │  "You should try X", "Switch to Y", "Check out Z", "I recommend X"
+   ├─ Testimonials & endorsements
+   │  "I love using X", "X is amazing", "Best tool ever", "Changed my life"
+   ├─ Marketing calls-to-action
+   │  "Sign up today", "Try it now", "Get started", "Join us", "Limited offer"
+   ├─ Promotional comparisons
+   │  "X is better than Y", "Why we chose X over Y", "X beats all competitors"
+   ├─ Speaking for a company
+   │  "We at CompanyX", "Our product Y", "We offer Z", "Check out our tool"
+   ├─ Success stories & case studies
+   │  "How X helped us 10x revenue", "Thanks to X we achieved Y"
+
+   🔑 KEY: Person is GIVING advice/promoting TO audience (OUTBOUND)
+
+✅ DETECT - BUYER/INBOUND Posts (Person is SEEKING/NEEDING):
+   ├─ Asking for recommendations
+   │  "What CRM should I use?", "Need suggestions for X", "Anyone recommend Y?"
+   ├─ Expressing pain/frustration
+   │  "This tool is terrible", "So frustrated with X", "Wasting hours on Y"
+   ├─ Actively researching
+   │  "Anyone use X? Thoughts?", "Comparing X vs Y", "Evaluating tools"
+   ├─ Announcing switches/transitions
+   │  "Moving away from X", "Switching from Y to something better"
+   ├─ Expressing unmet needs
+   │  "Wish there was a tool for X", "Can't find solution for Y"
+
+   🔑 KEY: Person is SEEKING help/expressing need FROM audience (INBOUND)
+
+═══════════════════════════════════════════════════════════════════
+📊 LANGUAGE PATTERN ANALYSIS
+═══════════════════════════════════════════════════════════════════
+
+PROMOTIONAL INDICATORS (❌):
+• Commands: "Try", "Switch to", "Check out", "Sign up", "Use"
+• Positive: "love", "amazing", "great", "best", "recommend"
+• Marketing: "today", "now", "free", "limited", "get started"
+• Questions TO audience: "Want to see?", "Interested in?"
+
+BUYER INDICATORS (✅):
+• Questions FROM audience: "Anyone know?", "What do you use?", "Help!"
+• Negative emotions: "frustrated", "struggling", "tired of", "hate"
+• Research mode: "evaluating", "considering", "comparing", "looking for"
+• Pain words: "slow", "buggy", "expensive", "complicated", "broken"
+
+═══════════════════════════════════════════════════════════════════
+💡 REAL-WORLD EXAMPLES (Learn from these)
+═══════════════════════════════════════════════════════════════════
+
+❌ "Switch to ProductX today - game changer for marketing!"
+   Analysis: Imperative command, promotional tone → PROMOTING (IGNORE)
+
+❌ "I've been using ProductX for 6 months - absolute game changer!"
+   Analysis: Testimonial, satisfied customer → PROMOTING (IGNORE)
+
+❌ "Are you struggling with lead gen? Try ProductX - we can help"
+   Analysis: Marketing pitch with CTA → PROMOTING (IGNORE)
+
+✅ "Anyone have good alternatives to Salesforce? Budget is tight"
+   Analysis: Question seeking help + pain point → SEEKING SOLUTION (DETECT "switch")
+
+✅ "Our current marketing tool is so buggy and slow. Drives me crazy!"
+   Analysis: Expressing frustration with current solution → PAIN SIGNAL (DETECT "pain")
+
+✅ "Looking for social media management tools - what do you all use?"
+   Analysis: Actively researching options → BUYING INTENT (DETECT "switch")
+
+✅ "Thrilled to announce my promotion to VP of Sales at AcmeCorp!"
+   Analysis: Career milestone announcement → CAREER CHANGE (DETECT "promoted")
+
+✅ "We're torn between HubSpot and Salesforce. Anyone used both?"
+   Analysis: Active evaluation/comparison → DECISION MODE (DETECT "switch")
+
+❌ "Just onboarded 5 clients to ProductX - they're loving it!"
+   Analysis: Consultant sharing success → PROMOTING (IGNORE)
+
 Posts to analyze:
 {tweets}
 
@@ -739,19 +825,104 @@ Signal Type Definitions (11 Categories):
 🔥 ENGAGEMENT SIGNALS (Warm/Interested):
 - "switch": Actively looking for alternatives, asking for recommendations, considering switching tools
   Examples: "Anyone know a good alternative to X?", "Evaluating new solutions", "Time to switch"
-- "likes_competitor": This signal requires metadata analysis (not text-based). Skip for now.
-- "interacts_with_content": This signal requires metadata analysis (not text-based). Skip for now.
+- "likes_competitor": Person likes/engages with competitor posts (requires metadata analysis - detect from context if mentioned)
+- "interacts_with_content": Person engages with industry content relevant to your solution
+
+═══════════════════════════════════════════════════════════════════
+🎯 CRITICAL: INDUSTRY KEYWORD MATCHING
+═══════════════════════════════════════════════════════════════════
+
+USER-PROVIDED KEYWORDS: {keywords}
+
+These keywords define the user's target industry/solution. Use HYBRID TIERED DETECTION:
+
+═══════════════════════════════════════════════════════════════════
+🎯 OPTION C: SMART HYBRID DETECTION STRATEGY
+═══════════════════════════════════════════════════════════════════
+
+TIER 1 - ALWAYS DETECT (No Keyword Match Required):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Signal Types: promoted, changed_jobs, new_decision_maker, raised_funds, hiring, expansion
+
+Detection Rule: ALWAYS detect these regardless of keywords
+Confidence: Set to 0.9 baseline (high priority)
+Reasoning: Life events = universal buying opportunities
+
+Examples:
+✅ "Promoted to VP of Sales" → DETECT (confidence 0.9) even if keywords = ["accounting"]
+✅ "We raised $10M Series A" → DETECT (confidence 0.9) even if keywords = ["CRM"]
+
+TIER 2 - DETECT ALL + KEYWORD SCORING (Keywords Boost Confidence):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Signal Types: pain, competitor_complaint, switch
+
+Detection Rule: Detect ALL genuine pain/switch signals (even without keywords)
+Confidence Boost: Add +0.20 if keywords match
+
+Examples with Keywords = ["CRM", "sales automation"]:
+
+1️⃣ Pain + Keyword Match:
+   Post: "Our CRM is so slow and buggy"
+   Match: ✅ "CRM" exact match
+   Base confidence: 0.75
+   Keyword boost: +0.20
+   Final confidence: 0.95 (CRITICAL PRIORITY)
+
+2️⃣ Pain + No Keyword Match:
+   Post: "This project management tool is terrible"
+   Match: ❌ None
+   Base confidence: 0.75
+   Keyword boost: 0
+   Final confidence: 0.75 (MEDIUM PRIORITY - still valid buyer)
+
+3️⃣ Switch + Keyword Match:
+   Post: "Looking for better sales automation tools"
+   Match: ✅ "sales automation" exact match
+   Base confidence: 0.75
+   Keyword boost: +0.20
+   Final confidence: 0.95 (CRITICAL PRIORITY)
+
+4️⃣ Switch + Related Keyword:
+   Post: "Need recommendations for managing customer relationships"
+   Match: ~ Related to "CRM" (synonym match)
+   Base confidence: 0.75
+   Keyword boost: +0.15
+   Final confidence: 0.90 (HIGH PRIORITY)
+
+CONFIDENCE SCORING FORMULA:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Base:
+- Career/Growth signals → 0.9 (always high)
+- Pain/Switch signals → 0.75 (baseline)
+
+Keyword Boost (only for pain/switch):
++ Exact keyword match → +0.20
++ Synonym match (e.g., "CRM" = "customer relationship management") → +0.15
++ Related match (e.g., "sales tech", "marketing tools") → +0.10
++ Strong pain language ("terrible", "hate", "broken") → +0.05
+
+Maximum: 1.0
+
+KEYWORD MATCHING INTELLIGENCE:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Match exact terms, synonyms, and contextual relevance:
+- "CRM" matches: "CRM", "customer relationship management", "sales database"
+- "sales automation" matches: "sales automation", "sales tech stack", "automating sales"
+- "lead generation" matches: "lead generation", "lead gen", "finding prospects"
 
 Task:
 Analyze the posts and determine if ANY of the specified signal types are present.
-Consider:
-1. Does the content mention any of the industry keywords?
-2. Are there explicit career changes, promotions, or new responsibilities mentioned?
-3. Are there funding announcements, hiring posts, or expansion news?
-4. Does it express pain points, frustration, or dissatisfaction?
-5. Is the person asking for recommendations or alternatives?
-6. Is there indication of budget/buying authority?
-7. Look for EXACT phrases like "promoted", "new role", "joining", "we raised", "we're hiring", "expanding to"
+
+MULTI-FACTOR ANALYSIS CHECKLIST:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. ✅ Does content mention industry keywords or related terms?
+2. ✅ Are there career changes, promotions, or new responsibilities?
+3. ✅ Are there funding announcements, hiring, or expansion news?
+4. ✅ Does it express pain points/frustration relevant to keywords?
+5. ✅ Is person asking for recommendations in keyword domain?
+6. ✅ Is there indication of budget/buying authority?
+7. ✅ Look for EXACT trigger phrases (see detection rules below)
+8. ✅ Is this INBOUND (seeking help) vs OUTBOUND (promoting)?
 
 IMPORTANT DETECTION RULES:
 - For "promoted": Look for words like "promoted", "new title", "new position", "VP", "Director", "Head of"
