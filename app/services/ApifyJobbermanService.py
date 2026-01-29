@@ -124,22 +124,22 @@ class ApifyJobbermanService:
             actor_id = "shahidirfan/jobberman-job-scraper"
 
             # Configure the input for the Jobberman actor with enhanced parameters
+            # ALWAYS use "Lagos" for Jobberman (regardless of user's location input)
+            # Jobberman is Nigeria-focused and works best with Lagos as the location
+            jobberman_location = "Lagos"
+
             run_input = {
                 "keyword": search_query,
                 "posted_date": posted_date,
                 "results_wanted": max_jobs,  # Use results_wanted for better control
                 "max_pages": 10,  # Pagination control
                 "collectDetails": True,  # Get full job details
+                "location": jobberman_location,  # Always use Lagos
                 "proxyConfiguration": {"useApifyProxy": True},
             }
 
-            # Only add location if specified (omit for worldwide search)
-            if location:
-                run_input["location"] = location
-
             # Run the actor in a thread to avoid blocking
-            location_msg = location if location else "worldwide"
-            logger.info(f"Starting Apify actor to fetch Jobberman jobs for: {search_query} in {location_msg}")
+            logger.info(f"Starting Apify actor to fetch Jobberman jobs for: {search_query} in {jobberman_location} (forced location)")
 
             # Run actor synchronously in executor to avoid blocking event loop
             loop = asyncio.get_event_loop()

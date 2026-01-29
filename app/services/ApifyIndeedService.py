@@ -243,6 +243,7 @@ class ApifyIndeedService:
     def _parse_posted_date(self, date_str: Optional[str]) -> str:
         """
         Parse posted date from various formats to ISO format
+        Handles Indeed's relative date formats like "24 days ago", "30+ days ago", "Just posted", etc.
 
         Args:
             date_str: Date string from job posting
@@ -258,7 +259,32 @@ class ApifyIndeedService:
             if "T" in date_str:
                 return date_str
 
-            # Try common date formats
+            # Handle Indeed's relative date formats
+            date_lower = date_str.lower().strip()
+
+            # "Just posted" or "Today" = today
+            if "just posted" in date_lower or date_lower == "today":
+                return datetime.now(timezone.utc).isoformat()
+
+            # "30+ days ago" or "30 days ago" or "24 days ago"
+            import re
+            days_match = re.search(r'(\d+)\+?\s*days?\s*ago', date_lower)
+            if days_match:
+                days = int(days_match.group(1))
+                from datetime import timedelta
+                posted_date = datetime.now(timezone.utc) - timedelta(days=days)
+                return posted_date.isoformat()
+
+            # "1 month ago" or "2 months ago"
+            months_match = re.search(r'(\d+)\s*months?\s*ago', date_lower)
+            if months_match:
+                months = int(months_match.group(1))
+                from datetime import timedelta
+                # Approximate: 1 month = 30 days
+                posted_date = datetime.now(timezone.utc) - timedelta(days=months * 30)
+                return posted_date.isoformat()
+
+            # Try standard date parsing (e.g., "Jan 15, 2025")
             from dateutil import parser
             parsed_date = parser.parse(date_str)
             return parsed_date.isoformat()
