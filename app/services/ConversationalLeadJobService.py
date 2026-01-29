@@ -836,6 +836,9 @@ class ConversationalLeadJobService:
             # Track total job posts fetched across all keywords (before AI filtering)
             job_boards_total_fetched = 0
 
+            # Track ALL filtered job board leads across ALL keywords (for spam saving)
+            all_keyword_filtered_leads = []
+
             # Try ALL keywords to maximize qualified leads (with early stopping at 150 posts)
             qualified_leads = []
             cancelled_early = False  # Track if job was cancelled
@@ -1030,7 +1033,7 @@ class ConversationalLeadJobService:
                 platform_errors = []
                 platform_successes = 0
                 keyword_job_boards_fetched = 0  # Track job boards fetched for THIS keyword only
-                keyword_filtered_leads = []  # NEW: Track filtered leads for spam
+                keyword_filtered_leads = []  # Track filtered leads for THIS keyword only
                 print(f"   🐛 DEBUG: Initialized keyword_filtered_leads for keyword '{keyword}'")
 
                 if fetch_tasks:
@@ -1150,29 +1153,32 @@ class ConversationalLeadJobService:
                     else:
                         print(f"   ⚠️ No leads passed filters for this keyword")
 
-                # === NEW: Save filtered job board leads to spam ===
-                print(f"   🐛 DEBUG: About to check spam save - keyword_filtered_leads has {len(keyword_filtered_leads)} items")
+                # === NEW: Accumulate filtered job board leads for spam (apply filters first) ===
+                print(f"   🐛 DEBUG: keyword_filtered_leads has {len(keyword_filtered_leads)} items for this keyword")
                 if keyword_filtered_leads:
-                    print(f"   🐛 DEBUG: Condition MET - calling _save_filtered_to_spam with {len(keyword_filtered_leads)} leads")
-                    try:
-                        await ConversationalLeadJobService._save_filtered_to_spam(
-                            db=db,
-                            filtered_leads=keyword_filtered_leads,
-                            user_id=user_id,
-                            lead_form_id=lead_form.get("lead_form_id", ""),
-                            search_keyword=keyword,
-                            filter_stage=SpamFilterStageEnum.JOB_BOARD_AI.value,
-                            spam_reason=SpamReasonEnum.LOW_COMMERCIAL_RELEVANCE.value,
-                            commercial_relevance_threshold=0.3,
-                            solution_context=solution_context
-                        )
-                        print(f"   🐛 DEBUG: Successfully completed _save_filtered_to_spam call")
-                    except Exception as spam_error:
-                        print(f"   ⚠️ Error saving filtered job boards to spam: {str(spam_error)}")
-                        import traceback
-                        traceback.print_exc()
+                    # Apply time/location filters to filtered leads BEFORE saving to spam
+                    # (same filters applied to qualified leads)
+                    post_age_filter = lead_form.get("post_age_filter", "all")
+                    location_filter = lead_form.get("location") or []
+                    cutoff_date = LeadFilter.calculate_cutoff_date(post_age_filter)
+
+                    # Filter by time
+                    filtered_after_time = LeadFilter.filter_by_time_range(keyword_filtered_leads, cutoff_date)
+                    time_filtered_count = len(keyword_filtered_leads) - len(filtered_after_time)
+                    if time_filtered_count > 0:
+                        print(f"   🕒 Filtered out {time_filtered_count} unqualified jobs older than {post_age_filter}")
+
+                    # Filter by location
+                    filtered_after_location = LeadFilter.filter_by_location(filtered_after_time, location_filter)
+                    location_filtered_count = len(filtered_after_time) - len(filtered_after_location)
+                    if location_filtered_count > 0:
+                        print(f"   📍 Filtered out {location_filtered_count} unqualified jobs not matching location {location_filter}")
+
+                    # Add to accumulator (will be saved after all keywords processed)
+                    all_keyword_filtered_leads.extend(filtered_after_location)
+                    print(f"   ✅ Added {len(filtered_after_location)} filtered job leads to accumulator (total: {len(all_keyword_filtered_leads)})")
                 else:
-                    print(f"   🐛 DEBUG: Condition NOT MET - skipping spam save (keyword_filtered_leads is empty)")
+                    print(f"   🐛 DEBUG: No filtered leads for this keyword")
 
                 # Continue with all keywords to maximize results (no early stopping)
 
@@ -1296,6 +1302,29 @@ class ConversationalLeadJobService:
 
             # Print final platform distribution summary
             print(distribution_manager.get_summary())
+
+            # === SAVE ALL FILTERED JOB BOARD LEADS TO SPAM (after all keywords processed) ===
+            if all_keyword_filtered_leads:
+                print(f"\n💾 Saving {len(all_keyword_filtered_leads)} filtered job board leads to spam collection...")
+                try:
+                    await ConversationalLeadJobService._save_filtered_to_spam(
+                        db=db,
+                        filtered_leads=all_keyword_filtered_leads,
+                        user_id=user_id,
+                        lead_form_id=lead_form.get("lead_form_id", ""),
+                        search_keyword="job_boards_aggregate",  # Aggregate from all keywords
+                        filter_stage=SpamFilterStageEnum.JOB_BOARD_AI.value,
+                        spam_reason=SpamReasonEnum.LOW_COMMERCIAL_RELEVANCE.value,
+                        commercial_relevance_threshold=0.3,
+                        solution_context=solution_context
+                    )
+                    print(f"   ✅ Successfully saved {len(all_keyword_filtered_leads)} filtered job leads to spam")
+                except Exception as spam_error:
+                    print(f"   ⚠️ Error saving filtered job boards to spam: {str(spam_error)}")
+                    import traceback
+                    traceback.print_exc()
+            else:
+                print(f"\n   ℹ️ No filtered job board leads to save to spam")
 
             # Update progress: Analyzing complete, now saving
             await update_progress(80, f"Analyzed {len(all_leads)} posts, saving {len(qualified_leads)} qualified leads...")
