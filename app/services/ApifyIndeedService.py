@@ -38,15 +38,17 @@ class ApifyIndeedService:
         self,
         search_query: str,
         max_jobs: int = 10,
-        location: str = "Nigeria"
+        location: str = "Nigeria",
+        country: str = "NG"
     ) -> Dict[str, Any]:
         """
-        Fetch job postings from Indeed using Apify
+        Fetch job postings from Indeed using Apify (misceres/indeed-scraper)
 
         Args:
             search_query: The search query (e.g., "DevOps Engineer")
             max_jobs: Maximum number of jobs to fetch (default: 10)
             location: Geographic location filter (default: "Nigeria")
+            country: Country code for Indeed (default: "NG" for Nigeria)
 
         Returns:
             Dictionary containing jobs and metadata:
@@ -75,35 +77,21 @@ class ApifyIndeedService:
                     "jobs": []
                 }
 
-            # TODO: Replace with actual Indeed actor when available
-            # For now, return placeholder to allow system to work
-            logger.info(f"Indeed scraper called for query: '{search_query}' in {location}")
-            logger.warning("Indeed actor not configured yet - returning empty results")
+            # Fetch jobs from Apify using misceres/indeed-scraper
+            jobs_result = await self._fetch_jobs_from_apify(search_query, max_jobs, location, country)
+
+            if not jobs_result["success"]:
+                return jobs_result
+
+            jobs = jobs_result["jobs"]
 
             return {
                 "success": True,
-                "total_jobs": 0,
-                "jobs": [],
+                "total_jobs": len(jobs),
+                "jobs": jobs,
                 "search_query": search_query,
-                "location": location,
-                "note": "Indeed integration ready - awaiting actor configuration"
+                "location": location
             }
-
-            # UNCOMMENT WHEN INDEED ACTOR IS READY:
-            # jobs_result = await self._fetch_jobs_from_apify(search_query, max_jobs, location)
-            #
-            # if not jobs_result["success"]:
-            #     return jobs_result
-            #
-            # jobs = jobs_result["jobs"]
-            #
-            # return {
-            #     "success": True,
-            #     "total_jobs": len(jobs),
-            #     "jobs": jobs,
-            #     "search_query": search_query,
-            #     "location": location
-            # }
 
         except Exception as e:
             logger.error(f"Error fetching Indeed jobs: {str(e)}")
@@ -120,72 +108,121 @@ class ApifyIndeedService:
         self,
         search_query: str,
         max_jobs: int,
-        location: str
+        location: str,
+        country: str = "NG"
     ) -> Dict[str, Any]:
         """
-        Internal method to fetch jobs from Indeed via Apify
-
-        TODO: Configure with actual Indeed actor ID when available
-        Recommended actors:
-        - misceres/indeed-scraper
-        - epctex/indeed-scraper
-        - dtrungtin/indeed-scraper
+        Fetch jobs from Indeed via Apify using misceres/indeed-scraper
 
         Args:
-            search_query: Search query
+            search_query: Search query (e.g., "DevOps Engineer")
             max_jobs: Max jobs to fetch
-            location: Location filter
+            location: Location filter (e.g., "Lagos", "Nigeria")
+            country: Country code (e.g., "NG", "US", "UK")
 
         Returns:
             Dict with jobs data
         """
         try:
-            # TODO: Replace with actual Indeed actor ID
-            # Example: INDEED_ACTOR_ID = "misceres/indeed-scraper"
-            INDEED_ACTOR_ID = "REPLACE_WITH_ACTUAL_INDEED_ACTOR_ID"
+            # Using misceres/indeed-scraper - reliable and well-maintained
+            # Docs: https://apify.com/misceres/indeed-scraper
+            actor_id = "misceres/indeed-scraper"
 
-            # Prepare actor input
+            # Map common location strings to country codes
+            country_code_map = {
+                "nigeria": "NG",
+                "united states": "US",
+                "uk": "UK",
+                "united kingdom": "UK",
+                "canada": "CA",
+                "south africa": "ZA",
+                "kenya": "KE",
+                "ghana": "GH",
+            }
+
+            # Auto-detect country code from location if not provided
+            if not country or country == "NG":
+                location_lower = location.lower()
+                for country_name, code in country_code_map.items():
+                    if country_name in location_lower:
+                        country = code
+                        break
+
+            # Prepare actor input (matching misceres/indeed-scraper format)
             run_input = {
                 "position": search_query,
                 "location": location,
-                "maxItems": max_jobs,
-                "parseCompanyDetails": True,
+                "country": country,
+                "maxItemsPerSearch": max_jobs,
+                "parseCompanyDetails": False,  # Skip for speed
                 "saveOnlyUniqueItems": True,
                 "followApplyRedirects": False
             }
 
-            print(f"🔍 Calling Indeed Apify Actor: {INDEED_ACTOR_ID}")
-            print(f"   Query: {search_query}")
-            print(f"   Location: {location}")
-            print(f"   Max jobs: {max_jobs}")
+            logger.info(f"🔍 Fetching Indeed jobs: '{search_query}' in {location} ({country})")
+            logger.info(f"   Using actor: {actor_id}")
 
-            # Run the actor
-            run = self.apify_client.actor(INDEED_ACTOR_ID).call(run_input=run_input)
+            # Run the actor in executor to avoid blocking
+            loop = asyncio.get_event_loop()
+            run = await loop.run_in_executor(
+                None,
+                lambda: self.apify_client.actor(actor_id).call(run_input=run_input)
+            )
+
+            # Check if run succeeded
+            if run.get("status") != "SUCCEEDED":
+                error_msg = f"Indeed actor failed with status: {run.get('status', 'Unknown')}"
+                logger.error(error_msg)
+                return {
+                    "success": False,
+                    "error_message": error_msg,
+                    "jobs": []
+                }
 
             # Fetch results from dataset
             items = []
-            for item in self.apify_client.dataset(run["defaultDatasetId"]).iterate_items():
-                items.append(item)
+            try:
+                dataset_id = run["defaultDatasetId"]
+                for item in self.apify_client.dataset(dataset_id).iterate_items():
+                    items.append(item)
 
-            print(f"✅ Indeed returned {len(items)} raw job postings")
+                logger.info(f"   📊 Indeed returned {len(items)} job postings")
+
+            except Exception as dataset_error:
+                logger.error(f"Error reading Indeed dataset: {str(dataset_error)}")
+                return {
+                    "success": False,
+                    "error_message": f"Failed to read results: {str(dataset_error)}",
+                    "jobs": []
+                }
 
             # Transform Indeed data to standardized format
             jobs = []
             for item in items[:max_jobs]:
-                job = {
-                    "title": item.get("positionName") or item.get("title", ""),
-                    "company": item.get("company") or item.get("companyName", ""),
-                    "location": item.get("location", ""),
-                    "description": item.get("description", ""),
-                    "url": item.get("url") or item.get("link", ""),
-                    "posted_date": item.get("postedAt") or item.get("datePosted"),
-                    "salary": item.get("salary"),
-                    "job_type": item.get("jobType"),
-                    # Indeed-specific fields
-                    "company_rating": item.get("companyRating"),
-                    "company_reviews_count": item.get("companyReviewsCount"),
-                }
-                jobs.append(job)
+                try:
+                    # misceres/indeed-scraper returns these fields
+                    job_data = {
+                        "title": item.get("positionName") or item.get("title") or "Unknown Title",
+                        "company": item.get("company") or item.get("companyName") or "Unknown Company",
+                        "location": item.get("location") or location,
+                        "description": item.get("description") or item.get("jobDescription") or "",
+                        "url": item.get("url") or item.get("link") or "",
+                        "posted_date": self._parse_posted_date(item.get("postedAt") or item.get("datePosted")),
+                        "salary": item.get("salary") or item.get("salaryRange"),
+                        "source": "Indeed"
+                    }
+
+                    # Only add jobs with valid URLs and descriptions
+                    if job_data["url"] and job_data["description"]:
+                        jobs.append(job_data)
+                    else:
+                        logger.warning(f"Skipping Indeed job with missing URL or description: {job_data['title']}")
+
+                except Exception as item_error:
+                    logger.warning(f"Error processing Indeed job item: {str(item_error)}")
+                    continue
+
+            logger.info(f"✅ Successfully processed {len(jobs)} Indeed jobs")
 
             return {
                 "success": True,
@@ -193,7 +230,7 @@ class ApifyIndeedService:
             }
 
         except Exception as e:
-            logger.error(f"Apify Indeed fetch error: {str(e)}")
+            logger.error(f"Error fetching Indeed jobs via Apify: {str(e)}")
             import traceback
             traceback.print_exc()
 
@@ -202,3 +239,30 @@ class ApifyIndeedService:
                 "error_message": f"Apify actor error: {str(e)}",
                 "jobs": []
             }
+
+    def _parse_posted_date(self, date_str: Optional[str]) -> str:
+        """
+        Parse posted date from various formats to ISO format
+
+        Args:
+            date_str: Date string from job posting
+
+        Returns:
+            ISO formatted date string or current date if parsing fails
+        """
+        if not date_str:
+            return datetime.now(timezone.utc).isoformat()
+
+        try:
+            # Try ISO format first
+            if "T" in date_str:
+                return date_str
+
+            # Try common date formats
+            from dateutil import parser
+            parsed_date = parser.parse(date_str)
+            return parsed_date.isoformat()
+
+        except Exception as e:
+            logger.warning(f"Could not parse Indeed date '{date_str}': {str(e)}")
+            return datetime.now(timezone.utc).isoformat()

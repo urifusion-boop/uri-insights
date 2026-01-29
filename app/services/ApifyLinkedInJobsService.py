@@ -121,6 +121,8 @@ class ApifyLinkedInJobsService:
         """
         Fetch job postings from Apify using LinkedIn Jobs scraper actor
 
+        Uses curious_coder/linkedin-jobs-search-scraper (primary) with fallback to bebity actor
+
         Args:
             search_query: Job search query
             max_jobs: Maximum number of jobs to fetch
@@ -130,65 +132,112 @@ class ApifyLinkedInJobsService:
             Dictionary containing the fetched jobs
         """
         try:
-            # LinkedIn Jobs Scraper actor from Apify Store
-            # Actor: bebity/linkedin-jobs-scraper
-            # Docs: https://apify.com/bebity/linkedin-jobs-scraper
-            actor_id = "bebity/linkedin-jobs-scraper"
+            # PRIMARY ACTOR: curious_coder/linkedin-jobs-search-scraper
+            # Docs: https://apify.com/curious_coder/linkedin-jobs-search-scraper
+            # Better keyword matching, fresher results, more reliable
+            primary_actor_id = "curious_coder/linkedin-jobs-search-scraper"
 
-            # Configure the base input for the actor
-            run_input = {
+            # FALLBACK ACTOR: bebity/linkedin-jobs-scraper
+            # Used if primary actor fails
+            fallback_actor_id = "bebity/linkedin-jobs-scraper"
+
+            # Build LinkedIn job search URL for curious_coder actor
+            # This actor requires a pre-built LinkedIn search URL
+            search_url = self._build_linkedin_search_url(search_query, location, published_at, infer_parameters, solution_context)
+
+            # Configure input for curious_coder actor (URL-based)
+            primary_run_input = {
+                "searchUrl": search_url,
+                "count": max_jobs,
+                "scrapeJobDetails": False,  # Faster scraping, we don't need deep details
+                "scrapeCompany": False,  # Skip company details for speed
+                "scrapeSkills": False,  # Skip skills for speed
+                "proxy": {
+                    "useApifyProxy": True,
+                    "apifyProxyCountry": "US"  # Use US proxies for consistent results
+                }
+            }
+
+            # Fallback input for bebity actor (keyword-based)
+            fallback_run_input = {
                 "keyword": search_query,
                 "maxItems": max_jobs,
-                "publishedAt": published_at,  # Time filter
+                "publishedAt": published_at,
                 "proxy": {
                     "useApifyProxy": True,
                     "apifyProxyGroups": ["RESIDENTIAL"]
                 }
             }
 
-            # Only add location if specified (omit for worldwide search)
             if location:
-                run_input["location"] = location
+                fallback_run_input["location"] = location
 
-            # Intelligently infer additional parameters from job keyword
+            # Infer parameters for fallback actor
             if infer_parameters:
                 from app.services.JobBoardParameterHelper import infer_linkedin_parameters
-
                 inferred = infer_linkedin_parameters(search_query, solution_context)
 
-                # Add inferred parameters (only if they're not None)
                 if inferred.get("experience_level"):
-                    run_input["experienceLevel"] = inferred["experience_level"]
-                    logger.info(f"   🎯 Inferred experience level: {inferred['experience_level']}")
-
+                    fallback_run_input["experienceLevel"] = inferred["experience_level"]
                 if inferred.get("on_site_remote"):
-                    run_input["workType"] = inferred["on_site_remote"]  # LinkedIn uses "workType" not "onSiteRemote"
-                    logger.info(f"   🏠 Inferred work arrangement: {inferred['on_site_remote']}")
-
+                    fallback_run_input["workType"] = inferred["on_site_remote"]
                 if inferred.get("job_type"):
-                    run_input["contractType"] = inferred["job_type"]  # LinkedIn uses "contractType" not "jobType"
-                    logger.info(f"   📋 Inferred job type: {inferred['job_type']}")
+                    fallback_run_input["contractType"] = inferred["job_type"]
 
-            # Run the actor in a thread to avoid blocking
+            # Try primary actor first, fallback to bebity if it fails
             location_display = location if location else "Worldwide"
-            logger.info(f"Starting Apify actor to fetch LinkedIn jobs for: {search_query} in {location_display}")
+            logger.info(f"🔍 Fetching LinkedIn jobs for: '{search_query}' in {location_display}")
+            logger.info(f"   Using primary actor: {primary_actor_id}")
 
-            # Run actor synchronously in executor to avoid blocking event loop
-            loop = asyncio.get_event_loop()
-            run = await loop.run_in_executor(
-                None,
-                lambda: self.apify_client.actor(actor_id).call(run_input=run_input)
-            )
+            actor_id = primary_actor_id
+            run_input = primary_run_input
+            used_fallback = False
 
-            # Check if the run was successful
-            if run.get("status") != "SUCCEEDED":
-                error_msg = f"Apify actor run failed with status: {run.get('status', 'Unknown')}"
-                logger.error(error_msg)
-                return {
-                    "success": False,
-                    "error_message": error_msg,
-                    "jobs": []
-                }
+            try:
+                # Run primary actor
+                loop = asyncio.get_event_loop()
+                run = await loop.run_in_executor(
+                    None,
+                    lambda: self.apify_client.actor(actor_id).call(run_input=run_input)
+                )
+
+                # Check if primary actor succeeded
+                if run.get("status") != "SUCCEEDED":
+                    raise Exception(f"Primary actor failed with status: {run.get('status', 'Unknown')}")
+
+            except Exception as primary_error:
+                logger.warning(f"⚠️ Primary actor ({primary_actor_id}) failed: {str(primary_error)}")
+                logger.info(f"   Falling back to: {fallback_actor_id}")
+
+                # Fallback to bebity actor
+                actor_id = fallback_actor_id
+                run_input = fallback_run_input
+                used_fallback = True
+
+                try:
+                    loop = asyncio.get_event_loop()
+                    run = await loop.run_in_executor(
+                        None,
+                        lambda: self.apify_client.actor(actor_id).call(run_input=run_input)
+                    )
+
+                    if run.get("status") != "SUCCEEDED":
+                        error_msg = f"Both actors failed. Fallback actor status: {run.get('status', 'Unknown')}"
+                        logger.error(error_msg)
+                        return {
+                            "success": False,
+                            "error_message": error_msg,
+                            "jobs": []
+                        }
+
+                except Exception as fallback_error:
+                    error_msg = f"Both actors failed. Primary: {str(primary_error)}, Fallback: {str(fallback_error)}"
+                    logger.error(error_msg)
+                    return {
+                        "success": False,
+                        "error_message": error_msg,
+                        "jobs": []
+                    }
 
             # Get the results
             items = []
@@ -209,21 +258,36 @@ class ApifyLinkedInJobsService:
                     "jobs": []
                 }
 
-            # Process the results
+            # Process the results (handles both actors' output formats)
             jobs = []
             for item in items[:max_jobs]:
                 try:
-                    # Extract job information (field names may vary by actor)
-                    job_data = {
-                        "title": item.get("title") or item.get("jobTitle") or "Unknown Title",
-                        "company": item.get("company") or item.get("companyName") or "Unknown Company",
-                        "location": item.get("location") or item.get("jobLocation") or location,
-                        "description": item.get("description") or item.get("jobDescription") or "",
-                        "url": item.get("url") or item.get("link") or item.get("jobUrl") or "",
-                        "posted_date": self._parse_posted_date(item.get("postedDate") or item.get("publishedAt")),
-                        "salary": item.get("salary") or item.get("salaryRange"),
-                        "source": "LinkedIn Jobs"
-                    }
+                    # curious_coder actor returns different field names than bebity
+                    # Handle both formats gracefully
+                    if not used_fallback:
+                        # curious_coder/linkedin-jobs-search-scraper format
+                        job_data = {
+                            "title": item.get("title") or item.get("jobTitle") or "Unknown Title",
+                            "company": item.get("companyName") or item.get("company") or "Unknown Company",
+                            "location": item.get("location") or item.get("jobLocation") or location,
+                            "description": item.get("description") or item.get("jobDescription") or "",
+                            "url": item.get("jobUrl") or item.get("url") or item.get("link") or "",
+                            "posted_date": self._parse_posted_date(item.get("postedDate") or item.get("publishedAt")),
+                            "salary": item.get("salary") or item.get("salaryRange"),
+                            "source": "LinkedIn Jobs"
+                        }
+                    else:
+                        # bebity/linkedin-jobs-scraper format (fallback)
+                        job_data = {
+                            "title": item.get("title") or item.get("jobTitle") or "Unknown Title",
+                            "company": item.get("company") or item.get("companyName") or "Unknown Company",
+                            "location": item.get("location") or item.get("jobLocation") or location,
+                            "description": item.get("description") or item.get("jobDescription") or "",
+                            "url": item.get("url") or item.get("link") or item.get("jobUrl") or "",
+                            "posted_date": self._parse_posted_date(item.get("postedDate") or item.get("publishedAt")),
+                            "salary": item.get("salary") or item.get("salaryRange"),
+                            "source": "LinkedIn Jobs (Fallback)"
+                        }
 
                     # Only add jobs with valid URLs and descriptions
                     if job_data["url"] and job_data["description"]:
@@ -235,7 +299,8 @@ class ApifyLinkedInJobsService:
                     logger.warning(f"Error processing job item: {str(item_error)}")
                     continue
 
-            logger.info(f"Successfully fetched {len(jobs)} LinkedIn jobs")
+            actor_used = fallback_actor_id if used_fallback else primary_actor_id
+            logger.info(f"✅ Successfully fetched {len(jobs)} LinkedIn jobs using {actor_used}")
 
             return {
                 "success": True,
@@ -251,6 +316,83 @@ class ApifyLinkedInJobsService:
                 "error_message": str(e),
                 "jobs": []
             }
+
+    def _build_linkedin_search_url(
+        self,
+        search_query: str,
+        location: str,
+        published_at: str,
+        infer_parameters: bool,
+        solution_context: str
+    ) -> str:
+        """
+        Build LinkedIn job search URL with proper filters for curious_coder actor
+
+        Args:
+            search_query: Job keyword
+            location: Location string
+            published_at: Time filter (e.g., "Past Week", "Past Month")
+            infer_parameters: Whether to infer additional parameters
+            solution_context: Solution context for inference
+
+        Returns:
+            Fully formatted LinkedIn job search URL
+        """
+        import urllib.parse
+
+        # Base LinkedIn jobs search URL
+        base_url = "https://www.linkedin.com/jobs/search/?"
+
+        # Build query parameters
+        params = {
+            "keywords": search_query,
+            "location": location or "Worldwide",
+            "locationId": "",  # Let LinkedIn auto-detect
+            "geoId": "",
+        }
+
+        # Add time filter (f_TPR parameter)
+        # LinkedIn time filters: r86400 (24h), r604800 (7d), r2592000 (30d), "" (any time)
+        time_filter_map = {
+            "Past 24 Hours": "r86400",
+            "Past Week": "r604800",
+            "Past Month": "r2592000",
+            "Any Time": "",
+            "r86400": "r86400",  # Support direct codes
+            "r604800": "r604800",
+            "r2592000": "r2592000",
+        }
+        time_filter = time_filter_map.get(published_at, "")
+        if time_filter:
+            params["f_TPR"] = time_filter
+
+        # Infer additional parameters if enabled
+        if infer_parameters:
+            from app.services.JobBoardParameterHelper import infer_linkedin_parameters
+            inferred = infer_linkedin_parameters(search_query, solution_context)
+
+            # Experience level filter (f_E parameter)
+            # LinkedIn codes: 1=Internship, 2=Entry, 3=Associate, 4=Mid-Senior, 5=Director
+            if inferred.get("experience_level"):
+                params["f_E"] = inferred["experience_level"]
+
+            # Work type filter (f_WT parameter)
+            # LinkedIn codes: 1=On-site, 2=Remote, 3=Hybrid
+            if inferred.get("on_site_remote"):
+                params["f_WT"] = inferred["on_site_remote"]
+
+            # Job type filter (f_JT parameter)
+            # LinkedIn codes: F=Full-time, P=Part-time, C=Contract, T=Temporary, I=Internship
+            if inferred.get("job_type"):
+                params["f_JT"] = inferred["job_type"]
+
+        # Build URL
+        query_string = urllib.parse.urlencode({k: v for k, v in params.items() if v})
+        search_url = base_url + query_string
+
+        logger.info(f"   🔗 Built LinkedIn search URL: {search_url[:100]}...")
+
+        return search_url
 
     def _parse_posted_date(self, date_str: Optional[str]) -> str:
         """
