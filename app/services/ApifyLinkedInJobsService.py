@@ -145,6 +145,23 @@ class ApifyLinkedInJobsService:
             # This actor requires a pre-built LinkedIn search URL
             search_url = self._build_linkedin_search_url(search_query, location, published_at, infer_parameters, solution_context)
 
+            # Get LinkedIn session cookie from settings and convert to Apify format
+            from app.core.config import settings
+            linkedin_session_cookie = settings.LINKEDIN_SESSION_COOKIE
+
+            # Convert li_at cookie to Apify JSON format
+            linkedin_cookies = None
+            if linkedin_session_cookie:
+                linkedin_cookies = [
+                    {
+                        "name": "li_at",
+                        "value": linkedin_session_cookie,
+                        "domain": ".linkedin.com"
+                    }
+                ]
+
+            linkedin_user_agent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+
             # Configure input for curious_coder actor (URL-based)
             primary_run_input = {
                 "searchUrl": search_url,
@@ -157,6 +174,16 @@ class ApifyLinkedInJobsService:
                     "apifyProxyCountry": "US"  # Use US proxies for consistent results
                 }
             }
+
+            # Add cookies if configured
+            if linkedin_cookies:
+                primary_run_input["cookies"] = linkedin_cookies
+                primary_run_input["userAgent"] = linkedin_user_agent
+                logger.info("   🔑 Using LinkedIn session cookie for authentication")
+            else:
+                logger.warning("⚠️ LINKEDIN_SESSION_COOKIE not configured - primary actor will fail, falling back to bebity")
+                # Force fallback immediately if no cookies
+                raise Exception("LinkedIn session cookie not configured")
 
             # Fallback input for bebity actor (keyword-based)
             fallback_run_input = {
