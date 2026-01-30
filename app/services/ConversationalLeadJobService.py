@@ -1118,6 +1118,20 @@ class ConversationalLeadJobService:
                         # Save time-filtered leads to spam
                         time_rejected_leads = [lead for lead in keyword_leads if lead not in leads_after_time_filter]
                         if time_rejected_leads:
+                            # Set user-friendly reasoning for time-filtered leads
+                            time_window_labels = {
+                                "24h": "the last 24 hours",
+                                "7d": "the last 7 days",
+                                "30d": "the last 30 days",
+                                "3m": "the last 3 months",
+                                "6m": "the last 6 months",
+                                "1y": "the last year",
+                                "all": "any time period"
+                            }
+                            time_window = time_window_labels.get(post_age_filter, f"the {post_age_filter} window")
+                            for lead in time_rejected_leads:
+                                lead.intent_reasoning = f"This post was published outside your selected time range. You are searching for posts from {time_window}, but this post is older than that timeframe and may not reflect current needs or opportunities."
+
                             try:
                                 await ConversationalLeadJobService._save_filtered_to_spam(
                                     db=db,
@@ -1144,6 +1158,13 @@ class ConversationalLeadJobService:
                         # Save location-filtered leads to spam
                         location_rejected_leads = [lead for lead in leads_after_time_filter if lead not in leads_after_location_filter]
                         if location_rejected_leads:
+                            # Set user-friendly reasoning for location-filtered leads
+                            if location_filter and len(location_filter) > 0:
+                                target_locations_str = ", ".join(location_filter)
+                                for lead in location_rejected_leads:
+                                    detected_location = lead.location if lead.location else "an unspecified location"
+                                    lead.intent_reasoning = f"This post does not match your target location. You are searching for leads in {target_locations_str}, but this post appears to be from {detected_location}. Geographic targeting helps ensure you connect with relevant opportunities in your preferred markets."
+
                             try:
                                 await ConversationalLeadJobService._save_filtered_to_spam(
                                     db=db,
@@ -1210,6 +1231,20 @@ class ConversationalLeadJobService:
                         # Save time-filtered job boards to spam
                         time_rejected_jobs = [lead for lead in keyword_filtered_leads if lead not in filtered_after_time]
                         if time_rejected_jobs:
+                            # Set user-friendly reasoning for time-filtered job boards
+                            time_window_labels = {
+                                "24h": "the last 24 hours",
+                                "7d": "the last 7 days",
+                                "30d": "the last 30 days",
+                                "3m": "the last 3 months",
+                                "6m": "the last 6 months",
+                                "1y": "the last year",
+                                "all": "any time period"
+                            }
+                            time_window = time_window_labels.get(post_age_filter, f"the {post_age_filter} window")
+                            for lead in time_rejected_jobs:
+                                lead.intent_reasoning = f"This job posting was published outside your selected time range. You are searching for recent opportunities from {time_window}, but this posting is older and the position may already be filled or no longer available."
+
                             try:
                                 await ConversationalLeadJobService._save_filtered_to_spam(
                                     db=db,
@@ -1237,6 +1272,13 @@ class ConversationalLeadJobService:
                         # Save location-filtered job boards to spam
                         location_rejected_jobs = [lead for lead in filtered_after_time if lead not in filtered_after_location]
                         if location_rejected_jobs:
+                            # Set user-friendly reasoning for location-filtered job boards
+                            if location_filter and len(location_filter) > 0:
+                                target_locations_str = ", ".join(location_filter)
+                                for lead in location_rejected_jobs:
+                                    detected_location = lead.location if lead.location else "an unspecified location"
+                                    lead.intent_reasoning = f"This job posting does not match your target location. You are searching for opportunities in {target_locations_str}, but this position is located in {detected_location}. Location-based filtering helps you find companies and hiring managers within your preferred geographic markets."
+
                             try:
                                 await ConversationalLeadJobService._save_filtered_to_spam(
                                     db=db,
@@ -1334,6 +1376,21 @@ class ConversationalLeadJobService:
                             if time_rejected_count > 0:
                                 print(f"   🕒 Filtered out {time_rejected_count} expansion leads older than {post_age_filter}")
                                 time_rejected_expansion = [lead for lead in extra_qualified_leads if lead not in filtered_after_time]
+
+                                # Set user-friendly reasoning for time-filtered expansion leads
+                                time_window_labels = {
+                                    "24h": "the last 24 hours",
+                                    "7d": "the last 7 days",
+                                    "30d": "the last 30 days",
+                                    "3m": "the last 3 months",
+                                    "6m": "the last 6 months",
+                                    "1y": "the last year",
+                                    "all": "any time period"
+                                }
+                                time_window = time_window_labels.get(post_age_filter, f"the {post_age_filter} window")
+                                for lead in time_rejected_expansion:
+                                    lead.intent_reasoning = f"This job posting was published outside your selected time range. You are searching for recent opportunities from {time_window}, but this posting is older and the position may already be filled or no longer available."
+
                                 try:
                                     await ConversationalLeadJobService._save_filtered_to_spam(
                                         db=db,
@@ -1358,6 +1415,14 @@ class ConversationalLeadJobService:
                             if location_rejected_count > 0:
                                 print(f"   📍 Filtered out {location_rejected_count} expansion leads not matching location {location_filter}")
                                 location_rejected_expansion = [lead for lead in filtered_after_time if lead not in filtered_leads]
+
+                                # Set user-friendly reasoning for location-filtered expansion leads
+                                if location_filter and len(location_filter) > 0:
+                                    target_locations_str = ", ".join(location_filter)
+                                    for lead in location_rejected_expansion:
+                                        detected_location = lead.location if lead.location else "an unspecified location"
+                                        lead.intent_reasoning = f"This job posting does not match your target location. You are searching for opportunities in {target_locations_str}, but this position is located in {detected_location}. Location-based filtering helps you find companies and hiring managers within your preferred geographic markets."
+
                                 try:
                                     await ConversationalLeadJobService._save_filtered_to_spam(
                                         db=db,
