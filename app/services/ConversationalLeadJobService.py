@@ -2224,12 +2224,18 @@ class ConversationalLeadJobService:
             if implied_keywords:
                 all_filter_keywords.extend(implied_keywords)
 
+            keyword_rejected_jobs = []  # NEW: Track jobs filtered by keyword matching
+
             if all_filter_keywords:
                 print(f"   🔍 Pre-filtering with {len(all_filter_keywords)} keywords before AI analysis")
                 keyword_filtered_jobs = ConversationalLeadJobService._filter_jobs_by_keyword_relevance(
                     deduplicated_jobs, all_filter_keywords
                 )
                 filtered_count = len(deduplicated_jobs) - len(keyword_filtered_jobs)
+
+                # NEW: Collect keyword-rejected jobs for spam
+                keyword_rejected_jobs = [job for job in deduplicated_jobs if job not in keyword_filtered_jobs]
+
                 print(f"   ✂️ Filtered out {filtered_count} jobs with zero keyword matches (cost savings: ${filtered_count * 0.0001:.4f})")
                 print(f"   ✅ {len(keyword_filtered_jobs)} jobs passed keyword filter → sending to AI")
                 jobs_to_analyze = keyword_filtered_jobs
@@ -2239,7 +2245,7 @@ class ConversationalLeadJobService:
 
             # Analyze each job posting with AI
             qualified_signals = []
-            filtered_signals = []  # NEW: Collect filtered jobs for spam
+            filtered_signals = []  # NEW: Collect filtered jobs for spam (AI-rejected)
 
             for job in jobs_to_analyze[:max_jobs]:  # Limit to max_jobs
                 try:
@@ -2302,7 +2308,50 @@ class ConversationalLeadJobService:
                     print(f"   ⚠️ Error analyzing job {job.get('title')}: {str(analysis_error)}")
                     continue
 
-            print(f"   ✅ {len(qualified_signals)} qualified job signals (from {len(deduplicated_jobs)} analyzed)")
+            print(f"   ✅ {len(qualified_signals)} qualified job signals (from {len(jobs_to_analyze)} AI-analyzed)")
+
+            # NEW: Convert keyword-rejected jobs to LeadCreate objects for spam
+            for job in keyword_rejected_jobs:
+                try:
+                    keyword_rejected_lead = LeadCreate(
+                        first_name=job.get("company", "Unknown Company"),
+                        last_name="",
+                        username="",
+                        mention=job.get("description", "")[:500],  # Truncate long descriptions
+                        lead_reason=f"Filtered by keyword matching - no match with: {', '.join(all_filter_keywords[:5])}",
+                        lead_status=LeadStatusEnum.NEW,
+                        opportunity_type=LeadOpportunityTypeEnum.OTHER,
+                        tags=[],
+                        lead_link=job.get("url", ""),
+                        website_url=job.get("url", ""),
+                        created_date=datetime.now(timezone.utc),
+                        last_updated=datetime.now(timezone.utc),
+                        lead_type=LeadFormTypeEnum.CONVERSATIONAL,
+                        lead_source=LeadSourceEnum.JOB_BOARDS,
+                        assigned_to=user_id,
+                        starred=False,
+                        lead_form_snapshot_id=lead_form_id,
+                        form_title=form_title,
+                        # Job-specific fields
+                        job_posting_url=job.get("url", ""),
+                        job_title_field=job.get("title", ""),
+                        hiring_company=job.get("company", ""),
+                        problem_solution_match=0.0,  # Not analyzed by AI
+                        hiring_intent_score=0.0,  # Not analyzed by AI
+                        commercial_relevance=0.0,  # Keyword rejected
+                        implied_problems=[],
+                        job_source=job.get("source", "Unknown"),
+                        company_confidence="low",
+                        final_score=0.0,
+                        intent_reasoning="Rejected by keyword matching",
+                        location=job.get("location", ""),
+                    )
+                    filtered_signals.append(keyword_rejected_lead)
+                except Exception as e:
+                    logger.warning(f"Error creating keyword-rejected lead: {str(e)}")
+                    continue
+
+            print(f"   📊 Total filtered: {len(filtered_signals)} (AI-rejected: {len(filtered_signals) - len(keyword_rejected_jobs)}, Keyword-rejected: {len(keyword_rejected_jobs)})")
 
             # NEW: Return filtered signals for spam saving
             # This will be passed back to the caller
@@ -2312,7 +2361,7 @@ class ConversationalLeadJobService:
             # Counter will use total_fetched to track raw posts (like social media)
             return {
                 "qualified_leads": qualified_signals,
-                "filtered_leads": filtered_signals,  # NEW: Include filtered for spam
+                "filtered_leads": filtered_signals,  # NEW: Include filtered for spam (AI + keyword rejected)
                 "total_fetched": len(deduplicated_jobs)
             }
 
