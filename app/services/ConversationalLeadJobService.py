@@ -2338,6 +2338,10 @@ class ConversationalLeadJobService:
             print(f"   💼 Distributing {max_jobs} jobs: LinkedIn {linkedin_max}, Jobberman {jobberman_max}, Indeed {indeed_max}")
             print(f"   ⚡ Fetching from all 3 job boards in parallel...")
 
+            # Helper async function for skipped Jobberman
+            async def skip_jobberman():
+                return {"success": True, "jobs": [], "total_jobs": 0}
+
             # Fetch from all 3 services concurrently (3x speedup!)
             results = await asyncio.gather(
                 linkedin_service.fetch_job_postings(
@@ -2352,7 +2356,7 @@ class ConversationalLeadJobService:
                     max_jobs=jobberman_max,
                     location=location_str,
                     posted_date=posted_date_jobberman
-                ) if location_str else {"success": True, "jobs": [], "total_jobs": 0},  # Skip Jobberman if no location
+                ) if location_str else skip_jobberman(),  # Async function call
                 indeed_service.fetch_job_postings(
                     search_query,
                     max_jobs=indeed_max
