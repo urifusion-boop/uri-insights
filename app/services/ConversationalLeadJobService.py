@@ -1104,7 +1104,7 @@ class ConversationalLeadJobService:
                 if keyword_leads:
                     # Extract filter parameters from lead_form
                     post_age_filter = lead_form.get("post_age_filter", "all")
-                    location_filter = lead_form.get("location") or []
+                    location_filter = [loc.strip() for loc in (lead_form.get("location") or [])]  # Strip whitespace
 
                     # Calculate cutoff date for time filtering
                     cutoff_date = LeadFilter.calculate_cutoff_date(post_age_filter)
@@ -1115,11 +1115,50 @@ class ConversationalLeadJobService:
                     if time_filtered_count > 0:
                         print(f"   🕒 Filtered out {time_filtered_count} leads older than {post_age_filter}")
 
+                        # Save time-filtered leads to spam
+                        time_rejected_leads = [lead for lead in keyword_leads if lead not in leads_after_time_filter]
+                        if time_rejected_leads:
+                            try:
+                                await ConversationalLeadJobService._save_filtered_to_spam(
+                                    db=db,
+                                    filtered_leads=time_rejected_leads,
+                                    user_id=user_id,
+                                    lead_form_id=lead_form.get("lead_form_id", ""),
+                                    search_keyword=keyword,
+                                    filter_stage=SpamFilterStageEnum.TIME_FILTER.value,
+                                    spam_reason=SpamReasonEnum.OUTSIDE_TIME_WINDOW.value,
+                                    post_age_filter=post_age_filter,
+                                    cutoff_date=cutoff_date,
+                                    category_config=category_config
+                                )
+                                print(f"   💾 Saved {len(time_rejected_leads)} time-filtered leads to spam")
+                            except Exception as spam_error:
+                                print(f"   ⚠️ Error saving time-filtered leads to spam: {str(spam_error)}")
+
                     # Apply location filter
                     leads_after_location_filter = LeadFilter.filter_by_location(leads_after_time_filter, location_filter)
                     location_filtered_count = len(leads_after_time_filter) - len(leads_after_location_filter)
                     if location_filtered_count > 0:
                         print(f"   📍 Filtered out {location_filtered_count} leads not matching location {location_filter}")
+
+                        # Save location-filtered leads to spam
+                        location_rejected_leads = [lead for lead in leads_after_time_filter if lead not in leads_after_location_filter]
+                        if location_rejected_leads:
+                            try:
+                                await ConversationalLeadJobService._save_filtered_to_spam(
+                                    db=db,
+                                    filtered_leads=location_rejected_leads,
+                                    user_id=user_id,
+                                    lead_form_id=lead_form.get("lead_form_id", ""),
+                                    search_keyword=keyword,
+                                    filter_stage=SpamFilterStageEnum.LOCATION_FILTER.value,
+                                    spam_reason=SpamReasonEnum.LOCATION_MISMATCH.value,
+                                    target_locations=location_filter,
+                                    category_config=category_config
+                                )
+                                print(f"   💾 Saved {len(location_rejected_leads)} location-filtered leads to spam")
+                            except Exception as spam_error:
+                                print(f"   ⚠️ Error saving location-filtered leads to spam: {str(spam_error)}")
 
                     print(f"   ✅ {len(leads_after_location_filter)} leads passed filters (from {len(keyword_leads)} raw)")
 
@@ -1159,7 +1198,7 @@ class ConversationalLeadJobService:
                     # Apply time/location filters to filtered leads BEFORE saving to spam
                     # (same filters applied to qualified leads)
                     post_age_filter = lead_form.get("post_age_filter", "all")
-                    location_filter = lead_form.get("location") or []
+                    location_filter = [loc.strip() for loc in (lead_form.get("location") or [])]  # Strip whitespace
                     cutoff_date = LeadFilter.calculate_cutoff_date(post_age_filter)
 
                     # Filter by time
@@ -1168,11 +1207,52 @@ class ConversationalLeadJobService:
                     if time_filtered_count > 0:
                         print(f"   🕒 Filtered out {time_filtered_count} unqualified jobs older than {post_age_filter}")
 
+                        # Save time-filtered job boards to spam
+                        time_rejected_jobs = [lead for lead in keyword_filtered_leads if lead not in filtered_after_time]
+                        if time_rejected_jobs:
+                            try:
+                                await ConversationalLeadJobService._save_filtered_to_spam(
+                                    db=db,
+                                    filtered_leads=time_rejected_jobs,
+                                    user_id=user_id,
+                                    lead_form_id=lead_form.get("lead_form_id", ""),
+                                    search_keyword=keyword,
+                                    filter_stage=SpamFilterStageEnum.TIME_FILTER.value,
+                                    spam_reason=SpamReasonEnum.OUTSIDE_TIME_WINDOW.value,
+                                    post_age_filter=post_age_filter,
+                                    cutoff_date=cutoff_date,
+                                    commercial_relevance_threshold=0.3,
+                                    solution_context=solution_context
+                                )
+                                print(f"   💾 Saved {len(time_rejected_jobs)} time-filtered job boards to spam")
+                            except Exception as spam_error:
+                                print(f"   ⚠️ Error saving time-filtered job boards to spam: {str(spam_error)}")
+
                     # Filter by location
                     filtered_after_location = LeadFilter.filter_by_location(filtered_after_time, location_filter)
                     location_filtered_count = len(filtered_after_time) - len(filtered_after_location)
                     if location_filtered_count > 0:
                         print(f"   📍 Filtered out {location_filtered_count} unqualified jobs not matching location {location_filter}")
+
+                        # Save location-filtered job boards to spam
+                        location_rejected_jobs = [lead for lead in filtered_after_time if lead not in filtered_after_location]
+                        if location_rejected_jobs:
+                            try:
+                                await ConversationalLeadJobService._save_filtered_to_spam(
+                                    db=db,
+                                    filtered_leads=location_rejected_jobs,
+                                    user_id=user_id,
+                                    lead_form_id=lead_form.get("lead_form_id", ""),
+                                    search_keyword=keyword,
+                                    filter_stage=SpamFilterStageEnum.LOCATION_FILTER.value,
+                                    spam_reason=SpamReasonEnum.LOCATION_MISMATCH.value,
+                                    target_locations=location_filter,
+                                    commercial_relevance_threshold=0.3,
+                                    solution_context=solution_context
+                                )
+                                print(f"   💾 Saved {len(location_rejected_jobs)} location-filtered job boards to spam")
+                            except Exception as spam_error:
+                                print(f"   ⚠️ Error saving location-filtered job boards to spam: {str(spam_error)}")
 
                     # Add to accumulator (will be saved after all keywords processed)
                     all_keyword_filtered_leads.extend(filtered_after_location)
@@ -1245,11 +1325,55 @@ class ConversationalLeadJobService:
 
                             # Apply filters to qualified leads
                             post_age_filter = lead_form.get("post_age_filter", "all")
-                            location_filter = lead_form.get("location") or []
+                            location_filter = [loc.strip() for loc in (lead_form.get("location") or [])]  # Strip whitespace
                             cutoff_date = LeadFilter.calculate_cutoff_date(post_age_filter)
 
-                            filtered_leads = LeadFilter.filter_by_time_range(extra_qualified_leads, cutoff_date)
-                            filtered_leads = LeadFilter.filter_by_location(filtered_leads, location_filter)
+                            # Apply time filter and save rejected to spam
+                            filtered_after_time = LeadFilter.filter_by_time_range(extra_qualified_leads, cutoff_date)
+                            time_rejected_count = len(extra_qualified_leads) - len(filtered_after_time)
+                            if time_rejected_count > 0:
+                                print(f"   🕒 Filtered out {time_rejected_count} expansion leads older than {post_age_filter}")
+                                time_rejected_expansion = [lead for lead in extra_qualified_leads if lead not in filtered_after_time]
+                                try:
+                                    await ConversationalLeadJobService._save_filtered_to_spam(
+                                        db=db,
+                                        filtered_leads=time_rejected_expansion,
+                                        user_id=user_id,
+                                        lead_form_id=lead_form.get("lead_form_id", ""),
+                                        search_keyword=extra_keyword,
+                                        filter_stage=SpamFilterStageEnum.TIME_FILTER.value,
+                                        spam_reason=SpamReasonEnum.OUTSIDE_TIME_WINDOW.value,
+                                        post_age_filter=post_age_filter,
+                                        cutoff_date=cutoff_date,
+                                        commercial_relevance_threshold=0.3,
+                                        solution_context=solution_context
+                                    )
+                                    print(f"   💾 Saved {len(time_rejected_expansion)} time-filtered expansion leads to spam")
+                                except Exception as spam_error:
+                                    print(f"   ⚠️ Error saving time-filtered expansion leads to spam: {str(spam_error)}")
+
+                            # Apply location filter and save rejected to spam
+                            filtered_leads = LeadFilter.filter_by_location(filtered_after_time, location_filter)
+                            location_rejected_count = len(filtered_after_time) - len(filtered_leads)
+                            if location_rejected_count > 0:
+                                print(f"   📍 Filtered out {location_rejected_count} expansion leads not matching location {location_filter}")
+                                location_rejected_expansion = [lead for lead in filtered_after_time if lead not in filtered_leads]
+                                try:
+                                    await ConversationalLeadJobService._save_filtered_to_spam(
+                                        db=db,
+                                        filtered_leads=location_rejected_expansion,
+                                        user_id=user_id,
+                                        lead_form_id=lead_form.get("lead_form_id", ""),
+                                        search_keyword=extra_keyword,
+                                        filter_stage=SpamFilterStageEnum.LOCATION_FILTER.value,
+                                        spam_reason=SpamReasonEnum.LOCATION_MISMATCH.value,
+                                        target_locations=location_filter,
+                                        commercial_relevance_threshold=0.3,
+                                        solution_context=solution_context
+                                    )
+                                    print(f"   💾 Saved {len(location_rejected_expansion)} location-filtered expansion leads to spam")
+                                except Exception as spam_error:
+                                    print(f"   ⚠️ Error saving location-filtered expansion leads to spam: {str(spam_error)}")
 
                             if filtered_leads:
                                 all_leads.extend(filtered_leads)
@@ -2341,14 +2465,14 @@ class ConversationalLeadJobService:
                         commercial_relevance=0.0,  # Keyword rejected
                         implied_problems=[],
                         job_source=job.get("source", "Unknown"),
-                        company_confidence="low",
+                        company_confidence=0.0,  # Not analyzed by AI (must be float)
                         final_score=0.0,
                         intent_reasoning="Rejected by keyword matching",
                         location=job.get("location", ""),
                     )
                     filtered_signals.append(keyword_rejected_lead)
                 except Exception as e:
-                    logger.warning(f"Error creating keyword-rejected lead: {str(e)}")
+                    print(f"   ⚠️ Error creating keyword-rejected lead: {str(e)}")
                     continue
 
             print(f"   📊 Total filtered: {len(filtered_signals)} (AI-rejected: {len(filtered_signals) - len(keyword_rejected_jobs)}, Keyword-rejected: {len(keyword_rejected_jobs)})")
@@ -2622,10 +2746,21 @@ class ConversationalLeadJobService:
                     spam_lead_data["solution_context"] = context["solution_context"]
 
                 # Build detailed reason for job boards
-                spam_lead_data["spam_reason_detail"] = (
-                    f"Commercial relevance ({lead.commercial_relevance:.2f}) "
-                    f"below threshold ({context.get('commercial_relevance_threshold', 0.3)})"
-                )
+                if filter_stage == SpamFilterStageEnum.JOB_BOARD_AI.value:
+                    spam_lead_data["spam_reason_detail"] = (
+                        f"Commercial relevance ({lead.commercial_relevance:.2f}) "
+                        f"below threshold ({context.get('commercial_relevance_threshold', 0.3)})"
+                    )
+                elif filter_stage == SpamFilterStageEnum.TIME_FILTER.value:
+                    spam_lead_data["spam_reason_detail"] = (
+                        f"Job posting outside time window ({context.get('post_age_filter', 'all')})"
+                    )
+                elif filter_stage == SpamFilterStageEnum.LOCATION_FILTER.value:
+                    spam_lead_data["spam_reason_detail"] = (
+                        f"Location '{lead.location}' does not match target: {', '.join(context.get('target_locations', []))}"
+                    )
+                else:
+                    spam_lead_data["spam_reason_detail"] = "Filtered by job board analysis"
 
             # === SOCIAL POST SPECIFIC FIELDS ===
             else:
@@ -2666,15 +2801,25 @@ class ConversationalLeadJobService:
                     })
 
                 # Build detailed reason for social posts
-                failed_criteria = []
-                if lead.intent_score and lead.intent_score < context.get("intent_min", 0.5):
-                    failed_criteria.append(f"intent ({lead.intent_score:.2f} < {context.get('intent_min', 0.5)})")
-                if lead.relevance_score and lead.relevance_score < context.get("relevance_min", 0.45):
-                    failed_criteria.append(f"relevance ({lead.relevance_score:.2f} < {context.get('relevance_min', 0.45)})")
-                if lead.final_score and lead.final_score < context.get("final_min", 0.55):
-                    failed_criteria.append(f"final ({lead.final_score:.2f} < {context.get('final_min', 0.55)})")
-
-                spam_lead_data["spam_reason_detail"] = f"Failed: {', '.join(failed_criteria)}" if failed_criteria else "Failed intent qualification"
+                if filter_stage == SpamFilterStageEnum.INTENT_ANALYSIS.value:
+                    failed_criteria = []
+                    if lead.intent_score and lead.intent_score < context.get("intent_min", 0.5):
+                        failed_criteria.append(f"intent ({lead.intent_score:.2f} < {context.get('intent_min', 0.5)})")
+                    if lead.relevance_score and lead.relevance_score < context.get("relevance_min", 0.45):
+                        failed_criteria.append(f"relevance ({lead.relevance_score:.2f} < {context.get('relevance_min', 0.45)})")
+                    if lead.final_score and lead.final_score < context.get("final_min", 0.55):
+                        failed_criteria.append(f"final ({lead.final_score:.2f} < {context.get('final_min', 0.55)})")
+                    spam_lead_data["spam_reason_detail"] = f"Failed: {', '.join(failed_criteria)}" if failed_criteria else "Failed intent qualification"
+                elif filter_stage == SpamFilterStageEnum.TIME_FILTER.value:
+                    spam_lead_data["spam_reason_detail"] = (
+                        f"Post outside time window ({context.get('post_age_filter', 'all')})"
+                    )
+                elif filter_stage == SpamFilterStageEnum.LOCATION_FILTER.value:
+                    spam_lead_data["spam_reason_detail"] = (
+                        f"Location '{lead.location}' does not match target: {', '.join(context.get('target_locations', []))}"
+                    )
+                else:
+                    spam_lead_data["spam_reason_detail"] = "Filtered by intent analysis"
 
             # Add time filter context if provided
             if "post_created_date" in context:
