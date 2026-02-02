@@ -500,13 +500,21 @@ async def update_company_monitor_scan_frequency(
 async def bulk_upload_csv(
     csv_rows: List[CSVUploadRow],
     user_id: str = Query(...),
+    auto_enrich: bool = Query(False, description="Auto-trigger LinkedIn enrichment for all contacts with LinkedIn URLs"),
     db: AsyncIOMotorDatabase = Depends(get_db_dependency),
 ):
     """
     Bulk upload focus contacts/companies from CSV
     PRD Section 4.2: Bulk Upload via CSV
+
+    Features:
+    - Accepts full URLs or handles for social_handle (auto-parsed)
+    - Supports LinkedIn, Twitter/X, Facebook, Instagram
+    - Optional auto-enrichment for LinkedIn profiles (email, phone, profile data)
+    - Duplicate detection based on social URLs
+    - Returns detailed feedback on URL parsing and normalization
     """
-    result = await LazarusService.bulk_upload_from_csv(db, user_id, csv_rows)
+    result = await LazarusService.bulk_upload_from_csv(db, user_id, csv_rows, auto_enrich)
 
     return UriResponse.custom_response(
         message=result["message"],
@@ -515,7 +523,10 @@ async def bulk_upload_csv(
         data={
             "added_count": result.get("added_count"),
             "failed_count": result.get("failed_count"),
+            "enrichment_queued_count": result.get("enrichment_queued_count", 0),
+            "duplicate_count": result.get("duplicate_count", 0),
             "errors": result.get("errors", []),
+            "uploaded_contacts": result.get("uploaded_contacts", []),
         },
     )
 

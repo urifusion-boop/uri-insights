@@ -283,7 +283,7 @@ class ApolloService:
             # If no email but revealed, Apollo doesn't have it in database
             if not email and revealed:
                 print(f"[EMAIL ENRICHMENT] ⚠️  Apollo has no email for this contact in their database")
-                email = "NOT_IN_APOLLO_DB"
+                email = "UNAVAILABLE"
 
         # Normalize payload
         email = email or "UNAVAILABLE"

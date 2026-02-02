@@ -413,10 +413,20 @@ class CompanyMonitorCreate(BaseModel):
 
 
 class CSVUploadRow(BaseModel):
-    """Single row from CSV upload (PRD Section 2.2.1)"""
+    """
+    Single row from CSV upload (PRD Section 2.2.1)
+
+    Supports flexible URL formats for social_handle:
+    - Full URLs: https://linkedin.com/in/johndoe
+    - Partial URLs: linkedin.com/in/johndoe
+    - Handles: @johndoe (for Twitter)
+    - Platform-specific paths: /in/johndoe
+
+    Auto-parses and normalizes all URL formats via SocialURLHelper
+    """
     type: LazarusMonitorTypeEnum
     name: str
-    social_handle: Optional[str] = None
+    social_handle: Optional[str] = None  # Accepts full URLs or handles - auto-parsed!
     current_bio: Optional[str] = None
     website_url: Optional[str] = None
     location: Optional[str] = None  # For companies

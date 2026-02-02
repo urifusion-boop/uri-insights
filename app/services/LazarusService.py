@@ -418,11 +418,29 @@ class LazarusService:
     # ============ BULK CSV UPLOAD ============
     @staticmethod
     async def bulk_upload_from_csv(
-        db: AsyncIOMotorDatabase, user_id: str, csv_rows: List[CSVUploadRow]
+        db: AsyncIOMotorDatabase,
+        user_id: str,
+        csv_rows: List[CSVUploadRow],
+        auto_enrich: bool = False
     ) -> Dict[str, Any]:
         """
         Bulk upload focus contacts/companies from CSV
         PRD Section 4.2: Bulk Upload via CSV
+
+        Enhanced Features:
+        - Accepts full URLs or handles (auto-parsed via SocialURLHelper)
+        - Duplicate detection based on LinkedIn/Twitter URLs
+        - Optional auto-enrichment for LinkedIn profiles
+        - Detailed feedback on URL parsing and normalization
+
+        Args:
+            db: Database connection
+            user_id: User ID
+            csv_rows: List of CSV rows to upload
+            auto_enrich: If True, auto-trigger LinkedIn enrichment for contacts with LinkedIn URLs
+
+        Returns:
+            Dictionary with upload results, errors, and detailed feedback
         """
         slots = await LazarusRepository.get_or_create_slots(db, user_id)
         slots_available = slots.max_slots - slots.used_slots
@@ -435,11 +453,71 @@ class LazarusService:
 
         added_count = 0
         failed_count = 0
+        duplicate_count = 0
+        enrichment_queued_count = 0
         errors = []
+        uploaded_contacts = []
 
         for row in csv_rows:
             try:
                 if row.type == LazarusMonitorTypeEnum.FOCUS_CONTACT:
+                    # Parse social_handle to extract platform URLs
+                    parsed_urls = {}
+                    detected_platform = "Unknown"
+                    normalized_url = None
+
+                    if row.social_handle:
+                        parsed_urls = SocialURLHelper.parse_social_handle(row.social_handle)
+                        detected_platform = (
+                            "LinkedIn" if parsed_urls.get("linkedin_url") else
+                            "Twitter" if parsed_urls.get("twitter_url") else
+                            "Facebook" if parsed_urls.get("facebook_url") else
+                            "Instagram" if parsed_urls.get("instagram_url") else
+                            "Unknown"
+                        )
+                        normalized_url = (
+                            parsed_urls.get("linkedin_url") or
+                            parsed_urls.get("twitter_url") or
+                            parsed_urls.get("facebook_url") or
+                            parsed_urls.get("instagram_url")
+                        )
+
+                    # Check for duplicates based on LinkedIn or Twitter URL
+                    is_duplicate = False
+                    if parsed_urls.get("linkedin_url"):
+                        # Clean LinkedIn URL for duplicate check
+                        clean_linkedin_url = SocialURLHelper.clean_linkedin_url(parsed_urls["linkedin_url"])
+                        existing = await db["focus_contacts"].find_one({
+                            "user_id": user_id,
+                            "linkedin_url": clean_linkedin_url
+                        })
+                        if existing:
+                            is_duplicate = True
+                            duplicate_count += 1
+                            errors.append({
+                                "name": row.name,
+                                "error": f"Duplicate: Contact with LinkedIn URL '{clean_linkedin_url}' already exists",
+                                "is_duplicate": True
+                            })
+                    elif parsed_urls.get("twitter_url"):
+                        existing = await db["focus_contacts"].find_one({
+                            "user_id": user_id,
+                            "twitter_url": parsed_urls["twitter_url"]
+                        })
+                        if existing:
+                            is_duplicate = True
+                            duplicate_count += 1
+                            errors.append({
+                                "name": row.name,
+                                "error": f"Duplicate: Contact with Twitter URL '{parsed_urls['twitter_url']}' already exists",
+                                "is_duplicate": True
+                            })
+
+                    # Skip if duplicate
+                    if is_duplicate:
+                        continue
+
+                    # Create contact
                     contact_create = FocusContactCreate(
                         name=row.name,
                         social_handle=row.social_handle,
@@ -450,7 +528,59 @@ class LazarusService:
                     result = await LazarusService.add_focus_contact(
                         db, user_id, contact_create
                     )
+
+                    if result["success"]:
+                        added_count += 1
+
+                        # Track uploaded contact with URL parsing feedback
+                        uploaded_contacts.append({
+                            "name": row.name,
+                            "focus_id": result.get("focus_id"),
+                            "original_input": row.social_handle,
+                            "detected_platform": detected_platform,
+                            "normalized_url": normalized_url,
+                            "enrichment_queued": False
+                        })
+
+                        # Auto-enrich if requested and LinkedIn URL exists
+                        if auto_enrich and parsed_urls.get("linkedin_url"):
+                            try:
+                                await LazarusService._enrich_focus_contact_background(
+                                    db,
+                                    user_id,
+                                    result["focus_id"],
+                                    parsed_urls["linkedin_url"]
+                                )
+                                enrichment_queued_count += 1
+                                uploaded_contacts[-1]["enrichment_queued"] = True
+                                print(f"✅ Queued enrichment for {row.name} (LinkedIn: {parsed_urls['linkedin_url']})")
+                            except Exception as enrich_error:
+                                print(f"⚠️ Enrichment queue failed for {row.name}: {str(enrich_error)}")
+                    else:
+                        failed_count += 1
+                        errors.append({"name": row.name, "error": result["message"]})
+
                 else:  # COMPANY
+                    # Check for duplicate company by website URL
+                    is_duplicate = False
+                    if row.website_url:
+                        existing = await db["company_monitors"].find_one({
+                            "user_id": user_id,
+                            "website_url": row.website_url
+                        })
+                        if existing:
+                            is_duplicate = True
+                            duplicate_count += 1
+                            errors.append({
+                                "name": row.name,
+                                "error": f"Duplicate: Company with website '{row.website_url}' already exists",
+                                "is_duplicate": True
+                            })
+
+                    # Skip if duplicate
+                    if is_duplicate:
+                        continue
+
                     monitor_create = CompanyMonitorCreate(
                         company_name=row.name,
                         website_url=row.website_url,
@@ -462,23 +592,124 @@ class LazarusService:
                         db, user_id, monitor_create
                     )
 
-                if result["success"]:
-                    added_count += 1
-                else:
-                    failed_count += 1
-                    errors.append({"name": row.name, "error": result["message"]})
+                    if result["success"]:
+                        added_count += 1
+                        uploaded_contacts.append({
+                            "name": row.name,
+                            "monitor_id": result.get("monitor_id"),
+                            "website_url": row.website_url,
+                            "type": "COMPANY"
+                        })
+                    else:
+                        failed_count += 1
+                        errors.append({"name": row.name, "error": result["message"]})
 
             except Exception as e:
                 failed_count += 1
                 errors.append({"name": row.name, "error": str(e)})
+                print(f"❌ Error uploading {row.name}: {str(e)}")
+                import traceback
+                traceback.print_exc()
+
+        # Build summary message
+        message_parts = [f"Uploaded {added_count} monitors"]
+        if failed_count > 0:
+            message_parts.append(f"{failed_count} failed")
+        if duplicate_count > 0:
+            message_parts.append(f"{duplicate_count} duplicates skipped")
+        if enrichment_queued_count > 0:
+            message_parts.append(f"{enrichment_queued_count} queued for enrichment")
+
+        message = ". ".join(message_parts) + "."
 
         return {
             "success": True,
-            "message": f"Uploaded {added_count} monitors. {failed_count} failed.",
+            "message": message,
             "added_count": added_count,
             "failed_count": failed_count,
+            "duplicate_count": duplicate_count,
+            "enrichment_queued_count": enrichment_queued_count,
             "errors": errors,
+            "uploaded_contacts": uploaded_contacts,
         }
+
+    @staticmethod
+    async def _enrich_focus_contact_background(
+        db: AsyncIOMotorDatabase,
+        user_id: str,
+        focus_id: str,
+        linkedin_url: str
+    ) -> None:
+        """
+        Background enrichment helper for CSV uploads
+        Enriches LinkedIn profile and updates focus contact
+
+        Args:
+            db: Database connection
+            user_id: User ID
+            focus_id: Focus contact ID
+            linkedin_url: LinkedIn URL to enrich
+        """
+        from app.services.LinkedInProfileScraperService import LinkedInProfileScraperService
+
+        # Update status to pending
+        await LazarusRepository.update_focus_contact(
+            db, focus_id, user_id, {"enrichment_status": "pending"}
+        )
+
+        # Call LinkedIn Profile Scraper
+        scraper_service = LinkedInProfileScraperService()
+        enrichment_result = await scraper_service.enrich_profile(
+            linkedin_url=linkedin_url,
+            timeout_seconds=90
+        )
+
+        if not enrichment_result.get("success"):
+            # Mark as failed
+            await LazarusRepository.update_focus_contact(
+                db, focus_id, user_id, {
+                    "enrichment_status": "failed",
+                    "enriched_at": datetime.utcnow()
+                }
+            )
+            print(f"⚠️ Enrichment failed for focus_id {focus_id}: {enrichment_result.get('error_message')}")
+            return
+
+        # Extract enriched data
+        profile_data = enrichment_result.get("profile_data", {})
+
+        # Update contact with enriched data
+        enrichment_update = {
+            "email": enrichment_result.get("email"),
+            "phone": enrichment_result.get("phone"),
+            "linkedin_url": linkedin_url,
+            "profile_photo": profile_data.get("profile_photo"),
+            "headline": profile_data.get("headline"),
+            "location": profile_data.get("location"),
+            "connections_count": profile_data.get("connections_count"),
+            "about": profile_data.get("about"),
+            "work_experience": profile_data.get("work_experience"),
+            "education": profile_data.get("education"),
+            "skills": profile_data.get("skills"),
+            "languages": profile_data.get("languages"),
+            "certifications": profile_data.get("certifications"),
+            "enriched_at": datetime.utcnow(),
+            "enrichment_status": "completed"
+        }
+
+        # Update current_company if available
+        if profile_data.get("current_company"):
+            enrichment_update["current_company"] = profile_data.get("current_company")
+
+        await LazarusRepository.update_focus_contact(
+            db, focus_id, user_id, enrichment_update
+        )
+
+        print(f"✅ Successfully enriched focus_id {focus_id}")
+        if enrichment_result.get("email"):
+            print(f"   📧 Email: {enrichment_result.get('email')}")
+        if enrichment_result.get("phone"):
+            print(f"   📱 Phone: {enrichment_result.get('phone')}")
 
     # ============ ALERTS ============
     @staticmethod
