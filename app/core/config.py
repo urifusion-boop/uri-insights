@@ -79,6 +79,11 @@ class Settings(BaseSettings):
     
     # Apify Configuration
     APIFY_API_TOKEN: str = ""
+    APIFY_API_TOKEN_BACKUP: str = ""  # Backup token for failover
+    APIFY_TIMEOUT_SECONDS: int = 60   # Timeout before switching to backup
+
+    # LinkedIn Scraping Configuration
+    LINKEDIN_SESSION_COOKIE: Optional[str] = None  # li_at session cookie for authenticated scraping
 
     # Gemini Configuration (for LLM fallback)
     GEMINI_API_KEY: Optional[str] = None

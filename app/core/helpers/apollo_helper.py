@@ -66,6 +66,7 @@ class ApolloHelper:
             "buying_signals",
             "excluded_keywords",
             "location",
+            "post_age_filter",
             "intent_type",
             "category_context",
             "implied_keywords",
@@ -73,6 +74,11 @@ class ApolloHelper:
             "enable_realtime",
             "monitoring_platforms",
             "platform_configs",
+            "solution_context",
+            "job_keywords",
+            "is_default",
+            "monitoring_interval_hours",
+            "lead_generation_goal",
         ]
 
         lead_form.copy()
@@ -126,6 +132,12 @@ class ApolloHelper:
             "enable_realtime",
             "monitoring_platforms",
             "platform_configs",
+            "post_age_filter",
+            "solution_context",
+            "job_keywords",
+            "is_default",
+            "monitoring_interval_hours",
+            "lead_generation_goal",
         ]
         organization_search_request_dict = DictHelper.remove_keys(
             lead_form.copy(), unwanted_keys
@@ -166,18 +178,46 @@ class ApolloHelper:
 
     @staticmethod
     def get_enrich_person_params_from_lead(lead: dict):
+        apollo_id = lead.get("apollo_id")
+
+        # If we have apollo_id, use it directly for reliable matching
+        if apollo_id:
+            print(f"[ENRICH PARAMS] Using Apollo ID for enrichment: {apollo_id}")
+            return {"id": apollo_id}
+
+        # Otherwise, build params from lead data
         # Extract domain from website_url
         website_url = lead.get("website_url") or ""
         parsed_domain = (
             urlparse(website_url).netloc.replace("www.", "") if website_url else ""
         )
 
-        return {
-            "name": f"{lead.get('first_name', '')} {lead.get('last_name', '')}".strip(),
+        # Build name, filtering out None/"None" values
+        first_name = lead.get('first_name', '') or ''
+        last_name = lead.get('last_name', '') or ''
+        # Don't include "None" string as a name
+        if last_name == "None":
+            last_name = ''
+        full_name = f"{first_name} {last_name}".strip()
+
+        params = {
+            "name": full_name if full_name else None,
             "organization_name": lead.get("company_name", ""),
             "domain": parsed_domain,
             "linkedin_url": lead.get("linkedin_url", ""),
         }
+
+        print(f"[ENRICH PARAMS] Building params for lead:")
+        print(f"  first_name: {first_name}")
+        print(f"  last_name: {last_name}")
+        print(f"  full_name: {full_name}")
+        print(f"  company_name: {lead.get('company_name')}")
+        print(f"  website_url: {website_url}")
+        print(f"  parsed_domain: {parsed_domain}")
+        print(f"  linkedin_url: {lead.get('linkedin_url')}")
+        print(f"[ENRICH PARAMS] Final params: {params}")
+
+        return params
 
     @staticmethod
     def get_url_for_enrich_person_request(
@@ -189,10 +229,10 @@ class ApolloHelper:
         url = f"https://api.apollo.io/api/v1/people/match"
 
         if not lead:
-            return UriResponse.custom_response("Lead not found for enrichment", 404)
+            raise ValueError("Lead not found for enrichment")
         if reveal_phone and not webhook_url:
-            return UriResponse.custom_response(
-                "A webhook url must be provided if reveal_phone is set to true.", 400
+            raise ValueError(
+                "A webhook url must be provided if reveal_phone is set to true."
             )
 
         # Helper function to extract Enrich Person params from lead.
@@ -255,9 +295,9 @@ class ApolloHelper:
                 # Only add TTL if provided
                 if ttl_seconds is not None:
                     ttl = timedelta(seconds=ttl_seconds)
+                    await CacheRepository.set_cache(db, cache_key, result, ttl)
                 else:
-                    ttl = None
-                await CacheRepository.set_cache(db, cache_key, result, ttl)
+                    await CacheRepository.set_cache(db, cache_key, result)
                 return result
 
             return wrapper

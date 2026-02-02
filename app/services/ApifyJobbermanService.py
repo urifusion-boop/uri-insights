@@ -1,0 +1,289 @@
+"""
+ApifyJobbermanService - Scrapes Jobberman using Apify or custom scraper
+Pattern: Same as ApifyLinkedInJobsService but for Jobberman
+
+This service fetches job postings from Jobberman (Nigerian job board) using Apify actors.
+"""
+import asyncio
+from typing import List, Dict, Any, Optional
+from apify_client import ApifyClient
+import logging
+from datetime import datetime, timezone
+
+from app.core.config import settings
+
+logger = logging.getLogger(__name__)
+
+
+class ApifyJobbermanService:
+    """
+    Service to fetch job postings from Jobberman using Apify
+    Pattern: Same as ApifyLinkedInJobsService
+    """
+
+    def __init__(self):
+        """
+        Initialize the service with Apify client
+        """
+        if not settings.APIFY_API_TOKEN:
+            logger.warning("APIFY_API_TOKEN not configured. Jobberman scraping will not work.")
+            self.apify_client = None
+        else:
+            self.apify_client = ApifyClient(settings.APIFY_API_TOKEN)
+
+    async def fetch_job_postings(
+        self,
+        search_query: str,
+        max_jobs: int = 5,
+        location: Optional[str] = None,
+        posted_date: str = "anytime"
+    ) -> Dict[str, Any]:
+        """
+        Fetch job postings from Jobberman using Apify
+
+        Args:
+            search_query: The search query (e.g., "DevOps Engineer")
+            max_jobs: Maximum number of jobs to fetch (default: 5)
+            location: Geographic location filter (default: None, omits location field for worldwide)
+            posted_date: Time filter (e.g., "anytime", "last_7_days", "last_30_days")
+
+        Returns:
+            Dictionary containing jobs and metadata:
+            {
+                "success": True,
+                "total_jobs": 5,
+                "jobs": [{
+                    "title": "Backend Developer",
+                    "company": "Nigerian Fintech Ltd",
+                    "location": "Lagos, Nigeria",
+                    "description": "We are seeking...",
+                    "url": "https://jobberman.com/job/...",
+                    "posted_date": "2025-12-15T10:00:00Z",
+                    "salary": "NGN 200,000 - 350,000"  # if available
+                }],
+                "search_query": "DevOps Engineer"
+            }
+        """
+        try:
+            # Check if client is initialized
+            if not self.apify_client:
+                return {
+                    "success": False,
+                    "error_message": "Apify client not initialized. Please configure APIFY_API_TOKEN.",
+                    "jobs": []
+                }
+
+            # Fetch jobs from Apify
+            jobs_result = await self._fetch_jobs_from_apify(search_query, max_jobs, location, posted_date)
+
+            if not jobs_result["success"]:
+                return jobs_result
+
+            jobs = jobs_result["jobs"]
+
+            return {
+                "success": True,
+                "total_jobs": len(jobs),
+                "jobs": jobs,
+                "search_query": search_query
+            }
+
+        except Exception as e:
+            logger.error(f"Error in fetch_job_postings (Jobberman): {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return {
+                "success": False,
+                "error_message": f"An error occurred: {str(e)}",
+                "jobs": []
+            }
+
+    async def _fetch_jobs_from_apify(
+        self,
+        search_query: str,
+        max_jobs: int,
+        location: Optional[str],
+        posted_date: str = "anytime"
+    ) -> Dict[str, Any]:
+        """
+        Fetch job postings from Apify using Jobberman scraper actor
+
+        Args:
+            search_query: Job search query
+            max_jobs: Maximum number of jobs to fetch
+            location: Geographic location
+            posted_date: Time filter
+
+        Returns:
+            Dictionary containing the fetched jobs
+        """
+        try:
+            # Jobberman Scraper actor from Apify Store
+            # Actor: shahidirfan/jobberman-job-scraper
+            # Docs: https://apify.com/shahidirfan/jobberman-job-scraper
+            actor_id = "shahidirfan/jobberman-job-scraper"
+
+            # Configure the input for the Jobberman actor with enhanced parameters
+            # ALWAYS use "Lagos" for Jobberman (regardless of user's location input)
+            # Jobberman is Nigeria-focused and works best with Lagos as the location
+            jobberman_location = "Lagos"
+
+            run_input = {
+                "keyword": search_query,
+                "posted_date": posted_date,
+                "results_wanted": max_jobs,  # Use results_wanted for better control
+                "max_pages": 10,  # Pagination control
+                "collectDetails": True,  # Get full job details
+                "location": jobberman_location,  # Always use Lagos
+                "proxyConfiguration": {"useApifyProxy": True},
+            }
+
+            # Run the actor in a thread to avoid blocking
+            logger.info(f"Starting Apify actor to fetch Jobberman jobs for: {search_query} in {jobberman_location} (forced location)")
+
+            # Run actor synchronously in executor to avoid blocking event loop
+            loop = asyncio.get_event_loop()
+            run = await loop.run_in_executor(
+                None,
+                lambda: self.apify_client.actor(actor_id).call(run_input=run_input)
+            )
+
+            # Check if the run was successful
+            if run.get("status") != "SUCCEEDED":
+                error_msg = f"Apify actor run failed with status: {run.get('status', 'Unknown')}"
+                logger.error(error_msg)
+                return {
+                    "success": False,
+                    "error_message": error_msg,
+                    "jobs": []
+                }
+
+            # Get the results
+            items = []
+            try:
+                dataset_id = run["defaultDatasetId"]
+                logger.info(f"📊 Jobberman dataset ID: {dataset_id}")
+
+                for item in self.apify_client.dataset(dataset_id).iterate_items():
+                    items.append(item)
+
+                logger.info(f"📊 Jobberman total items fetched: {len(items)}")
+
+                # Log the first item structure for debugging
+                if items:
+                    logger.info(f"🔍 Sample Jobberman job item structure: {list(items[0].keys())}")
+                    logger.info(f"🔍 First Jobberman item: {items[0]}")
+                else:
+                    logger.warning(f"⚠️ Jobberman returned 0 items from dataset {dataset_id}")
+
+            except Exception as dataset_error:
+                logger.error(f"Error reading dataset: {str(dataset_error)}")
+                return {
+                    "success": False,
+                    "error_message": f"Failed to read results from Apify: {str(dataset_error)}",
+                    "jobs": []
+                }
+
+            # Process the results
+            jobs = []
+            for idx, item in enumerate(items[:max_jobs]):
+                try:
+                    # Debug: Log actual field names for first item
+                    if idx == 0:
+                        logger.info(f"🔍 Jobberman item fields: {list(item.keys())}")
+                        logger.info(f"🔍 Full item content: {item}")
+
+                    # Extract job information from Jobberman actor output
+                    # Try multiple possible field name variations
+                    title = (item.get("title") or item.get("jobTitle") or item.get("job_title") or
+                            item.get("position") or item.get("role") or "Unknown Title")
+
+                    company = (item.get("company") or item.get("companyName") or item.get("company_name") or
+                              item.get("employer") or "Unknown Company")
+
+                    location_field = (item.get("location") or item.get("jobLocation") or item.get("job_location") or
+                                     item.get("city") or location)
+
+                    # Description - try various field names (Jobberman uses description_text)
+                    description = (item.get("description_text") or item.get("description") or
+                                  item.get("jobDescription") or item.get("job_description") or
+                                  item.get("details") or item.get("summary") or
+                                  item.get("responsibilities") or "")
+
+                    # URL - try various field names
+                    url = (item.get("url") or item.get("link") or item.get("jobUrl") or
+                          item.get("job_url") or item.get("detailUrl") or item.get("applyUrl") or "")
+
+                    job_data = {
+                        "title": title,
+                        "company": company,
+                        "location": location_field,
+                        "description": description,
+                        "url": url,
+                        "posted_date": self._parse_posted_date(item.get("date_posted") or item.get("postedDate") or item.get("posted_date") or item.get("publishedAt") or item.get("date")),
+                        "salary": item.get("salary_range") or item.get("salary") or item.get("salaryRange"),
+                        "source": "Jobberman"
+                    }
+
+                    # Debug log for missing fields
+                    if not url or not description:
+                        logger.warning(f"⚠️ Jobberman job '{title}': URL={'present' if url else 'MISSING'}, Description={'present' if description else 'MISSING'}")
+                        logger.warning(f"   Available fields in item: {list(item.keys())}")
+
+                    # Only add jobs with valid URLs and descriptions
+                    if job_data["url"] and job_data["description"]:
+                        jobs.append(job_data)
+                    else:
+                        logger.warning(f"Skipping Jobberman job with missing URL or description: {job_data['title']}")
+
+                except Exception as item_error:
+                    logger.warning(f"Error processing Jobberman job item: {str(item_error)}")
+                    import traceback
+                    traceback.print_exc()
+                    continue
+
+            logger.info(f"Successfully fetched {len(jobs)} Jobberman jobs")
+
+            return {
+                "success": True,
+                "jobs": jobs
+            }
+
+        except Exception as e:
+            logger.error(f"Error fetching jobs from Apify (Jobberman): {str(e)}")
+            import traceback
+            traceback.print_exc()
+
+            # Fallback: Return empty results for now if actor doesn't exist
+            logger.warning("Jobberman scraper not configured. Returning empty results.")
+            return {
+                "success": True,  # Don't fail the entire job fetch
+                "jobs": []  # Just return no Jobberman jobs
+            }
+
+    def _parse_posted_date(self, date_str: Optional[str]) -> str:
+        """
+        Parse posted date from various formats to ISO format
+
+        Args:
+            date_str: Date string from job posting
+
+        Returns:
+            ISO formatted date string or current date if parsing fails
+        """
+        if not date_str:
+            return datetime.now(timezone.utc).isoformat()
+
+        try:
+            # Try ISO format first
+            if "T" in date_str:
+                return date_str
+
+            # Try common date formats
+            from dateutil import parser
+            parsed_date = parser.parse(date_str)
+            return parsed_date.isoformat()
+
+        except Exception as e:
+            logger.warning(f"Could not parse date '{date_str}': {str(e)}")
+            return datetime.now(timezone.utc).isoformat()

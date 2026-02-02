@@ -117,6 +117,94 @@ class LeadGenerationJobRepository:
         }
 
     @staticmethod
+    async def mark_cancellation_requested(
+        db: AsyncIOMotorDatabase,
+        job_id: str
+    ) -> bool:
+        """
+        Mark job for cancellation. Worker will detect and stop gracefully.
+
+        Returns:
+            True if cancellation request was accepted (job was cancellable)
+            False if job already completed/failed or not found
+        """
+        job = await db[LeadGenerationJobRepository.COLLECTION_NAME].find_one(
+            {"job_id": job_id}
+        )
+
+        if not job:
+            return False
+
+        # Only allow cancellation of queued/processing jobs
+        if job["status"] not in ["queued", "processing"]:
+            return False
+
+        # If job hasn't started - cancel immediately with empty stats
+        if job["status"] == "queued":
+            await LeadGenerationJobRepository.mark_cancelled(
+                db=db,
+                job_id=job_id,
+                partial_stats={
+                    "total_fetched": 0,
+                    "total_qualified": 0,
+                    "new_leads_saved": 0,
+                    "duplicates_skipped": 0,
+                    "social_total_fetched": 0,
+                    "social_qualified": 0,
+                    "social_new_leads": 0,
+                    "social_duplicates": 0,
+                    "job_boards_total_fetched": 0,
+                    "job_signals_found": 0,
+                    "job_signals_saved": 0,
+                },
+                processed_count=0
+            )
+            return True
+
+        # Job is running - signal worker to stop gracefully
+        result = await db[LeadGenerationJobRepository.COLLECTION_NAME].update_one(
+            {
+                "job_id": job_id,
+                "status": "processing"
+            },
+            {
+                "$set": {
+                    "status": "cancelling",
+                    "message": "Cancellation requested by user",
+                    "cancellation_requested_at": datetime.utcnow(),
+                    "updated_at": datetime.utcnow()
+                }
+            }
+        )
+
+        return result.modified_count > 0
+
+    @staticmethod
+    async def mark_cancelled(
+        db: AsyncIOMotorDatabase,
+        job_id: str,
+        partial_stats: Dict,
+        processed_count: int
+    ) -> None:
+        """
+        Mark job as fully cancelled with partial results.
+        Called by worker after graceful exit.
+        """
+        await db[LeadGenerationJobRepository.COLLECTION_NAME].update_one(
+            {"job_id": job_id},
+            {
+                "$set": {
+                    "status": "cancelled",
+                    "progress": 100,
+                    "message": f"Cancelled by user after processing {processed_count} items",
+                    "stats": partial_stats,
+                    "cancelled_at": datetime.utcnow(),
+                    "updated_at": datetime.utcnow()
+                }
+            }
+        )
+
+    @staticmethod
     async def cleanup_old_jobs(db: AsyncIOMotorDatabase, days: int = 7):
         """Clean up job records older than X days"""
         from datetime import timedelta

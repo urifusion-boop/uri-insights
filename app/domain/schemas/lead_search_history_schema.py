@@ -1,6 +1,6 @@
 """
 Lead Search History Schema
-Tracks conversational lead search operations for analytics and preventing duplicate searches
+Tracks sales signal search operations for analytics and preventing duplicate searches
 """
 from typing import List, Optional, Dict
 from datetime import datetime

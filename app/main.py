@@ -11,6 +11,10 @@ from typing import Any
 from app.database import get_db
 from app.core.config import settings
 from app.database import connect_to_mongo
+from app.core.sentry_config import initialize_sentry
+
+# Initialize Sentry first before anything else
+initialize_sentry()
 from app.routers import (
     apollo,
     lead_form_snapshots,
@@ -51,7 +55,11 @@ from app.routers import (
     openai_apify_facebook,
     lead_search_history,
     websockets_leads,
+    signal_refinery_router,
+    lazarus_router,
+    lazarus_crm_router,
 )
+from app.routers.admin import admin_lead_analytics
 from app.core.auth_bearer import JWTBearer
 from app.core.handlers.exception_handler import global_exception_handler
 from app.services.BackgroundService import BackgroundService
@@ -153,7 +161,7 @@ app.include_router(
 )
 app.include_router(
     service_health.router,
-    prefix="/service-health",
+    prefix="",
     tags=["service-health"],
 )
 app.include_router(
@@ -391,6 +399,34 @@ app.include_router(
     websockets_leads.router,
     prefix="",
     tags=["WebSocket Real-time Leads"],
+)
+
+app.include_router(
+    admin_lead_analytics.router,
+    prefix="",
+    tags=["Admin Lead Analytics"],
+    dependencies=[Depends(JWTBearer())],
+)
+
+app.include_router(
+    signal_refinery_router.router,
+    prefix="/signal-refinery",
+    tags=["Signal Refinery (X-Ray Test)"],
+    dependencies=[Depends(JWTBearer())],
+)
+
+app.include_router(
+    lazarus_router.router,
+    prefix="/api/lazarus",
+    tags=["Lazarus Protocol"],
+    dependencies=[Depends(JWTBearer())],
+)
+
+app.include_router(
+    lazarus_crm_router.router,
+    prefix="/api/lazarus/crm",
+    tags=["Lazarus CRM Integration"],
+    dependencies=[Depends(JWTBearer())],
 )
 
 

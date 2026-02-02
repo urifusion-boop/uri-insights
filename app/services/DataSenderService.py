@@ -5,7 +5,7 @@ from app.core.cache.manager.redis_manager import redis_manager
 from app.domain.enums.datasenderservices_enum import DataSenderServicesEnum
 from app.domain.enums.queue_enum import QueueEnum
 from enum import Enum
-from app.services.azure.AzureServiceBusProducer import send_message
+from app.services.azure.AzureServiceBusProducer import producer
 
 
 class DataSenderService:
@@ -45,21 +45,11 @@ class DataSenderService:
         data: Union[str, dict],
         message_type: Enum,
     ):
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(
-                send_message(
-                    queue_name,
-                    data,  # Convert dict to JSON string
-                    message_type.value,
-                )
-            )
-        except RuntimeError:
-            # If no running event loop, create a new one (for scripts)
-            asyncio.run(
-                send_message(
-                    queue_name,
-                    data,  # Convert dict to JSON string
-                    message_type.value,
-                )
-            )
+        # Await the producer.send_message to ensure it completes and catch any errors
+        # Extract string value from QueueEnum if needed
+        queue_name_str = queue_name if isinstance(queue_name, str) else queue_name
+        await producer.send_message(
+            queue_name_str,
+            data,
+            message_type.value,
+        )

@@ -53,6 +53,11 @@ class ConversationalSearchRequest(BaseBusinessAndConversationalSearchRequest):
     enable_realtime: Optional[bool] = False
     monitoring_platforms: Optional[List[str]] = None
     platform_configs: Optional[List[PlatformConfig]] = None
+    monitoring_interval_hours: Optional[int] = 0  # 0 = one-time only, >0 = recurring interval in hours
+
+    # Job Boards fields (PRD Section 5) - Only for Conversational forms
+    solution_context: Optional[str] = None  # What problem does user's product/service solve?
+    job_keywords: Optional[List[str]] = None  # AI-generated job role keywords for job board scanning
 
 
 # --- Base Form Input ---
@@ -63,6 +68,7 @@ class BaseFormInput(BaseModel):
     user_id: str = Field(...)
     add_to_history: Optional[bool] = None
     auto_generate: Optional[bool] = None
+    lead_generation_goal: Optional[str] = None  # User's business goal/reason for generating leads
 
 
 # --- Person Search Form ---

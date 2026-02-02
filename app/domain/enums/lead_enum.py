@@ -11,6 +11,8 @@ class LeadSourceEnum(str, Enum):
     LINKEDIN = "LinkedIn"
     TIKTOK = "Tiktok"
     NAIRALAND = "Nairaland"
+    JOB_BOARDS = "Job Boards"
+    LAZARUS = "Lazarus"
     OTHER = "Other"
 
 
@@ -20,6 +22,9 @@ class LeadStatusEnum(str, Enum):
     QUALIFIED = "Qualified"
     UNQUALIFIED = "Unqualified"
     CONVERTED = "Converted"
+    DEAD = "Dead"
+    RESURRECTED = "Resurrected"
+    MONITORING = "Monitoring"
 
 
 class LeadInterestLevelEnum(str, Enum):

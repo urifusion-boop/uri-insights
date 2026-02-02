@@ -29,3 +29,10 @@ def get_db() -> AsyncIOMotorDatabase:
     if client is None:
         raise ConnectionError("Client is not connected.")
     return client.get_default_database()
+
+
+def get_backend_db() -> AsyncIOMotorDatabase:
+    """Get connection to uri-backend database (Uri) for user lookups"""
+    if client is None:
+        raise ConnectionError("Client is not connected.")
+    return client["Uri"]

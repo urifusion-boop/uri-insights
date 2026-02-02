@@ -1,0 +1,1302 @@
+from fastapi import APIRouter, Depends, Query, HTTPException
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from typing import Optional, List
+from fastapi.encoders import jsonable_encoder
+import logging
+import uuid
+
+from app.dependencies import get_db_dependency
+from app.domain.responses.uri_response import UriResponse
+from app.services.LazarusService import LazarusService
+from app.services.LazarusMonitoringService import LazarusMonitoringService
+from app.repository.LazarusRepository import LazarusRepository
+from app.domain.schemas.lazarus_schema import (
+    FocusContactCreate,
+    CompanyMonitorCreate,
+    LazarusMonitoringStatusEnum,
+    LazarusAlertStatusEnum,
+    LazarusMonitorTypeEnum,
+    CSVUploadRow,
+    DetectionRulesUpdate,
+    KeywordExtractionRequest,
+    KeywordExtractionResult,
+)
+
+# Configure logging
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+router = APIRouter()
+
+# Log all registered routes when router is loaded
+@router.on_event("startup")
+async def log_routes():
+    logger.info("=" * 80)
+    logger.info("LAZARUS ROUTER LOADED - Registered Routes:")
+    for route in router.routes:
+        if hasattr(route, 'path') and hasattr(route, 'methods'):
+            methods = ','.join(route.methods) if route.methods else 'ANY'
+            logger.info(f"  {methods:10} {route.path}")
+    logger.info("=" * 80)
+
+
+# ============ FOCUS CONTACTS ============
+@router.post("/focus-contacts/add")
+async def add_focus_contact(
+    contact: FocusContactCreate,
+    user_id: str = Query(...),
+    source_lead_id: Optional[str] = Query(None),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Add a new focus contact to monitor
+    PRD Section 4.1: Focus Contact Monitoring
+    """
+    result = await LazarusService.add_focus_contact(
+        db, user_id, contact, source_lead_id
+    )
+
+    if not result["success"]:
+        return UriResponse.custom_response(result["message"], 400)
+
+    return UriResponse.custom_response(
+        result["message"],
+        200,
+        {
+            "focus_id": result.get("focus_id"),
+            "slots_used": result.get("slots_used"),
+            "slots_available": result.get("slots_available"),
+        },
+    )
+
+
+@router.get("/focus-contacts")
+async def get_focus_contacts(
+    user_id: str = Query(...),
+    status: Optional[LazarusMonitoringStatusEnum] = Query(None),
+    skip: int = Query(0),
+    limit: int = Query(50),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """Get all focus contacts for a user"""
+    from app.repository.LazarusRepository import LazarusRepository
+
+    contacts = await LazarusRepository.get_focus_contacts_by_user(
+        db, user_id, status, skip, limit
+    )
+
+    return UriResponse.custom_response(
+        message="Focus contacts retrieved successfully",
+        error_code=200,
+        success=True,
+        data=[jsonable_encoder(c) for c in contacts],
+    )
+
+
+@router.put("/focus-contacts/{focus_id}")
+async def update_focus_contact(
+    focus_id: str,
+    update_data: FocusContactCreate,
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """Update focus contact details (name, social_handle, keywords, etc.)"""
+    try:
+        # Convert Pydantic model to dict and filter out None values
+        update_dict = {k: v for k, v in update_data.dict().items() if v is not None}
+
+        # Don't allow changing user_id
+        if "user_id" in update_dict:
+            del update_dict["user_id"]
+
+        updated_contact = await LazarusRepository.update_focus_contact(
+            db, focus_id, user_id, update_dict
+        )
+
+        if not updated_contact:
+            return UriResponse.custom_response(
+                message="Focus contact not found or you don't have permission to update it",
+                error_code=404,
+                success=False
+            )
+
+        return UriResponse.custom_response(
+            message="Focus contact updated successfully",
+            error_code=200,
+            success=True,
+            data=jsonable_encoder(updated_contact)
+        )
+    except Exception as e:
+        logger.error(f"Error updating focus contact: {str(e)}")
+        return UriResponse.custom_response(
+            message=f"Failed to update focus contact: {str(e)}",
+            error_code=500,
+            success=False
+        )
+
+
+@router.delete("/focus-contacts/{focus_id}")
+async def remove_focus_contact(
+    focus_id: str,
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """Remove a focus contact"""
+    result = await LazarusService.remove_focus_contact(db, user_id, focus_id)
+
+    if not result["success"]:
+        return UriResponse.custom_response(result["message"], 404)
+
+    return UriResponse.custom_response(result["message"], 200)
+
+
+@router.put("/focus-contacts/{focus_id}/pause")
+async def pause_focus_contact(
+    focus_id: str,
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """Pause monitoring for a focus contact"""
+    result = await LazarusService.pause_focus_contact(db, user_id, focus_id)
+
+    if not result["success"]:
+        return UriResponse.custom_response(result["message"], 404)
+
+    return UriResponse.custom_response(result["message"], 200)
+
+
+@router.put("/focus-contacts/{focus_id}/resume")
+async def resume_focus_contact(
+    focus_id: str,
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """Resume monitoring for a paused focus contact"""
+    result = await LazarusService.resume_focus_contact(db, user_id, focus_id)
+
+    if not result["success"]:
+        return UriResponse.custom_response(result["message"], 404)
+
+    return UriResponse.custom_response(result["message"], 200)
+
+
+@router.post("/focus-contacts/{focus_id}/enrich")
+async def enrich_focus_contact(
+    focus_id: str,
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Manually trigger LinkedIn profile enrichment for a focus contact
+    Phase 1: Contact Enrichment - Extracts email, phone, and profile data
+    """
+    from app.repository.LazarusRepository import LazarusRepository
+    from app.services.LinkedInProfileScraperService import LinkedInProfileScraperService
+    from datetime import datetime
+
+    # Get contact
+    contact = await LazarusRepository.get_focus_contact_by_id(db, focus_id, user_id)
+    if not contact:
+        return UriResponse.custom_response("Focus contact not found", 404)
+
+    # Check if LinkedIn URL exists
+    if not contact.linkedin_url:
+        return UriResponse.custom_response(
+            message="No LinkedIn URL found for this contact",
+            error_code=400,
+            success=False
+        )
+
+    logger.info(f"🔍 Enriching contact: {contact.name} ({focus_id})")
+
+    # Update status to pending
+    await LazarusRepository.update_focus_contact(
+        db, focus_id, user_id, {"enrichment_status": "pending"}
+    )
+
+    # Call LinkedIn Profile Scraper
+    scraper_service = LinkedInProfileScraperService()
+    enrichment_result = await scraper_service.enrich_profile(
+        linkedin_url=contact.linkedin_url,
+        timeout_seconds=90
+    )
+
+    if not enrichment_result.get("success"):
+        # Mark as failed
+        await LazarusRepository.update_focus_contact(
+            db, focus_id, user_id, {
+                "enrichment_status": "failed",
+                "enriched_at": datetime.utcnow()
+            }
+        )
+        return UriResponse.custom_response(
+            message=f"Enrichment failed: {enrichment_result.get('error_message', 'Unknown error')}",
+            error_code=500,
+            success=False
+        )
+
+    # Extract enriched data
+    profile_data = enrichment_result.get("profile_data", {})
+
+    # Update contact with enriched data
+    enrichment_update = {
+        "email": enrichment_result.get("email"),
+        "phone": enrichment_result.get("phone"),
+        "linkedin_url": contact.linkedin_url,  # Preserve the LinkedIn URL we used to scrape
+        "profile_photo": profile_data.get("profile_photo"),
+        "headline": profile_data.get("headline"),
+        "location": profile_data.get("location"),
+        "connections_count": profile_data.get("connections_count"),
+        "about": profile_data.get("about"),
+        "work_experience": profile_data.get("work_experience"),
+        "education": profile_data.get("education"),
+        "skills": profile_data.get("skills"),
+        "languages": profile_data.get("languages"),
+        "certifications": profile_data.get("certifications"),
+        "enriched_at": datetime.utcnow(),
+        "enrichment_status": "completed"
+    }
+
+    # Update current_company if we got it from enrichment
+    if profile_data.get("current_company"):
+        enrichment_update["current_company"] = profile_data.get("current_company")
+
+    updated = await LazarusRepository.update_focus_contact(
+        db, focus_id, user_id, enrichment_update
+    )
+
+    if not updated:
+        return UriResponse.custom_response("Failed to save enrichment data", 500)
+
+    logger.info(f"✅ Successfully enriched contact: {contact.name}")
+    if enrichment_result.get("email"):
+        logger.info(f"   📧 Email: {enrichment_result.get('email')}")
+    if enrichment_result.get("phone"):
+        logger.info(f"   📱 Phone: {enrichment_result.get('phone')}")
+
+    return UriResponse.custom_response(
+        message="Contact enriched successfully",
+        error_code=200,
+        success=True,
+        data={
+            "email": enrichment_result.get("email"),
+            "phone": enrichment_result.get("phone"),
+            "profile_data": profile_data
+        }
+    )
+
+
+@router.get("/focus-contacts/{focus_id}/detail")
+async def get_focus_contact_detail(
+    focus_id: str,
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Get full contact details including enrichment data
+    Phase 1: Contact Detail Page
+    """
+    from app.repository.LazarusRepository import LazarusRepository
+
+    logger.info(f"🔍 Looking for focus contact: focus_id={focus_id}, user_id={user_id}")
+    contact = await LazarusRepository.get_focus_contact_by_id(db, focus_id, user_id)
+
+    if not contact:
+        logger.warning(f"❌ Focus contact not found: focus_id={focus_id}, user_id={user_id}")
+        # Check if it exists for any user (debugging)
+        any_contact = await db["focus_contacts"].find_one({"focus_id": focus_id})
+        if any_contact:
+            logger.warning(f"⚠️ Contact exists but for different user: {any_contact.get('user_id')}")
+        else:
+            logger.warning(f"⚠️ Contact does not exist in database at all")
+        return UriResponse.custom_response("Focus contact not found", 404)
+
+    logger.info(f"✅ Contact found: {contact.name}")
+    return UriResponse.custom_response(
+        message="Contact details retrieved successfully",
+        error_code=200,
+        success=True,
+        data=jsonable_encoder(contact)
+    )
+
+
+# ============ DIAGNOSTIC TEST ENDPOINTS ============
+@router.get("/diagnostic/ping")
+async def diagnostic_ping():
+    """Ultra-simple test endpoint - no dependencies, just returns success"""
+    logger.info("🏓 DIAGNOSTIC PING endpoint hit!")
+    return {
+        "success": True,
+        "message": "Lazarus router is alive!",
+        "endpoint": "/diagnostic/ping"
+    }
+
+
+@router.patch("/diagnostic/test-patch/{item_id}")
+async def diagnostic_test_patch(item_id: str, value: int = Query(default=1)):
+    """Test PATCH method with path param and query param"""
+    logger.info(f"🧪 DIAGNOSTIC TEST-PATCH hit! item_id={item_id}, value={value}")
+    return {
+        "success": True,
+        "message": "PATCH method works!",
+        "item_id": item_id,
+        "value": value
+    }
+
+
+@router.put("/focus-contacts/{focus_id}/scanfrequency")
+async def update_focus_contact_scan_frequency(
+    focus_id: str,
+    scan_frequency_days: int = Query(..., ge=1, le=30),
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """Update scan frequency for a focus contact (1-30 days)"""
+    logger.info("=" * 80)
+    logger.info(f"🔥 SCANFREQUENCY ENDPOINT HIT!")
+    logger.info(f"  focus_id: {focus_id}")
+    logger.info(f"  user_id: {user_id}")
+    logger.info(f"  scan_frequency_days: {scan_frequency_days}")
+    logger.info("=" * 80)
+    print(f"🔍 [BACKEND] scan-frequency endpoint HIT! focus_id={focus_id}, user_id={user_id}, days={scan_frequency_days}")
+    from app.repository.LazarusRepository import LazarusRepository
+    from datetime import datetime, timedelta
+
+    # Get contact to calculate new next_scan_date
+    contact = await LazarusRepository.get_focus_contact_by_id(db, focus_id, user_id)
+    if not contact:
+        return UriResponse.custom_response("Focus contact not found", 404)
+
+    # Update scan frequency and recalculate next scan
+    updated = await LazarusRepository.update_focus_contact(
+        db,
+        focus_id,
+        user_id,
+        {
+            "scan_frequency_days": scan_frequency_days,
+            "next_scan_date": datetime.utcnow() + timedelta(days=scan_frequency_days),
+        },
+    )
+
+    if not updated:
+        return UriResponse.custom_response("Failed to update scan frequency", 500)
+
+    return UriResponse.custom_response(
+        message=f"Scan frequency updated to every {scan_frequency_days} days",
+        error_code=200,
+        success=True,
+        data={"scan_frequency_days": scan_frequency_days}
+    )
+
+
+# ============ COMPANY MONITORS ============
+@router.post("/company-monitors/add")
+async def add_company_monitor(
+    monitor: CompanyMonitorCreate,
+    user_id: str = Query(...),
+    source_lead_id: Optional[str] = Query(None),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Add a new company monitor
+    PRD Section 3 Track A: Company Monitoring
+    """
+    result = await LazarusService.add_company_monitor(
+        db, user_id, monitor, source_lead_id
+    )
+
+    if not result["success"]:
+        return UriResponse.custom_response(result["message"], 400)
+
+    return UriResponse.custom_response(
+        result["message"],
+        200,
+        {
+            "monitor_id": result.get("monitor_id"),
+            "slots_used": result.get("slots_used"),
+            "slots_available": result.get("slots_available"),
+        },
+    )
+
+
+@router.get("/company-monitors")
+async def get_company_monitors(
+    user_id: str = Query(...),
+    status: Optional[LazarusMonitoringStatusEnum] = Query(None),
+    skip: int = Query(0),
+    limit: int = Query(50),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """Get all company monitors for a user"""
+    from app.repository.LazarusRepository import LazarusRepository
+
+    monitors = await LazarusRepository.get_company_monitors_by_user(
+        db, user_id, status, skip, limit
+    )
+
+    return UriResponse.custom_response(
+        message="Company monitors retrieved successfully",
+        error_code=200,
+        success=True,
+        data=[jsonable_encoder(m) for m in monitors],
+    )
+
+
+@router.delete("/company-monitors/{monitor_id}")
+async def remove_company_monitor(
+    monitor_id: str,
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """Remove a company monitor"""
+    result = await LazarusService.remove_company_monitor(db, user_id, monitor_id)
+
+    if not result["success"]:
+        return UriResponse.custom_response(result["message"], 404)
+
+    return UriResponse.custom_response(result["message"], 200)
+
+
+@router.put("/company-monitors/{monitor_id}/scanfrequency")
+async def update_company_monitor_scan_frequency(
+    monitor_id: str,
+    scan_frequency_days: int = Query(..., ge=1, le=30),
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """Update scan frequency for a company monitor (1-30 days)"""
+    from app.repository.LazarusRepository import LazarusRepository
+    from datetime import datetime, timedelta
+
+    # Get monitor to calculate new next_scan_date
+    monitor = await LazarusRepository.get_company_monitor_by_id(db, monitor_id, user_id)
+    if not monitor:
+        return UriResponse.custom_response("Company monitor not found", 404)
+
+    # Update scan frequency and recalculate next scan
+    updated = await LazarusRepository.update_company_monitor(
+        db,
+        monitor_id,
+        user_id,
+        {
+            "scan_frequency_days": scan_frequency_days,
+            "next_scan_date": datetime.utcnow() + timedelta(days=scan_frequency_days),
+        },
+    )
+
+    if not updated:
+        return UriResponse.custom_response("Failed to update scan frequency", 500)
+
+    return UriResponse.custom_response(
+        message=f"Scan frequency updated to every {scan_frequency_days} days",
+        error_code=200,
+        success=True,
+        data={"scan_frequency_days": scan_frequency_days}
+    )
+
+
+# ============ BULK CSV UPLOAD ============
+@router.post("/bulk-upload")
+async def bulk_upload_csv(
+    csv_rows: List[CSVUploadRow],
+    user_id: str = Query(...),
+    auto_enrich: bool = Query(False, description="Auto-trigger LinkedIn enrichment for all contacts with LinkedIn URLs"),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Bulk upload focus contacts/companies from CSV
+    PRD Section 4.2: Bulk Upload via CSV
+
+    Features:
+    - Accepts full URLs or handles for social_handle (auto-parsed)
+    - Supports LinkedIn, Twitter/X, Facebook, Instagram
+    - Optional auto-enrichment for LinkedIn profiles (email, phone, profile data)
+    - Duplicate detection based on social URLs
+    - Returns detailed feedback on URL parsing and normalization
+    """
+    result = await LazarusService.bulk_upload_from_csv(db, user_id, csv_rows, auto_enrich)
+
+    return UriResponse.custom_response(
+        message=result["message"],
+        error_code=200,
+        success=True,
+        data={
+            "added_count": result.get("added_count"),
+            "failed_count": result.get("failed_count"),
+            "enrichment_queued_count": result.get("enrichment_queued_count", 0),
+            "duplicate_count": result.get("duplicate_count", 0),
+            "errors": result.get("errors", []),
+            "uploaded_contacts": result.get("uploaded_contacts", []),
+        },
+    )
+
+
+# ============ ALERTS ============
+@router.get("/alerts")
+async def get_alerts(
+    user_id: str = Query(...),
+    status: Optional[LazarusAlertStatusEnum] = Query(None),
+    skip: int = Query(0),
+    limit: int = Query(50),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """Get Lazarus alerts for a user"""
+    alerts = await LazarusService.get_alerts(db, user_id, status, skip, limit)
+
+    return UriResponse.custom_response(
+        message="Alerts retrieved successfully",
+        error_code=200,
+        success=True,
+        data=[jsonable_encoder(a) for a in alerts],
+    )
+
+
+@router.put("/alerts/{alert_id}/contacted")
+async def mark_alert_contacted(
+    alert_id: str,
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """Mark an alert as contacted"""
+    result = await LazarusService.mark_alert_contacted(db, user_id, alert_id)
+
+    if not result["success"]:
+        return UriResponse.custom_response(result["message"], 404)
+
+    return UriResponse.custom_response(result["message"], 200)
+
+
+@router.put("/alerts/{alert_id}/dismiss")
+async def dismiss_alert(
+    alert_id: str,
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """Dismiss an alert"""
+    result = await LazarusService.dismiss_alert(db, user_id, alert_id)
+
+    if not result["success"]:
+        return UriResponse.custom_response(result["message"], 404)
+
+    return UriResponse.custom_response(result["message"], 200)
+
+
+@router.put("/alerts/{alert_id}/viewed")
+async def mark_alert_viewed(
+    alert_id: str,
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """Mark an alert as viewed"""
+    from app.repository.LazarusRepository import LazarusRepository
+    from datetime import datetime
+
+    updated = await LazarusRepository.update_alert_status(
+        db, alert_id, user_id, LazarusAlertStatusEnum.VIEWED
+    )
+
+    if not updated:
+        return UriResponse.custom_response("Alert not found", 404)
+
+    return UriResponse.custom_response(
+        message="Alert marked as viewed",
+        error_code=200,
+        success=True
+    )
+
+
+@router.put("/alerts/{alert_id}/resurrected")
+async def mark_alert_resurrected(
+    alert_id: str,
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Mark an alert as resurrected (deal won!)
+    Phase 1: Alert Workflow System
+    """
+    from app.repository.LazarusRepository import LazarusRepository
+    from datetime import datetime
+
+    # Get the alert
+    alert = await LazarusRepository.get_alert_by_id(db, alert_id, user_id)
+    if not alert:
+        return UriResponse.custom_response("Alert not found", 404)
+
+    # Update alert status - using ACTED as "resurrected" since schema doesn't have RESURRECTED enum
+    # In future, we can add RESURRECTED to the enum
+    updated = await LazarusRepository.update_alert_status(
+        db, alert_id, user_id, LazarusAlertStatusEnum.ACTED
+    )
+
+    # Also mark the contact/monitor as resurrected (update metrics)
+    if alert.source_type == LazarusMonitorTypeEnum.FOCUS_CONTACT:
+        await LazarusRepository.update_focus_contact(
+            db, alert.source_id, user_id, {
+                "marked_dead_date": None,  # No longer dead!
+                "monitoring_status": LazarusMonitoringStatusEnum.ACTIVE
+            }
+        )
+
+    return UriResponse.custom_response(
+        message="🎉 Alert marked as resurrected! Deal won!",
+        error_code=200,
+        success=True
+    )
+
+
+@router.post("/alerts/{alert_id}/outreach")
+async def log_outreach(
+    alert_id: str,
+    user_id: str = Query(...),
+    outreach_type: str = Query(...),  # "email", "phone", "whatsapp", "other"
+    notes: Optional[str] = Query(None),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Log an outreach attempt for an alert
+    Phase 1: Alert Workflow System
+    """
+    from app.repository.LazarusRepository import LazarusRepository
+    from datetime import datetime
+
+    # Get the alert
+    alert = await LazarusRepository.get_alert_by_id(db, alert_id, user_id)
+    if not alert:
+        return UriResponse.custom_response("Alert not found", 404)
+
+    # Create outreach log entry
+    outreach_log = {
+        "outreach_id": str(uuid.uuid4()),
+        "alert_id": alert_id,
+        "user_id": user_id,
+        "source_type": alert.source_type,
+        "source_id": alert.source_id,
+        "outreach_type": outreach_type,
+        "notes": notes,
+        "timestamp": datetime.utcnow()
+    }
+
+    # Store in new collection: lazarus_outreach_log
+    await db["lazarus_outreach_log"].insert_one(outreach_log)
+
+    # Auto-mark alert as contacted if this is first outreach
+    if alert.status == LazarusAlertStatusEnum.NEW or alert.status == LazarusAlertStatusEnum.VIEWED:
+        await LazarusRepository.update_alert_status(
+            db, alert_id, user_id, LazarusAlertStatusEnum.ACTED
+        )
+
+    logger.info(f"📞 Outreach logged: {outreach_type} for alert {alert_id}")
+
+    return UriResponse.custom_response(
+        message=f"Outreach logged successfully ({outreach_type})",
+        error_code=200,
+        success=True,
+        data={"outreach_id": outreach_log["outreach_id"]}
+    )
+
+
+@router.put("/alerts/{alert_id}/assign")
+async def assign_alert(
+    alert_id: str,
+    user_id: str = Query(...),
+    assigned_to_user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Assign an alert to a team member
+    Phase 2: Team Collaboration
+    """
+    from app.repository.LazarusRepository import LazarusRepository
+    from datetime import datetime
+
+    # Get the alert
+    alert = await LazarusRepository.get_alert_by_id(db, alert_id, user_id)
+    if not alert:
+        return UriResponse.custom_response("Alert not found", 404)
+
+    # Update assignment
+    update_data = {
+        "assigned_to": assigned_to_user_id,
+        "assigned_at": datetime.utcnow(),
+        "assigned_by": user_id
+    }
+
+    await db["lazarus_alerts"].update_one(
+        {"alert_id": alert_id, "user_id": user_id},
+        {"$set": update_data}
+    )
+
+    logger.info(f"👥 Alert {alert_id} assigned to {assigned_to_user_id} by {user_id}")
+
+    return UriResponse.custom_response(
+        message="Alert assigned successfully",
+        error_code=200,
+        success=True,
+        data=update_data
+    )
+
+
+# ============ SLOTS & METRICS ============
+@router.get("/slots")
+async def get_user_slots(
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """Get user's slot information"""
+    slots = await LazarusService.get_user_slots(db, user_id)
+
+    return UriResponse.custom_response(
+        "Slots retrieved successfully", 200, jsonable_encoder(slots)
+    )
+
+
+@router.get("/metrics")
+async def get_user_metrics(
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Get comprehensive Lazarus metrics for a user
+    PRD Section 7: Success Metrics
+    """
+    try:
+        metrics = await LazarusService.get_user_metrics(db, user_id)
+        return UriResponse.custom_response(
+            message="Metrics retrieved successfully",
+            error_code=200,
+            success=True,
+            data=jsonable_encoder(metrics)
+        )
+    except Exception as e:
+        print(f"❌ Error in get_user_metrics: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise
+
+
+@router.post("/upgrade-to-pro")
+async def upgrade_to_pro(
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """Upgrade user from BASIC (50 slots) to PRO (500 slots)"""
+    result = await LazarusService.upgrade_to_pro(db, user_id)
+
+    if not result["success"]:
+        return UriResponse.custom_response(result["message"], 400)
+
+    return UriResponse.custom_response(
+        result["message"],
+        200,
+        {
+            "max_slots": result.get("max_slots"),
+            "plan_type": result.get("plan_type"),
+        },
+    )
+
+
+# ============ LEAD INTEGRATION ============
+@router.put("/leads/{lead_id}/mark-dead")
+async def mark_lead_as_dead(
+    lead_id: str,
+    user_id: str = Query(...),
+    reason: str = Query(...),
+    auto_monitor: bool = Query(False),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Mark a lead as DEAD
+    Optionally auto-add to Lazarus monitoring
+    """
+    result = await LazarusService.mark_lead_as_dead(
+        db, user_id, lead_id, reason, auto_monitor
+    )
+
+    if not result["success"]:
+        return UriResponse.custom_response(result["message"], 404)
+
+    return UriResponse.custom_response(result["message"], 200, result)
+
+
+@router.put("/leads/{lead_id}/resurrect")
+async def resurrect_lead(
+    lead_id: str,
+    user_id: str = Query(...),
+    alert_type: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Resurrect a DEAD lead
+    PRD Section 5.2: Resurrection
+    """
+    result = await LazarusService.resurrect_lead(db, user_id, lead_id, alert_type)
+
+    if not result["success"]:
+        return UriResponse.custom_response(result["message"], 404)
+
+    return UriResponse.custom_response(result["message"], 200, result)
+
+
+# ============ BACKGROUND SCANNING ============
+@router.post("/scan/run-weekly")
+async def run_weekly_scan(
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Trigger weekly background scan manually
+    PRD Section 6: Origami Method
+    NOTE: This should normally be triggered by APScheduler cron job
+    """
+    result = await LazarusMonitoringService.run_weekly_scan(db)
+
+    return UriResponse.custom_response(
+        "Weekly scan completed",
+        200,
+        result,
+    )
+
+
+@router.post("/scan/focus-contacts")
+async def scan_focus_contacts(
+    batch_size: int = Query(100),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """Manually trigger focus contact scan"""
+    result = await LazarusMonitoringService.scan_focus_contacts(db, batch_size)
+
+    return UriResponse.custom_response(
+        "Focus contact scan completed",
+        200,
+        result,
+    )
+
+
+@router.post("/scan/focus-contact/{focus_id}")
+async def scan_single_focus_contact(
+    focus_id: str,
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """Scan a single specific focus contact immediately"""
+    result = await LazarusMonitoringService.scan_single_focus_contact(db, user_id, focus_id)
+
+    if not result.get("success"):
+        return UriResponse.custom_response(
+            message=result.get("message", "Scan failed"),
+            error_code=400,
+            success=False,
+            data=result,
+        )
+
+    return UriResponse.custom_response(
+        message="Focus contact scanned successfully",
+        error_code=200,
+        success=True,
+        data=result,
+    )
+
+
+@router.post("/scan/company-monitors")
+async def scan_company_monitors(
+    batch_size: int = Query(100),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """Manually trigger company monitor scan"""
+    result = await LazarusMonitoringService.scan_company_monitors(db, batch_size)
+
+    return UriResponse.custom_response(
+        "Company monitor scan completed",
+        200,
+        result,
+    )
+
+
+# ============ AUTO-DETECTION RULES ============
+@router.get("/auto-detection/rules")
+async def get_auto_detection_rules(
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Get user's auto-detection rules for dead leads
+    Returns default rules if none configured
+    """
+    from app.services.AutoDeadLeadDetectionService import AutoDeadLeadDetectionService
+
+    rules = await AutoDeadLeadDetectionService.get_user_detection_rules(db, user_id)
+
+    return UriResponse.custom_response(
+        "Auto-detection rules retrieved successfully",
+        200,
+        jsonable_encoder(rules)
+    )
+
+
+@router.put("/auto-detection/rules")
+async def update_auto_detection_rules(
+    rules_update: DetectionRulesUpdate,
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """Update user's auto-detection rules"""
+    from app.services.AutoDeadLeadDetectionService import AutoDeadLeadDetectionService
+
+    result = await AutoDeadLeadDetectionService.update_user_detection_rules(
+        db, user_id, rules_update.dict(exclude_unset=True)
+    )
+
+    # Remove MongoDB _id before encoding
+    if result and "_id" in result:
+        result.pop("_id")
+
+    return UriResponse.custom_response(
+        "Auto-detection rules updated successfully",
+        200,
+        jsonable_encoder(result)
+    )
+
+
+@router.post("/auto-detection/scan")
+async def trigger_auto_detection_scan(
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Manually trigger auto-detection scan for dead leads
+    Scans user's leads based on their configured rules
+    """
+    from app.services.AutoDeadLeadDetectionService import AutoDeadLeadDetectionService
+
+    # Get user's detection rules
+    rules_doc = await AutoDeadLeadDetectionService.get_user_detection_rules(db, user_id)
+
+    if not rules_doc.get("enabled"):
+        return UriResponse.custom_response(
+            "Auto-detection is disabled. Enable it in settings first.",
+            400
+        )
+
+    # Run scan
+    scan_result = await AutoDeadLeadDetectionService.scan_for_dead_leads(
+        db, user_id, rules_doc["detection_rules"]
+    )
+
+    # Save to history
+    await AutoDeadLeadDetectionService.save_scan_result(db, user_id, scan_result)
+
+    return UriResponse.custom_response(
+        "Auto-detection scan completed successfully",
+        200,
+        jsonable_encoder(scan_result)
+    )
+
+
+@router.get("/auto-detection/history")
+async def get_auto_detection_history(
+    user_id: str = Query(...),
+    skip: int = Query(0),
+    limit: int = Query(20),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """Get history of auto-detection scans"""
+    from app.services.AutoDeadLeadDetectionService import AutoDeadLeadDetectionService
+
+    history = await AutoDeadLeadDetectionService.get_scan_history(
+        db, user_id, skip, limit
+    )
+
+    return UriResponse.custom_response(
+        "Scan history retrieved successfully",
+        200,
+        [jsonable_encoder(record) for record in history]
+    )
+
+
+# ============ AI KEYWORD EXTRACTION ============
+@router.post("/extract-keywords")
+async def extract_keywords(
+    request: KeywordExtractionRequest,
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Extract industry keywords from profile/post data using AI
+    This endpoint helps auto-generate keywords for Paste & Go and CSV uploads
+    """
+    from app.services.AIService import AIService
+    from app.domain.enums.ai_prompt import LazarusPrompt
+
+    try:
+        # Build context from provided data
+        context_parts = []
+        if request.name:
+            context_parts.append(f"Name: {request.name}")
+        if request.title:
+            context_parts.append(f"Title: {request.title}")
+        if request.company:
+            context_parts.append(f"Company: {request.company}")
+        if request.bio:
+            context_parts.append(f"Bio: {request.bio}")
+        if request.recent_post:
+            context_parts.append(f"Recent Post: {request.recent_post}")
+
+        context = "\n".join(context_parts)
+
+        if not context:
+            return UriResponse.custom_response(
+                "No data provided for keyword extraction",
+                400,
+            )
+
+        # Build AI prompt
+        prompt = LazarusPrompt.EXTRACT_KEYWORDS_FROM_POST.value.format(
+            context=context,
+            signal_types=", ".join(request.signal_types)
+        )
+
+        # Get AI analysis
+        ai_model = AIService.build_ai_model([
+            AIService.construct_user_prompt(prompt)
+        ])
+
+        ai_response = await AIService.structured_chat_completion(
+            ai_model, KeywordExtractionResult
+        )
+
+        result = AIService.extract_ai_result(ai_response)
+
+        return UriResponse.custom_response(
+            "Keywords extracted successfully",
+            200,
+            {
+                "keywords": result.keywords,
+                "confidence": result.confidence,
+                "reasoning": result.reasoning
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"Keyword extraction failed: {e}")
+        return UriResponse.custom_response(
+            f"Keyword extraction failed: {str(e)}",
+            500
+        )
+
+
+# ============ ANALYTICS ============
+@router.get("/analytics")
+async def get_analytics_data(
+    user_id: str = Query(...),
+    days: int = Query(30, description="Number of days to analyze (default: 30)"),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Get detailed analytics data for Lazarus dashboard
+    PRD Section 7 - Success Metrics
+
+    Returns:
+    - Resurrection rate (% of alerts acted upon) - Target >15%
+    - Quota utilization (% of slots used)
+    - Alert performance by type
+    - Weekly trend data (last 4 weeks)
+    - False positive rate (dismissals)
+    - Accuracy rate
+    """
+    analytics = await LazarusService.get_analytics_data(db, user_id, days)
+    return UriResponse.custom_response(
+        "Analytics data retrieved successfully", 200, analytics
+    )
+
+
+@router.post("/alerts/recalculate-priority")
+async def recalculate_alert_priorities(
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Recalculate priority scores for all NEW alerts
+    Useful for existing alerts that don't have priority scores yet
+    """
+    from app.services.LazarusMonitoringService import LazarusMonitoringService
+
+    # Get all NEW alerts for user
+    alerts = await db["lazarus_alerts"].find({
+        "user_id": user_id,
+        "status": "NEW"
+    }).to_list(None)
+
+    updated_count = 0
+    for alert in alerts:
+        # Calculate priority score
+        priority_score, priority_level = LazarusMonitoringService.calculate_priority_score(alert)
+
+        # Update alert
+        await db["lazarus_alerts"].update_one(
+            {"alert_id": alert["alert_id"]},
+            {"$set": {
+                "priority_score": priority_score,
+                "priority_level": priority_level
+            }}
+        )
+        updated_count += 1
+
+    logger.info(f"🔥 Recalculated priority for {updated_count} alerts for user {user_id}")
+
+    return UriResponse.custom_response(
+        f"Recalculated priority for {updated_count} alerts",
+        200,
+        {"updated_count": updated_count}
+    )
+
+
+# ============ SCANNED CONTENT ============
+@router.get("/scanned-content")
+async def get_scanned_content(
+    user_id: str = Query(...),
+    skip: int = Query(0),
+    limit: int = Query(50),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Get all scanned content for Phase 2: Scanned Content Tab
+
+    NEW: Retrieves from scan_history collection which saves ALL scanned posts
+    Groups by contact and time period for organized display
+
+    Returns:
+    - All scan history records with posts (grouped by contact and date)
+    - Signal detection status for each scan
+    """
+    from app.repository.LazarusRepository import LazarusRepository
+    from datetime import datetime
+    from collections import defaultdict
+
+    try:
+        # Get all scan history for this user, sorted by most recent first
+        scan_history_records = await db["scan_history"].find({
+            "user_id": user_id
+        }).sort("scan_date", -1).to_list(None)
+
+        # Build grouped scan history data from new scan_history collection
+        scan_groups = []
+
+        for scan in scan_history_records:
+            # Build scanned posts for this scan
+            scanned_posts = []
+            triggering_index = scan.get("triggering_post_index")
+
+            for post in scan.get("scanned_posts", []):
+                is_triggering = (post.get("post_index") == triggering_index)
+
+                scanned_posts.append({
+                    "post_id": f"{scan.get('_id')}_{post.get('post_index')}",
+                    "post_url": post.get("post_url"),
+                    "post_text": post.get("post_text"),
+                    "post_platform": post.get("post_platform"),
+                    "post_author": post.get("post_author"),
+                    "post_created_at": post.get("post_created_at"),
+                    "post_likes": post.get("post_likes", 0),
+                    "post_comments": post.get("post_comments", 0),
+                    "post_index": post.get("post_index"),
+                    "is_triggering_post": is_triggering,
+                })
+
+            # Build scan group
+            scan_group = {
+                "scan_id": str(scan.get("_id")),
+                "source_type": scan.get("source_type"),
+                "source_id": scan.get("source_id"),
+                "source_name": scan.get("source_name"),
+                "scan_date": scan.get("scan_date"),
+                "platform": scan.get("platform"),
+                "posts_scanned_count": scan.get("posts_scanned_count", 0),
+                "scanned_posts": scanned_posts,
+                "signal_detected": scan.get("signal_detected", False),
+                "alert_id": scan.get("alert_id"),
+                "signal_type": scan.get("signal_type"),
+                "confidence": scan.get("confidence"),
+                "triggering_post_index": triggering_index,
+            }
+
+            scan_groups.append(scan_group)
+
+        # BACKWARD COMPATIBILITY: Convert old alerts with scanned_posts to scan_groups format
+        # This shows historical scanned content that was saved in alerts before scan_history existed
+        old_alerts = await db["lazarus_alerts"].find({
+            "user_id": user_id,
+            "evidence.scanned_posts": {"$exists": True, "$ne": []}
+        }).sort("created_at", -1).to_list(None)
+
+        for alert in old_alerts:
+            evidence = alert.get("evidence", {})
+            alert_scanned_posts = evidence.get("scanned_posts", [])
+
+            if not alert_scanned_posts:
+                continue
+
+            # Build scanned posts for legacy alert
+            scanned_posts = []
+            triggering_index = evidence.get("triggering_post_index")
+
+            for post in alert_scanned_posts:
+                is_triggering = (post.get("post_index") == triggering_index)
+
+                scanned_posts.append({
+                    "post_id": f"{alert.get('alert_id')}_{post.get('post_index')}",
+                    "post_url": post.get("post_url"),
+                    "post_text": post.get("post_text"),
+                    "post_platform": post.get("post_platform"),
+                    "post_author": post.get("post_author"),
+                    "post_created_at": post.get("post_created_at"),
+                    "post_likes": post.get("post_likes", 0),
+                    "post_comments": post.get("post_comments", 0),
+                    "post_index": post.get("post_index"),
+                    "is_triggering_post": is_triggering,
+                })
+
+            # Build scan group from legacy alert
+            scan_group = {
+                "scan_id": alert.get("alert_id"),
+                "source_type": alert.get("source_type"),
+                "source_id": alert.get("source_id"),
+                "source_name": alert.get("source_name"),
+                "scan_date": alert.get("created_at"),
+                "platform": evidence.get("post_platform", "Unknown"),
+                "posts_scanned_count": len(scanned_posts),
+                "scanned_posts": scanned_posts,
+                "signal_detected": True,  # Old alerts always had signals
+                "alert_id": alert.get("alert_id"),
+                "signal_type": evidence.get("signal_type"),
+                "confidence": evidence.get("confidence"),
+                "triggering_post_index": triggering_index,
+            }
+
+            scan_groups.append(scan_group)
+
+        # Sort all scan groups by scan_date (most recent first)
+        scan_groups.sort(key=lambda x: x.get("scan_date") or datetime.min, reverse=True)
+
+        # Apply pagination
+        paginated_scan_groups = scan_groups[skip:skip + limit]
+
+        return UriResponse.custom_response(
+            message="Scanned content retrieved successfully",
+            error_code=200,
+            success=True,
+            data={
+                "scan_groups": paginated_scan_groups,
+                "total_scans": len(scan_groups),
+                "total_posts": sum(sg.get("posts_scanned_count", 0) for sg in paginated_scan_groups),
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"❌ Error fetching scanned content: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return UriResponse.custom_response(
+            message=f"Failed to fetch scanned content: {str(e)}",
+            error_code=500,
+            success=False
+        )

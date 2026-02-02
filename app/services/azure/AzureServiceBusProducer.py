@@ -46,8 +46,9 @@ class AzureServiceBusProducer:
         message_body: dict,
         message_type: str = "default",
     ):
-        async with self.service_bus_client:
-            sender = self.service_bus_client.get_queue_sender(queue_name=queue_name)
+        # Create a fresh client for each send to avoid connection reuse issues
+        async with ServiceBusClient.from_connection_string(self.connection_string) as client:
+            sender = client.get_queue_sender(queue_name=queue_name)
             async with sender:
                 # Ensure message body is a JSON string
                 message_body_json = (
@@ -67,6 +68,57 @@ class AzureServiceBusProducer:
                     print(f"Sent message to queue: {queue_name}")
                 except Exception as e:
                     print(f"Failed to send message: {e}")
+
+    async def send_scheduled_message(
+        self,
+        queue_name: str,
+        message_body: dict,
+        message_type: str = "default",
+        scheduled_enqueue_time_utc = None,
+    ):
+        """
+        Send a scheduled message to the queue.
+        The message will be available for processing only after scheduled_enqueue_time_utc.
+
+        Args:
+            queue_name: Name of the queue
+            message_body: Message payload (dict)
+            message_type: Message type for routing
+            scheduled_enqueue_time_utc: datetime object in UTC when message should be available
+        """
+        # Create a fresh client for each send to avoid connection reuse issues
+        async with ServiceBusClient.from_connection_string(self.connection_string) as client:
+            sender = client.get_queue_sender(queue_name=queue_name)
+            async with sender:
+                # Ensure message body is a JSON string
+                message_body_json = (
+                    message_body
+                    if isinstance(message_body, str)
+                    else json.dumps(message_body)
+                )
+
+                message = ServiceBusMessage(
+                    body=message_body_json,
+                    application_properties={"messageType": message_type},
+                    content_type="application/json",
+                )
+
+                try:
+                    if scheduled_enqueue_time_utc:
+                        # Use Azure Service Bus scheduled message feature
+                        # Message will be invisible to workers until scheduled_enqueue_time_utc
+                        sequence_numbers = await sender.schedule_messages(
+                            messages=[message],
+                            schedule_time_utc=scheduled_enqueue_time_utc
+                        )
+                        print(f"✅ Scheduled message to queue '{queue_name}' at {scheduled_enqueue_time_utc} (sequence: {sequence_numbers})")
+                    else:
+                        # No schedule time provided, send immediately
+                        await sender.send_messages(message)
+                        print(f"✅ Sent immediate message to queue: {queue_name}")
+                except Exception as e:
+                    print(f"❌ Failed to send scheduled message: {e}")
+                    raise
 
 
 producer = AzureServiceBusProducer(CONNECTION_STRING)

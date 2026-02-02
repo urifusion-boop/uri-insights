@@ -61,14 +61,26 @@ class LeadHelper:
     def extract_apollo_person_lead(data: dict) -> dict:
         organization = data.get("organization", {})
 
+        # DEBUG: Log organization data to see what Apollo returns
+        print(f"[EXTRACT LEAD] Person: {data.get('name')}")
+        print(f"[EXTRACT LEAD] Organization data: {organization}")
+        print(f"[EXTRACT LEAD] Organization website_url: {organization.get('website_url')}")
+        print(f"[EXTRACT LEAD] Organization primary_domain: {organization.get('primary_domain')}")
+
         location_parts: List[str] = list(
             filter(None, [data.get("city"), data.get("state"), data.get("country")])
         )
         full_location = ", ".join(location_parts) if any(location_parts) else None
 
+        # Handle new Apollo API that returns last_name_obfuscated instead of last_name
+        last_name = data.get("last_name")
+        # Don't use obfuscated last name - keep as None if not available
+        if not last_name or last_name == "None" or "obfuscated" in str(last_name):
+            last_name = None
+
         return {
             "first_name": data.get("first_name"),
-            "last_name": data.get("last_name"),
+            "last_name": last_name,
             "username": data.get("name"),
             "phone": organization.get("phone"),
             "company_name": organization.get("name"),

@@ -1,0 +1,31 @@
+version: "3.9"
+
+services:
+  uri-insight.api:
+    image: uriteam/urisvc:uriinsightprod
+    container_name: uri-insight.api
+    env_file:
+      - .env
+    environment:
+      - ENV=Production
+      - SSL_CERT_PATH=/https/fullchain.pem
+      - SSL_KEY_PATH=/https/privkey.pem
+    volumes:
+      - /etc/letsencrypt/live/api.uricreative.com/fullchain.pem:/https/fullchain.pem
+      - /etc/letsencrypt/live/api.uricreative.com/privkey.pem:/https/privkey.pem
+    restart: always
+    ports:
+      - "8002:80"
+      - "8445:443"
+
+  uri-insight.worker:
+    image: uriteam/urisvc:uriinsightworker
+    env_file:
+      - .env
+    environment:
+      - ENV=Production
+    restart: always
+    deploy:
+      replicas: 10
+    # Worker processes background jobs from Azure Service Bus queue
+    # No ports needed - this service only consumes from queue

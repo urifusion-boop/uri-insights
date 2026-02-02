@@ -10,12 +10,16 @@ from app.domain.models.chat_model import (
     AudioModel,
     PlainText,
     SentimentResponse,
+    AINextStepsResponse,
+    NextStepAction,
 )
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app import schemas
-from typing import Any, List
+from typing import Any, List, Dict, Optional
 import asyncio
+from datetime import datetime
+import uuid
 
 client = OpenAI(api_key=settings.OPENAI_API_KEY)
 
@@ -223,3 +227,183 @@ class AIService:
             }
         except Exception as e:
             return {"error": str(e)}
+
+    @staticmethod
+    async def analyze_with_structured_output(
+        prompt: str,
+        response_model: Any,
+        model: str = "gpt-4o-mini",
+        temperature: float = 0.7
+    ) -> Any:
+        """
+        Analyze text with structured output using OpenAI's structured output feature.
+
+        Args:
+            prompt: The analysis prompt
+            response_model: Pydantic model for structured response
+            model: OpenAI model to use
+            temperature: Temperature for generation
+
+        Returns:
+            Parsed response matching the response_model schema
+        """
+        messages = [
+            {"role": "system", "content": "You are an expert analyst. Provide accurate, structured analysis."},
+            {"role": "user", "content": prompt}
+        ]
+
+        chat_request = ChatModel(
+            model=model,
+            messages=messages,
+            temperature=temperature
+        )
+
+        try:
+            response = await AIService.structured_chat_completion(
+                request=chat_request,
+                response_model=response_model
+            )
+
+            # Extract the parsed result
+            result = AIService.extract_ai_result(response)
+            return result
+
+        except Exception as e:
+            print(f"Error in analyze_with_structured_output: {e}")
+            raise
+
+    @staticmethod
+    async def generate_lead_next_steps(
+        lead_data: Dict[str, Any],
+        user_goal: Optional[str] = None,
+        lead_type: str = "PERSON"
+    ) -> Dict[str, Any]:
+        """
+        Generate actionable next steps for a lead based on user's business goal.
+
+        Args:
+            lead_data (Dict): Lead information including context, post content, job listing, etc.
+            user_goal (str): User's business goal/reason for generating leads
+            lead_type (str): Type of lead (PERSON, ORGANIZATION, CONVERSATIONAL, etc.)
+
+        Returns:
+            Dict: Structured next steps with actions, reasoning, and priority
+        """
+        # Extract relevant lead context
+        lead_name = lead_data.get("first_name", "") or lead_data.get("company_name", "this lead")
+        lead_source = lead_data.get("lead_source", "unknown")
+        post_content = lead_data.get("mention", "") or lead_data.get("summary_of_mention", "")
+        job_description = lead_data.get("lead_reason", "")
+        lead_link = lead_data.get("lead_link", "")
+        keywords_matched = lead_data.get("keywords", [])
+
+        # Fallback goal if not provided
+        if not user_goal:
+            user_goal = "Convert this lead into a customer"
+
+        # Build context based on lead type
+        if lead_type == "CONVERSATIONAL" or post_content:
+            context_section = f"""
+Lead Context:
+- Name/Company: {lead_name}
+- Source: Social media post ({lead_source})
+- Post Content: "{post_content}"
+- Keywords Matched: {', '.join(keywords_matched) if keywords_matched else 'N/A'}
+- Link: {lead_link}
+"""
+        elif "job" in lead_source.lower() or job_description:
+            context_section = f"""
+Lead Context:
+- Company: {lead_name}
+- Source: Job listing ({lead_source})
+- Job Description/Problem: {job_description}
+- Keywords Matched: {', '.join(keywords_matched) if keywords_matched else 'N/A'}
+- Link: {lead_link}
+"""
+        else:
+            context_section = f"""
+Lead Context:
+- Name/Company: {lead_name}
+- Source: {lead_source}
+- Description: {job_description or post_content or 'No additional context'}
+- Keywords Matched: {', '.join(keywords_matched) if keywords_matched else 'N/A'}
+"""
+
+        system_prompt = {
+            "role": "system",
+            "content": """You are a sales strategy expert. Generate 2-4 specific, actionable next steps for converting a lead.
+Each step should be:
+- Concrete and specific (not generic advice)
+- Prioritized (high/medium/low)
+- Platform-specific where applicable
+- Include reasoning based on the lead's context
+- Assigned a confidence score (0.0-1.0)
+
+Consider: timing, relevance to the user's goal, and the lead's specific situation."""
+        }
+
+        user_prompt = {
+            "role": "user",
+            "content": f"""User's Business Goal: {user_goal}
+
+{context_section}
+
+Generate specific next steps this user should take to convert this lead. Each step should include:
+1. The specific action to take
+2. Why this action makes sense given the context
+3. Priority level (high/medium/low)
+4. Confidence score
+5. Platform to use (if applicable: linkedin, twitter, email, phone, etc.)
+
+Focus on practical, immediate actions."""
+        }
+
+        chat_request = AIService.build_ai_model(
+            messages=[system_prompt, user_prompt],
+            model="gpt-4o",  # Use better model for strategic advice
+            temperature=0.7
+        )
+
+        try:
+            response = await AIService.structured_chat_completion(
+                request=chat_request,
+                response_model=AINextStepsResponse,
+            )
+
+            result: Dict = response.dict() if hasattr(response, 'dict') else response
+            parsed_steps: Dict = result["choices"][0]["message"]["parsed"]
+
+            # Add step_id and timestamp to each step
+            for step in parsed_steps.get("steps", []):
+                if "step_id" not in step or not step["step_id"]:
+                    step["step_id"] = str(uuid.uuid4())
+                step["completed"] = False
+                step["completed_at"] = None
+
+            # Build final response
+            return {
+                "steps": parsed_steps.get("steps", []),
+                "generated_at": datetime.utcnow().isoformat() + "Z",
+                "based_on_goal": user_goal,
+                "summary": parsed_steps.get("summary", f"{len(parsed_steps.get('steps', []))} actions recommended")
+            }
+        except Exception as e:
+            print(f"Error generating next steps: {e}")
+            # Return fallback generic steps
+            return {
+                "steps": [
+                    {
+                        "step_id": str(uuid.uuid4()),
+                        "action": "Review the lead details and prepare personalized outreach",
+                        "reasoning": "Understanding the lead's context is crucial for effective communication",
+                        "priority": "high",
+                        "confidence": 0.85,
+                        "platform": None,
+                        "completed": False,
+                        "completed_at": None
+                    }
+                ],
+                "generated_at": datetime.utcnow().isoformat() + "Z",
+                "based_on_goal": user_goal,
+                "summary": "1 action recommended (fallback due to AI error)"
+            }

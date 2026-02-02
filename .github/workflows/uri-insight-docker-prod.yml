@@ -39,17 +39,32 @@ jobs:
       - name: Log in to Docker Hub
         run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
 
-      # Build and push Docker image
-      - name: Build and push Docker image
+      # Build and push Docker images (API + Worker)
+      - name: Build and push Docker images
         run: |
           docker build -t uriteam/urisvc:uriinsightprod .
           docker push uriteam/urisvc:uriinsightprod
+          docker build -f Dockerfile.worker -t uriteam/urisvc:uriinsightworker .
+          docker push uriteam/urisvc:uriinsightworker
 
   deploy:
     runs-on: ubuntu-latest
     needs: build
 
     steps:
+      # Checkout code to get docker-compose files
+      - uses: actions/checkout@v4
+
+      # Copy docker-compose file to VM
+      - name: Copy docker-compose.prod.yml to VM
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VM_IP }}
+          username: urifusion
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "docker-compose.prod.yml"
+          target: "/tmp/"
+
       # SSH into the VM and deploy the Docker container
       - name: SSH into VM and Deploy
         uses: appleboy/ssh-action@v0.1.6
@@ -66,10 +81,14 @@ jobs:
               mkdir -p /home/uriprod/uri-insight;
             fi
             cd /home/uriprod/uri-insight
+
+            # Copy docker-compose file from tmp to working directory
+            cp /tmp/docker-compose.prod.yml /home/uriprod/uri-insight/docker-compose.prod.yml
+
             echo '${{ secrets.DOCKER_PASSWORD }}' | docker login -u '${{ secrets.DOCKER_USERNAME }}' --password-stdin
-            docker-compose down
-            docker-compose pull
-            docker-compose up -d
+            docker-compose -f docker-compose.prod.yml down
+            docker-compose -f docker-compose.prod.yml pull
+            docker-compose -f docker-compose.prod.yml up -d --scale uri-insight.worker=10
 
             # Cleanup redundant image
             docker image prune -f

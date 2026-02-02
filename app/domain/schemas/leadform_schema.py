@@ -49,6 +49,7 @@ class LeadFormBase(BaseModel):
     form_type: LeadFormTypeEnum
     form_title: str
     user_id: str
+    is_default: Optional[bool] = False  # Multi-form support: Mark one form as default per user per type
     disabled: bool = False
     disabled_reason: Optional[LeadFormDisabledReasonEnum] = None
     ai_response_guide: Optional[str] = None
@@ -108,6 +109,14 @@ class LeadFormBase(BaseModel):
     enable_realtime: Optional[bool] = False
     monitoring_platforms: Optional[List[str]] = None
     platform_configs: Optional[List[PlatformConfig]] = None
+    monitoring_interval_hours: Optional[int] = 0  # 0 = one-time only, >0 = recurring interval in hours (e.g., 1, 2, 3, 6, 12, 24, 48, 72, 120, 168)
+
+    # Job Boards fields
+    solution_context: Optional[str] = None  # What problem does user's product/service solve? (for job board analysis)
+    job_keywords: Optional[List[str]] = None  # AI-generated job role keywords for job board scanning (PRD Section 5)
+
+    # AI Next Steps fields
+    lead_generation_goal: Optional[str] = None  # User's business goal/reason for generating leads (e.g., "I want to sell gadgets to programmers")
 
     # Pagination
     page: Optional[int] = 1
@@ -133,6 +142,7 @@ class LeadFormUpdateBase(BaseModel):
     disabled_reason: Optional[LeadFormDisabledReasonEnum] = None
     add_to_history: Optional[bool] = True
     auto_generate: Optional[bool] = None
+    lead_generation_goal: Optional[str] = None  # User's business goal/reason for generating leads
     # Pagination
     page: Optional[int] = None
     per_page: Optional[int] = None
@@ -206,6 +216,11 @@ class ConversationalLeadFormUpdate(BizConvLeadFormUpdateBase):
     enable_realtime: Optional[bool] = None
     monitoring_platforms: Optional[List[str]] = None
     platform_configs: Optional[List[PlatformConfig]] = None
+    monitoring_interval_hours: Optional[int] = None  # 0 = one-time only, >0 = recurring interval in hours
+
+    # Job Boards fields
+    solution_context: Optional[str] = None  # What problem does user's product/service solve?
+    job_keywords: Optional[List[str]] = None  # AI-generated job role keywords (PRD Section 5)
 
 
 class LeadForm(LeadFormBase):

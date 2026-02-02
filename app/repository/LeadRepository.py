@@ -74,7 +74,7 @@ class LeadRepository:
                 sparse=True,
             )
 
-            # Duplicate detection index for conversational leads (URL-based)
+            # Duplicate detection index for sales signals (URL-based)
             # Prevents same post URL from being saved multiple times for the same user
             await db["leads"].create_index(
                 [
@@ -85,7 +85,7 @@ class LeadRepository:
                 sparse=True,
             )
 
-            # Duplicate detection index for conversational leads (content-based)
+            # Duplicate detection index for sales signals (content-based)
             # Prevents retweets/shares with same content from being saved multiple times
             await db["leads"].create_index(
                 [
@@ -102,7 +102,7 @@ class LeadRepository:
 
     @staticmethod
     async def update_conv_to_biz_leads(db: AsyncIOMotorDatabase):
-        print("🔄 Updating all CONVERSATIONAL leads to BUSINESS...")
+        print("🔄 Updating all sales signals to BUSINESS...")
 
         try:
             result = await db["leads"].update_many(
@@ -210,15 +210,41 @@ class LeadRepository:
                 {"is_pre_stored": {"$exists": False}},
             ]
 
+        # Count total leads matching the query
         total_leads = await db["leads"].count_documents(query)
-        leads = (
-            await db["leads"]
-            .find(query)
-            .sort("last_updated", -1)
-            .skip(skip)
-            .limit(limit)
-            .to_list(length=limit)
-        )
+
+        # Use aggregation pipeline to join with lead_form_snapshots and populate form_title
+        pipeline = [
+            {"$match": query},
+            {"$sort": {"last_updated": -1}},
+            {"$skip": skip},
+            {"$limit": limit},
+            {
+                "$lookup": {
+                    "from": "lead_form_snapshots",
+                    "localField": "lead_form_snapshot_id",
+                    "foreignField": "lead_form_snapshot_id",
+                    "as": "snapshot_data"
+                }
+            },
+            {
+                "$addFields": {
+                    "form_title": {
+                        "$ifNull": [
+                            {"$arrayElemAt": ["$snapshot_data.form_title", 0]},
+                            None
+                        ]
+                    }
+                }
+            },
+            {
+                "$project": {
+                    "snapshot_data": 0  # Remove the snapshot_data array from final output
+                }
+            }
+        ]
+
+        leads = await db["leads"].aggregate(pipeline).to_list(length=limit)
 
         leads_list = [Lead(**lead).dict() for lead in leads]
         return UriResponse.get_paged_data_response(
@@ -274,6 +300,31 @@ class LeadRepository:
         return UriResponse.delete_response("lead", True)
 
     @staticmethod
+    async def delete_leads_by_snapshot_ids(
+        db: AsyncIOMotorDatabase, snapshot_ids: List[str]
+    ) -> int:
+        """
+        Delete all leads associated with specific form snapshots.
+
+        PRD Section 4.6: Deleting a form deletes associated leads
+
+        Args:
+            db: Database connection
+            snapshot_ids: List of lead_form_snapshot_id values
+
+        Returns:
+            Number of leads deleted
+        """
+        if not snapshot_ids:
+            return 0
+
+        result = await db["leads"].delete_many({
+            "lead_form_snapshot_id": {"$in": snapshot_ids}
+        })
+
+        return result.deleted_count
+
+    @staticmethod
     async def multiple_create_leads(
         db: AsyncIOMotorDatabase, leads: List[LeadCreate]
     ) -> Dict[str, Any]:
@@ -321,6 +372,14 @@ class LeadRepository:
 
         for lead in leads:
             lead_data = lead.dict()
+
+            # DEBUG: Print job board lead data
+            if lead.lead_source == "Job Boards":
+                print(f"🔍 DEBUG - Saving Job Board Lead:")
+                print(f"   lead_source: {lead_data.get('lead_source')}")
+                print(f"   hiring_company: {lead_data.get('hiring_company')}")
+                print(f"   job_source: {lead_data.get('job_source')}")
+                print(f"   job_title_field: {lead_data.get('job_title_field')}")
 
             # Check if this lead already exists for this user (URL-based)
             if lead.lead_link and lead.assigned_to:

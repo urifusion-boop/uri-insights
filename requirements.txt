@@ -1,6 +1,7 @@
 fastapi
 uvicorn
 pymongo
+sentry-sdk[fastapi,pymongo]
 python-dotenv
 fastapi-jwt-auth
 requests
@@ -40,3 +41,4 @@ apify-client>=1.7.0
 pytest>=7.4.0
 pytest-asyncio>=0.21.0
 httpx>=0.24.0
+python-dateutil>=2.8.2

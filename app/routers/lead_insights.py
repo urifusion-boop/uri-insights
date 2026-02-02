@@ -21,7 +21,7 @@ from app.domain.schemas.lead_schema import (
     LeadUpdate,
 )
 from app.domain.responses.uri_response import UriResponse
-from typing import Optional, List, Union
+from typing import Optional, List, Union, Dict, Any
 from fastapi.encoders import jsonable_encoder
 from app.services.ApolloService import ApolloService
 from app.services.LeadBusinessInfoService import LeadBusinessInfoService
@@ -33,6 +33,7 @@ from app.domain.requests.lead_requests import (
 )
 from app.domain.enums.leadform_enum import LeadFormTypeEnum
 from app.repository.LeadFormRepository import LeadFormRepository
+from app.services.uri_microservices.UriBackendService import UriBackendService
 
 
 router = APIRouter()
@@ -414,3 +415,991 @@ async def trigger_conversational_leads_gen(
     )
 
     return UriResponse.custom_response("Leads gen triggered successfully.", 202, True)
+
+
+# Generate job keywords from business context (PRD Section 5)
+@router.post("/generate-job-keywords")
+async def generate_job_keywords(
+    user_id: str,
+    context: Optional[str] = None,
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency)
+):
+    """
+    Generate job role keywords for job board searching
+    PRD: "The AI uses the prompt and user's onboarding information to pre-fill keyword logic"
+    
+    Args:
+        user_id: User ID to fetch onboarding data if context not provided
+        context: Optional business description (if not provided, fetches from LeadBusinessInfo)
+        
+    Returns:
+        {
+            "job_keywords": ["DevOps Engineer", "Cloud Engineer", ...],
+            "solution_context": "business description used",
+            "source": "provided" | "onboarding_data"
+        }
+    """
+    from app.services.JobKeywordGenerationService import JobKeywordGenerationService
+    
+    try:
+        business_context = context
+        source = "provided"
+        
+        # If no context provided, fetch from user's onboarding data (PRD Section 5)
+        if not business_context or business_context.strip() == "":
+            print(f"📥 No context provided, fetching onboarding data for user: {user_id}")
+
+            # PRD: "Users have already defined what they sell" - fetch from user.businessDetails
+            user_details = await UriBackendService.get_user_details(user_id)
+
+            if user_details and user_details.get("businessDetails"):
+                what_you_sell = user_details["businessDetails"].get("whatYouSell")
+                if what_you_sell and what_you_sell.strip():
+                    business_context = what_you_sell
+                    source = "user_onboarding"
+                    print(f"✅ Found user onboarding data (whatYouSell): {business_context[:100]}...")
+
+            # Fallback to LeadBusinessInfo if user onboarding doesn't have it
+            if not business_context:
+                print(f"   Trying LeadBusinessInfo as fallback...")
+                business_info_response = await LeadBusinessInfoRepository.get_lead_business_info_by_filters(
+                    db, user_id=user_id, skip=0, limit=1
+                )
+
+                business_info_list = business_info_response.get("responseData", [])
+                if business_info_list and len(business_info_list) > 0:
+                    business_context = business_info_list[0].get("business_summary")
+                    source = "lead_business_info"
+                    print(f"✅ Found LeadBusinessInfo data: {business_context[:100]}...")
+
+            # If still no context found, return error
+            if not business_context:
+                return UriResponse.custom_response(
+                    "No business context provided and no onboarding data found. Please complete your business details in onboarding or provide a description.",
+                    400,
+                    False
+                )
+        
+        print(f"🤖 Generating job keywords from context (source: {source})")
+        
+        # Generate job keywords using AI
+        result = await JobKeywordGenerationService.generate_job_keywords(business_context)
+        
+        # Validate and clean keywords
+        valid_keywords = JobKeywordGenerationService.validate_job_keywords(result.job_keywords)
+        
+        response_data = {
+            "job_keywords": valid_keywords,
+            "solution_context": business_context,
+            "source": source,
+            "reasoning": result.reasoning
+        }
+        
+        print(f"✅ Generated {len(valid_keywords)} job keywords: {', '.join(valid_keywords)}")
+        
+        return UriResponse.custom_response(
+            "Job keywords generated successfully",
+            200,
+            True,
+            response_data
+        )
+        
+    except Exception as e:
+        print(f"❌ Error generating job keywords: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        
+        return UriResponse.custom_response(
+            f"Error generating job keywords: {str(e)}",
+            500,
+            False
+        )
+
+
+
+@router.post("/find-decision-makers")
+async def find_decision_makers(
+    lead_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency)
+):
+    """
+    Find decision-makers for a job board signal
+    PRD Section 8: Decision-Maker Connection Feature
+    """
+    from app.repository.LeadRepository import LeadRepository
+    from app.services.DecisionMakerMappingService import DecisionMakerMappingService
+    from app.core.helpers.apollo_helper import ApolloHelper
+    from app.services.uri_microservices.UriBackendService import UriBackendService
+    
+    lead_response = await LeadRepository.get_lead_by_id(db, lead_id)
+    
+    if lead_response["responseCode"] != 200:
+        return UriResponse.custom_response("Lead not found", 404, False)
+    
+    lead = lead_response["responseData"]
+    
+    # PRD Section 16: Eligibility checks
+    hiring_company = lead.get("hiring_company")
+    company_confidence = lead.get("company_confidence", 0.0)
+    problem_solution_match = lead.get("problem_solution_match", 0.0)
+    job_title = lead.get("job_title_field")
+    
+    if not hiring_company:
+        return UriResponse.custom_response(
+            "Company name is missing",
+            400,
+            False,
+            {"reason": "missing_company_name"}
+        )
+    
+    if company_confidence < 0.5:
+        return UriResponse.custom_response(
+            "Company identity could not be verified",
+            400,
+            False,
+            {"reason": "low_company_confidence"}
+        )
+    
+    if problem_solution_match < 0.3:
+        return UriResponse.custom_response(
+            "Problem-solution match too low",
+            400,
+            False
+        )
+    
+    # Map job title to decision-maker titles
+    decision_maker_titles = await DecisionMakerMappingService.map_job_to_decision_makers(job_title)
+    
+    if not decision_maker_titles:
+        return UriResponse.custom_response("No decision-makers found", 404, False)
+    
+    # Search Apollo for decision-makers at this company
+    apollo_params = {
+        "person_titles": decision_maker_titles,
+        "q_organization_name": hiring_company,
+        "page": 1,
+        "per_page": 3
+    }
+    
+    try:
+        apollo_results = await UriBackendService.search_apollo_persons(apollo_params)
+        
+        if not apollo_results or apollo_results.get("responseCode") != 200:
+            return UriResponse.custom_response("No contacts found", 404, False)
+        
+        contacts = apollo_results.get("responseData", {}).get("people", [])
+        
+        # Filter out recruiters/HR
+        excluded = ["recruiter", "recruiting", "talent acquisition", "hr ", "human resources"]
+        filtered = [c for c in contacts if not any(k in c.get("title", "").lower() for k in excluded)]
+        
+        return UriResponse.custom_response(
+            "Decision-makers found",
+            200,
+            True,
+            {
+                "decision_makers": filtered[:3],
+                "searched_titles": decision_maker_titles,
+                "company": hiring_company
+            }
+        )
+    except Exception as e:
+        return UriResponse.custom_response(f"Error: {str(e)}", 500, False)
+
+
+@router.get("/user-business-details/{user_id}")
+async def get_user_business_details(user_id: str):
+    """
+    Get user's business details from uri-backend for job keyword generation.
+
+    Returns businessDetails object containing:
+    - whatYouSell: What the user's business sells/does
+    - industry: User's industry
+    - businessName: Business name
+    - etc.
+    """
+    try:
+        business_details = await UriBackendService.get_user_business_details(user_id)
+
+        if business_details:
+            return UriResponse.custom_response(
+                "Business details retrieved successfully",
+                200,
+                True,
+                business_details
+            )
+        else:
+            return UriResponse.custom_response(
+                "Business details not found for user",
+                404,
+                False
+            )
+    except Exception as e:
+        print(f"Error getting user business details: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return UriResponse.custom_response(
+            f"Error retrieving business details: {str(e)}",
+            500,
+            False
+        )
+
+
+# PRD Section 8: Find decision-makers for job signal leads
+@router.post("/job-boards/{lead_id}/find-decision-makers")
+async def find_decision_makers_for_job_signal(
+    lead_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency)
+):
+    """
+    Find decision-makers at the company from a job signal
+    PRD Section 8: Decision-Maker Connection Feature
+
+    Returns 1-3 relevant decision-makers with contact details (name, title, email, phone, LinkedIn)
+    """
+    try:
+        print(f"🔍 DECISION MAKER REQUEST - Lead ID: {lead_id}")
+
+        # Get the job signal lead
+        lead_response = await LeadRepository.get_lead_by_id(db, lead_id)
+
+        if lead_response["responseCode"] != 200:
+            print("❌ Lead not found")
+            return UriResponse.custom_response("Lead not found", 404, False)
+
+        # Extract the actual lead data from the response wrapper
+        lead = lead_response["responseData"]
+
+        print(f"📋 Lead found: {lead is not None}")
+        if lead:
+            print(f"   lead_source: {lead.get('lead_source')}")
+            print(f"   hiring_company: {lead.get('hiring_company')}")
+            print(f"   job_source: {lead.get('job_source')}")
+
+        # Verify this is a job board signal
+        lead_source = lead.get("lead_source")
+        print(f"🔎 Checking lead_source: '{lead_source}' == '{LeadSourceEnum.JOB_BOARDS}' ?")
+
+        if lead_source != LeadSourceEnum.JOB_BOARDS:
+            print(f"❌ Not a job board lead! lead_source='{lead_source}'")
+            return UriResponse.custom_response(
+                "This endpoint only works for job board signals",
+                400,
+                False
+            )
+
+        # Extract company name and job title
+        company_name = lead.get("hiring_company") or lead.get("company_name")
+        job_title = lead.get("job_title_field") or lead.get("job_title")
+
+        if not company_name:
+            return UriResponse.custom_response(
+                "Company name not found in lead",
+                400,
+                False
+            )
+
+        # Check company confidence (PRD Section 16)
+        company_confidence = lead.get("company_confidence", 1.0)
+        if company_confidence < 0.5:
+            return UriResponse.custom_response(
+                "Company confidence too low for decision-maker lookup",
+                400,
+                False,
+                {"company_confidence": company_confidence}
+            )
+
+        # Get decision-maker titles from AI analysis (stored in lead)
+        # Or map from job title using JobSignalAnalysisService logic
+        from app.services.JobSignalAnalysisService import JobSignalAnalysisService
+
+        # Use AI-generated target_seniorities if available, otherwise map from job title
+        decision_maker_titles = []
+        if hasattr(lead, 'target_seniorities') and lead.target_seniorities:
+            decision_maker_titles = lead.target_seniorities
+        else:
+            # Fallback: map job title to decision-maker titles
+            # Basic mapping (can be enhanced)
+            job_title_lower = (job_title or "").lower()
+            if any(keyword in job_title_lower for keyword in ["devops", "engineer", "developer", "sre"]):
+                decision_maker_titles = ["CTO", "VP Engineering", "Head of Engineering", "Director of Engineering"]
+            elif any(keyword in job_title_lower for keyword in ["marketing", "growth"]):
+                decision_maker_titles = ["CMO", "VP Marketing", "Head of Marketing"]
+            elif any(keyword in job_title_lower for keyword in ["sales", "business development"]):
+                decision_maker_titles = ["VP Sales", "Head of Sales", "Chief Revenue Officer"]
+            elif any(keyword in job_title_lower for keyword in ["data", "analyst", "analytics"]):
+                decision_maker_titles = ["Head of Data", "VP Analytics", "Chief Data Officer"]
+            elif any(keyword in job_title_lower for keyword in ["operations", "office manager"]):
+                decision_maker_titles = ["COO", "Head of Operations", "VP Operations"]
+            else:
+                # Default fallback
+                decision_maker_titles = ["CEO", "COO", "Founder"]
+
+        print(f"🔍 Finding decision-makers at {company_name} with titles: {decision_maker_titles}")
+
+        # Call Apollo API
+        try:
+            decision_makers = await ApolloService.find_decision_makers(
+                company_name=company_name,
+                job_titles=decision_maker_titles,
+                max_results=3
+            )
+
+            # Success - return the decision-makers
+            return UriResponse.custom_response(
+                f"Found {len(decision_makers)} decision-maker(s)",
+                200,
+                True,
+                {
+                    "decision_makers": decision_makers,
+                    "company_name": company_name,
+                    "job_title": job_title
+                }
+            )
+
+        except Exception as apollo_error:
+            # Apollo API failed - return user-friendly error
+            error_message = str(apollo_error)
+            print(f"❌ Apollo API error: {error_message}")
+
+            # Return user-friendly message (don't expose internal API issues)
+            return UriResponse.custom_response(
+                "Decision-maker search is temporarily unavailable. Please try again later.",
+                503,  # Service Unavailable
+                False,
+                {
+                    "company_name": company_name,
+                    "suggestion": f"You can manually search for contacts at {company_name} on LinkedIn."
+                }
+            )
+
+    except Exception as e:
+        print(f"❌ Error finding decision-makers: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return UriResponse.custom_response(
+            "An error occurred while processing your request. Please try again later.",
+            500,
+            False
+        )
+
+# Validate search context to detect business-keyword mismatch
+@router.post("/validate-search-context")
+async def validate_search_context(
+    request: Dict[str, Any]
+):
+    """
+    Validates if user's search keywords align with their business solution.
+    Prevents irrelevant lead generation by detecting mismatches like:
+    - Selling laptops but searching for "skin care"
+    - Selling marketing software but searching for "plumbing issues"
+
+    Request body:
+    {
+        "solution_context": "What user sells",
+        "category_context": "What people are complaining about (social platforms)",
+        "social_keywords": ["keyword1", "keyword2"],
+        "job_keywords": ["keyword1", "keyword2"],
+        "has_social_platforms": true,
+        "has_job_boards": true
+    }
+
+    Returns:
+    {
+        "is_valid": bool,
+        "match_score": 0.0-1.0,
+        "social_platform_match": 0.0-1.0,
+        "job_board_match": 0.0-1.0,
+        "recommendation": "proceed" | "use_only_social" | "use_only_job_boards" | "update_search",
+        "reasoning": "Explanation",
+        "suggested_social_keywords": ["better", "keywords"]
+    }
+    """
+    from app.services.SearchKeywordValidationService import SearchKeywordValidationService
+
+    try:
+        solution_context = request.get("solution_context", "")
+        category_context = request.get("category_context")
+        social_keywords = request.get("social_keywords", [])
+        job_keywords = request.get("job_keywords", [])
+        has_social_platforms = request.get("has_social_platforms", False)
+        has_job_boards = request.get("has_job_boards", False)
+
+        # Validate
+        validation_result = await SearchKeywordValidationService.validate_search_context(
+            solution_context=solution_context,
+            category_context=category_context,
+            social_keywords=social_keywords,
+            job_keywords=job_keywords,
+            has_social_platforms=has_social_platforms,
+            has_job_boards=has_job_boards
+        )
+
+        return UriResponse.custom_response(
+            "Search context validated",
+            200,
+            True,
+            validation_result
+        )
+
+    except Exception as e:
+        print(f"❌ Validation endpoint error: {e}")
+        # Fail open - allow search to proceed
+        return UriResponse.custom_response(
+            "Validation unavailable, proceeding with search",
+            200,
+            True,
+            {
+                "is_valid": True,
+                "match_score": 0.5,
+                "social_platform_match": 0.5,
+                "job_board_match": 0.8,
+                "recommendation": "proceed",
+                "reasoning": "Validation service unavailable",
+                "suggested_social_keywords": []
+            }
+        )
+
+
+# ============================================
+# SPAM LEAD ENDPOINTS (NEW - Spam Visibility Feature)
+# PRD: Lead Gen Enhancement - Spam Visibility & Lead Reclassification
+# These endpoints allow users to view and manage filtered leads
+# ============================================
+
+@router.get("/spam-leads", tags=["Spam Leads"])
+async def get_spam_leads(
+    user_id: str,
+    lead_form_snapshot_id: Optional[str] = None,
+    filter_stage: Optional[str] = None,
+    lead_source: Optional[str] = None,
+    spam_reason: Optional[str] = None,
+    search: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 50,
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency)
+):
+    """
+    Get spam leads for a user (PRD Section 3.4)
+
+    Spam = Analyzed but Unqualified Items
+    These are posts/jobs that were fetched and analyzed but did not meet qualification criteria.
+
+    Args:
+        user_id: User ID
+        lead_form_snapshot_id: Filter by specific lead form (PRD 4.7: Spam scoped per form)
+        filter_stage: Optional filter by stage ("job_board_ai", "intent_analysis", etc.)
+        page: Page number (1-indexed)
+        page_size: Items per page (default 50)
+
+    Returns:
+        Paginated list of spam leads with reasons for disqualification
+    """
+    from app.repository.SpamLeadRepository import SpamLeadRepository
+
+    try:
+        # Filter out "undefined" strings from frontend
+        clean_snapshot_id = None if lead_form_snapshot_id == "undefined" else lead_form_snapshot_id
+        clean_filter_stage = None if filter_stage == "undefined" else filter_stage
+        clean_lead_source = None if lead_source == "undefined" else lead_source
+        clean_spam_reason = None if spam_reason == "undefined" else spam_reason
+        clean_search = None if search == "undefined" else search
+
+        print(f"🔍 [get_spam_leads] Request params: user_id={user_id}, lead_form_snapshot_id={clean_snapshot_id}, filter_stage={clean_filter_stage}, lead_source={clean_lead_source}, spam_reason={clean_spam_reason}, search={clean_search}, page={page}, page_size={page_size}")
+
+        spam_leads, total = await SpamLeadRepository.get_spam_leads_by_user(
+            db, user_id, clean_snapshot_id, clean_filter_stage, clean_lead_source, clean_spam_reason, clean_search, page, page_size
+        )
+
+        print(f"✅ [get_spam_leads] Retrieved {len(spam_leads)} spam leads out of {total} total")
+        if len(spam_leads) > 0:
+            print(f"📋 [get_spam_leads] First spam lead sample: {spam_leads[0].get('spam_id', 'no_id')}, spam_reason: {spam_leads[0].get('spam_reason', 'no_reason')}")
+
+        response = UriResponse.get_paged_data_response(
+            entity_name="Spam lead",
+            data=spam_leads,
+            total=total,
+            page=page,
+            page_size=page_size,
+            message="Spam leads retrieved successfully"
+        )
+
+        print(f"📦 [get_spam_leads] Response structure: status={response.get('status')}, responseCode={response.get('responseCode')}, data_count={len(response.get('responseData', {}).get('data', []))}")
+
+        return response
+
+    except Exception as e:
+        print(f"Error retrieving spam leads: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return UriResponse.custom_response(
+            f"Error retrieving spam leads: {str(e)}",
+            500,
+            False
+        )
+
+
+@router.post("/spam-leads/{spam_id}/promote", tags=["Spam Leads"])
+async def promote_spam_to_lead(
+    spam_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency)
+):
+    """
+    Promote spam lead to qualified leads (PRD Section 3.5 - "Add to Leads")
+
+    Allows users to recover false negatives by manually promoting spam items to active leads.
+
+    Args:
+        spam_id: Spam lead ID
+
+    Returns:
+        Success response with promoted lead data
+    """
+    from app.repository.SpamLeadRepository import SpamLeadRepository
+    from app.repository.LeadRepository import LeadRepository
+    from app.domain.schemas.lead_schema import LeadCreate
+
+    try:
+        # Get spam lead
+        spam_lead = await SpamLeadRepository.get_spam_lead_by_id(db, spam_id)
+
+        if not spam_lead:
+            return UriResponse.custom_response("Spam lead not found", 404, False)
+
+        # Extract original lead data
+        original_data = spam_lead.get("original_lead_data")
+        if not original_data:
+            return UriResponse.custom_response("Original lead data not found in spam entry", 400, False)
+
+        # Recreate LeadCreate object from original data
+        lead = LeadCreate(**original_data)
+
+        # Save to main leads collection
+        save_result = await LeadRepository.create_lead(db, lead)
+
+        # Mark spam as promoted (keeps record for analytics)
+        await SpamLeadRepository.promote_spam_to_lead(db, spam_id)
+
+        # save_result is already a formatted dict from LeadRepository.create_lead
+        return save_result
+
+    except Exception as e:
+        print(f"Error promoting spam lead: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return UriResponse.custom_response(
+            f"Error promoting spam lead: {str(e)}",
+            500,
+            False
+        )
+
+
+@router.post("/leads/{lead_id}/move-to-spam", tags=["Spam Leads"])
+async def move_lead_to_spam(
+    lead_id: str,
+    spam_reason: str = "Manually moved by user",
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency)
+):
+    """
+    Move qualified lead to spam (PRD Section 3.6 - Reverse action)
+
+    Allows users to demote active leads that turn out to be false positives.
+
+    Args:
+        lead_id: Lead ID to move to spam
+        spam_reason: Reason for moving to spam
+
+    Returns:
+        Success response
+    """
+    from app.repository.SpamLeadRepository import SpamLeadRepository
+    from app.repository.LeadRepository import LeadRepository
+
+    try:
+        # Get existing lead
+        lead_response = await LeadRepository.get_lead_by_id(db, lead_id)
+
+        if lead_response["responseCode"] != 200:
+            return UriResponse.custom_response("Lead not found", 404, False)
+
+        lead_data = lead_response["responseData"]
+
+        # Extract user_id from lead
+        user_id = lead_data.get("assigned_to") or lead_data.get("user_id", "")
+
+        # Create spam entry from lead
+        spam_entry = await SpamLeadRepository.move_lead_to_spam(
+            db=db,
+            lead_data=lead_data,
+            spam_reason=spam_reason,
+            user_id=user_id
+        )
+
+        # Delete from leads collection
+        delete_result = await LeadRepository.delete_lead(db, lead_id)
+
+        if delete_result["responseCode"] == 200:
+            return UriResponse.update_response(
+                entity_name="Lead",
+                data={"spam_id": spam_entry.get("spam_id"), "deleted_lead_id": lead_id},
+                message="Lead moved to spam"
+            )
+        else:
+            return UriResponse.custom_response("Failed to delete lead after moving to spam", 500, False)
+
+    except Exception as e:
+        print(f"Error moving lead to spam: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return UriResponse.custom_response(
+            f"Error moving lead to spam: {str(e)}",
+            500,
+            False
+        )
+
+
+@router.delete("/spam-leads/{spam_id}", tags=["Spam Leads"])
+async def delete_spam_lead(
+    spam_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency)
+):
+    """
+    Delete a single spam lead permanently
+
+    Enhanced UX: Allow users to remove individual spam items
+
+    Args:
+        spam_id: Spam lead ID to delete
+
+    Returns:
+        Success message
+    """
+    from app.repository.SpamLeadRepository import SpamLeadRepository
+
+    try:
+        deleted = await SpamLeadRepository.delete_spam_lead(db, spam_id)
+
+        if deleted:
+            return UriResponse.get_single_data_response(
+                entity_name="Spam lead",
+                data={"spam_id": spam_id},
+                message="Spam lead deleted successfully"
+            )
+        else:
+            return UriResponse.custom_response(
+                "Spam lead not found",
+                404,
+                False
+            )
+
+    except Exception as e:
+        print(f"Error deleting spam lead: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return UriResponse.custom_response(
+            f"Error deleting spam lead: {str(e)}",
+            500,
+            False
+        )
+
+
+@router.post("/spam-leads/bulk-delete", tags=["Spam Leads"])
+async def bulk_delete_spam_leads(
+    request: dict,
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency)
+):
+    """
+    Bulk delete multiple spam leads
+
+    Enhanced UX: Allow users to remove multiple spam items at once
+
+    Args:
+        request: { spam_ids: List[str] }
+
+    Returns:
+        Count of deleted items
+    """
+    from app.repository.SpamLeadRepository import SpamLeadRepository
+
+    try:
+        spam_ids = request.get("spam_ids", [])
+
+        if not spam_ids:
+            return UriResponse.custom_response(
+                "No spam IDs provided",
+                400,
+                False
+            )
+
+        deleted_count = await SpamLeadRepository.bulk_delete_spam_leads(db, spam_ids)
+
+        return UriResponse.get_single_data_response(
+            entity_name="Spam leads",
+            data={"deleted_count": deleted_count, "requested_count": len(spam_ids)},
+            message=f"Successfully deleted {deleted_count} spam lead(s)"
+        )
+
+    except Exception as e:
+        print(f"Error bulk deleting spam leads: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return UriResponse.custom_response(
+            f"Error bulk deleting spam leads: {str(e)}",
+            500,
+            False
+        )
+
+
+@router.get("/spam-leads/stats", tags=["Spam Leads"])
+async def get_spam_stats(
+    user_id: str,
+    lead_form_snapshot_id: Optional[str] = None,
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency)
+):
+    """
+    Get spam statistics for user/form
+
+    Returns counts by filter stage, spam reason, and user actions.
+
+    Args:
+        user_id: User ID
+        lead_form_snapshot_id: Optional form filter
+
+    Returns:
+        Statistics about spam leads
+    """
+    from app.repository.SpamLeadRepository import SpamLeadRepository
+
+    try:
+        stats = await SpamLeadRepository.get_spam_stats(db, user_id, lead_form_snapshot_id)
+
+        return UriResponse.get_single_data_response(
+            entity_name="Spam statistics",
+            data=stats,
+            message="Spam statistics retrieved successfully"
+        )
+
+    except Exception as e:
+        print(f"Error retrieving spam stats: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return UriResponse.custom_response(
+            f"Error retrieving spam stats: {str(e)}",
+            500,
+            False
+        )
+
+
+@router.patch("/leads/{lead_id}/next-steps/{step_id}/complete", tags=["Leads - AI Next Steps"])
+async def mark_next_step_complete(
+    lead_id: str,
+    step_id: str,
+    completed: bool = True,
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency)
+):
+    """
+    Mark a next step as completed or uncompleted.
+
+    Args:
+        lead_id: The lead ID
+        step_id: The step ID to update
+        completed: Whether the step is completed (default: True)
+
+    Returns:
+        Updated lead with modified next steps
+    """
+    from datetime import datetime
+
+    try:
+        # Get the lead
+        lead_response = await LeadRepository.get_lead_by_id(db, lead_id)
+        if not lead_response or not lead_response.get("status"):
+            return UriResponse.custom_response("Lead not found", 404, False)
+
+        lead = lead_response.get("responseData")
+        if not lead:
+            return UriResponse.custom_response("Lead not found", 404, False)
+
+        # Get next steps
+        ai_next_steps = lead.get("ai_next_steps", {})
+        if not ai_next_steps or "steps" not in ai_next_steps:
+            return UriResponse.custom_response("No next steps found for this lead", 404, False)
+
+        # Find and update the step
+        steps = ai_next_steps.get("steps", [])
+        step_found = False
+        for step in steps:
+            if step.get("step_id") == step_id:
+                step["completed"] = completed
+                step["completed_at"] = datetime.utcnow().isoformat() + "Z" if completed else None
+                step_found = True
+                break
+
+        if not step_found:
+            return UriResponse.custom_response("Step not found", 404, False)
+
+        # Update lead with modified next steps
+        from app.domain.schemas.lead_schema import LeadUpdate
+        update_data = LeadUpdate(ai_next_steps=ai_next_steps)
+
+        result = await LeadRepository.update_lead(db, lead_id, update_data)
+
+        return UriResponse.get_single_data_response(
+            entity_name="Lead next step",
+            data=result,
+            message=f"Step marked as {'completed' if completed else 'incomplete'}"
+        )
+
+    except Exception as e:
+        print(f"Error updating next step: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return UriResponse.custom_response(f"Error updating next step: {str(e)}", 500, False)
+
+
+@router.get("/leads/insights/next-steps-summary", tags=["Leads - AI Next Steps"])
+async def get_next_steps_summary(
+    user_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency)
+):
+    """
+    Get aggregated insights about pending next steps across all leads.
+
+    Returns:
+        {
+            "total_pending_actions": int,
+            "by_priority": {"high": int, "medium": int, "low": int},
+            "leads_requiring_action": int,
+            "completed_actions_today": int,
+            "top_actions": [{"action": str, "count": int}, ...]
+        }
+    """
+    from datetime import datetime, timedelta
+    from collections import Counter
+
+    try:
+        # Get all leads for user with next steps
+        pipeline = [
+            {
+                "$match": {
+                    "assigned_to": user_id,
+                    "ai_next_steps": {"$exists": True, "$ne": None}
+                }
+            },
+            {
+                "$project": {
+                    "lead_id": 1,
+                    "ai_next_steps": 1
+                }
+            }
+        ]
+
+        leads_cursor = db["leads"].aggregate(pipeline)
+        leads = await leads_cursor.to_list(length=None)
+
+        # Aggregate statistics
+        total_pending = 0
+        by_priority = {"high": 0, "medium": 0, "low": 0}
+        leads_with_pending = set()
+        completed_today = 0
+        action_types = []
+
+        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+
+        for lead in leads:
+            ai_next_steps = lead.get("ai_next_steps", {})
+            steps = ai_next_steps.get("steps", [])
+
+            lead_has_pending = False
+            for step in steps:
+                if not step.get("completed", False):
+                    total_pending += 1
+                    priority = step.get("priority", "medium").lower()
+                    by_priority[priority] = by_priority.get(priority, 0) + 1
+                    lead_has_pending = True
+
+                    # Extract action type (first few words)
+                    action = step.get("action", "")
+                    action_type = " ".join(action.split()[:3]) if action else "Other"
+                    action_types.append(action_type)
+                else:
+                    # Check if completed today
+                    completed_at = step.get("completed_at")
+                    if completed_at:
+                        try:
+                            completed_date = datetime.fromisoformat(completed_at.replace("Z", "+00:00"))
+                            if completed_date >= today_start:
+                                completed_today += 1
+                        except:
+                            pass
+
+            if lead_has_pending:
+                leads_with_pending.add(lead["lead_id"])
+
+        # Get top action types
+        action_counter = Counter(action_types)
+        top_actions = [
+            {"action": action, "count": count}
+            for action, count in action_counter.most_common(5)
+        ]
+
+        summary = {
+            "total_pending_actions": total_pending,
+            "by_priority": by_priority,
+            "leads_requiring_action": len(leads_with_pending),
+            "completed_actions_today": completed_today,
+            "top_actions": top_actions
+        }
+
+        return UriResponse.get_single_data_response(
+            entity_name="Next steps summary",
+            data=summary,
+            message="Next steps summary retrieved successfully"
+        )
+
+    except Exception as e:
+        print(f"Error getting next steps summary: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return UriResponse.custom_response(f"Error getting next steps summary: {str(e)}", 500, False)
+
+
+@router.patch("/spam-leads/{spam_id}/notes", tags=["Spam Leads"])
+async def update_spam_notes(
+    spam_id: str,
+    user_notes: str,
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency)
+):
+    """
+    Add or update user notes on spam lead
+
+    Allows users to document why they reviewed/promoted/dismissed an item.
+
+    Args:
+        spam_id: Spam lead ID
+        user_notes: User's notes
+
+    Returns:
+        Success response
+    """
+    from app.repository.SpamLeadRepository import SpamLeadRepository
+
+    try:
+        success = await SpamLeadRepository.update_spam_notes(db, spam_id, user_notes)
+
+        if success:
+            return UriResponse.update_response(
+                entity_name="Spam notes",
+                data={"spam_id": spam_id},
+                message="Spam notes updated"
+            )
+        else:
+            return UriResponse.custom_response("Spam lead not found", 404, False)
+
+    except Exception as e:
+        print(f"Error updating spam notes: {str(e)}")
+        return UriResponse.custom_response(
+            f"Error updating spam notes: {str(e)}",
+            500,
+            False
+        )

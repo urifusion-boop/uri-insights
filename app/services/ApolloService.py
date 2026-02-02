@@ -55,16 +55,22 @@ class ApolloService:
 
     @staticmethod
     async def handle_organization_leads_gen(lead_form: dict, db: AsyncIOMotorDatabase):
+        print(f"[ORG LEADS] Starting organization leads generation for form: {lead_form.get('lead_form_id')}")
         search_result = await ApolloService.search_organizations(lead_form=lead_form)
 
+        print(f"[ORG LEADS] Search result received: {len(search_result.get('organizations', []))} organizations found")
+
         if not search_result:
+            print("[ORG LEADS] ERROR: Apollo search returned empty result")
             raise ValueError("Apollo leads gen failed.")
 
         await ApolloService.handle_search_result(search_result, lead_form, db)
 
-        return await ApolloService.handle_organization_search_result(
+        result = await ApolloService.handle_organization_search_result(
             search_result, lead_form.get("user_id", ""), db
         )
+        print(f"[ORG LEADS] Completed. Leads to create: {len(result) if result else 0}")
+        return result
 
     @staticmethod
     @ApolloHelper.cache_result(
@@ -78,12 +84,17 @@ class ApolloService:
             )
         search_result = {}
         url = ApolloHelper.get_url_for_search_request(lead_form)
+        print(f"[PEOPLE SEARCH] Calling Apollo API: {url[:150]}...")
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 url,
                 headers=ApolloService.HEADERS,
             )
+            print(f"[PEOPLE SEARCH] Apollo API response status: {response.status_code}")
+            if response.status_code != 200:
+                print(f"[PEOPLE SEARCH] Error response: {response.text}")
             search_result = ApolloService._process_response(response)
+        print(f"[PEOPLE SEARCH] People in response: {len(search_result.get('people', []))}")
         return search_result
 
     @staticmethod
@@ -99,12 +110,15 @@ class ApolloService:
             )
         search_result = {}
         url = ApolloHelper.get_url_for_search_request(lead_form)
+        print(f"[ORG SEARCH] Calling Apollo API: {url[:100]}...")
         async with httpx.AsyncClient() as client:
-            response = await client.get(
+            response = await client.post(
                 url,
                 headers=ApolloService.HEADERS,
             )
+            print(f"[ORG SEARCH] Apollo API response status: {response.status_code}")
             search_result = ApolloService._process_response(response)
+        print(f"[ORG SEARCH] Organizations in response: {len(search_result.get('organizations', []))}")
         return search_result
 
     @staticmethod
@@ -156,8 +170,14 @@ class ApolloService:
                     )
 
                 case LeadFormTypeEnum.ORGANIZATION:
-                    # Placeholder for org enrichment logic
-                    org_results = await ApolloService.enrich_organization(grouped_leads)
+                    # Handle organization enrichment (email/phone reveal)
+                    if len(grouped_leads) == 1:
+                        grouped_leads = grouped_leads[0]
+                    org_results = (
+                        await ApolloService.handle_organization_enrichment_request(
+                            grouped_leads, db, reveal_email, reveal_phone, webhook_url
+                        )
+                    )
                     results.extend(
                         org_results if isinstance(org_results, list) else [org_results]
                     )
@@ -251,9 +271,23 @@ class ApolloService:
         if not email:
             response = await ApolloService.enrich_person(lead, reveal_email=True)
             email = response.get("person", {}).get("email", "")
+            email_status = response.get("person", {}).get("email_status", "")
+            revealed = response.get("person", {}).get("revealed_for_current_team", False)
+
+            print(f"[EMAIL ENRICHMENT] Lead: {lead.get('username', 'Unknown')}")
+            print(f"[EMAIL ENRICHMENT] Apollo Response: {response}")
+            print(f"[EMAIL ENRICHMENT] Extracted Email: {email}")
+            print(f"[EMAIL ENRICHMENT] Email Status: {email_status}")
+            print(f"[EMAIL ENRICHMENT] Revealed for team: {revealed}")
+
+            # If no email but revealed, Apollo doesn't have it in database
+            if not email and revealed:
+                print(f"[EMAIL ENRICHMENT] ⚠️  Apollo has no email for this contact in their database")
+                email = "UNAVAILABLE"
 
         # Normalize payload
         email = email or "UNAVAILABLE"
+        print(f"[EMAIL ENRICHMENT] Final Email Value: {email}")
         payload = {"person": {"email": email}} if isinstance(email, str) else email
 
         # Process and persist
@@ -286,15 +320,114 @@ class ApolloService:
             )
         # Trigger apollo webhook process if phone number isn't already in DB
         if not phone:
+            print(f"[PHONE ENRICHMENT] Lead: {lead.get('username', 'Unknown')} - No phone in DB, calling Apollo API...")
             response = await ApolloService.enrich_person(
                 lead, reveal_phone=True, webhook_url=webhook_url
             )
+            print(f"[PHONE ENRICHMENT] Apollo Response: {response}")
             await LeadRepository.update_lead(
                 db, lead_id, LeadUpdate(phone="PROCESSING")
             )
+            print(f"[PHONE ENRICHMENT] Phone set to PROCESSING (awaiting webhook)")
+        else:
+            print(f"[PHONE ENRICHMENT] Lead: {lead.get('username', 'Unknown')} - Phone found in DB: {phone}")
 
         return await ApolloService._process_person_phone_enrichment_response(
             db, lead_id, phone, response
+        )
+
+    @staticmethod
+    async def handle_organization_enrichment_request(
+        leads: Union[List[dict], dict],
+        db: AsyncIOMotorDatabase,
+        reveal_email: bool = False,
+        reveal_phone: bool = False,
+        webhook_url: Optional[str] = None,
+    ):
+        """
+        Handle organization enrichment similar to person enrichment.
+        Calls Apollo API and saves the enriched data back to the database.
+        """
+        if not leads:
+            return UriResponse.custom_response("Lead(s) not found for enrichment.", 404)
+
+        if isinstance(leads, list):
+            return await ApolloService.handle_multiple_organization_leads_enrichment(
+                leads,
+                db,
+                reveal_email,
+                reveal_phone,
+                webhook_url,
+            )
+        else:
+            # Single organization lead
+            return await ApolloService.handle_single_organization_lead_enrichment(
+                leads, db, reveal_email, reveal_phone, webhook_url
+            )
+
+    @staticmethod
+    async def handle_multiple_organization_leads_enrichment(
+        leads: List[dict],
+        db: AsyncIOMotorDatabase,
+        reveal_email: bool = False,
+        reveal_phone: bool = False,
+        webhook_url: Optional[str] = None,
+    ):
+        """Handle multiple organization leads enrichment concurrently"""
+        enrichment_tasks = [
+            ApolloService.handle_single_organization_lead_enrichment(
+                lead=lead,
+                db=db,
+                reveal_email=reveal_email,
+                reveal_phone=reveal_phone,
+                webhook_url=webhook_url
+            )
+            for lead in leads
+        ]
+        task_responses = await asyncio.gather(*enrichment_tasks, return_exceptions=True)
+        results = [
+            task for task in task_responses if not isinstance(task, Exception)
+        ]
+        return results
+
+    @staticmethod
+    async def handle_single_organization_lead_enrichment(
+        lead: dict,
+        db: AsyncIOMotorDatabase,
+        reveal_email: bool = False,
+        reveal_phone: bool = False,
+        webhook_url: Optional[str] = None,
+    ):
+        """
+        Enrich a single organization lead.
+        Similar to person enrichment but for organizations.
+        """
+        if not lead:
+            return UriResponse.custom_response("Lead not found for enrichment.", 404)
+
+        lead_id = lead.get("lead_id", "")
+        website_url = lead.get("website_url", "")
+
+        print(f"[ORG ENRICHMENT] Lead: {lead.get('company_name', 'Unknown')}")
+        print(f"[ORG ENRICHMENT] Website: {website_url}")
+        print(f"[ORG ENRICHMENT] reveal_email={reveal_email}, reveal_phone={reveal_phone}")
+
+        if not website_url:
+            print(f"[ORG ENRICHMENT] ⚠️ No website URL found for organization")
+            return UriResponse.custom_response("No domain found for this lead.", 404)
+
+        # Call Apollo API to enrich organization
+        response = await ApolloService.handle_single_org_enrichement(lead)
+
+        print(f"[ORG ENRICHMENT] Apollo Response: {response}")
+
+        # Process and persist the enriched data
+        return await ApolloService._process_organization_enrichment_response(
+            db=db,
+            lead_id=lead_id,
+            response=response,
+            reveal_phone=reveal_phone,
+            reveal_email=reveal_email,
         )
 
     @staticmethod
@@ -313,9 +446,15 @@ class ApolloService:
         url = ApolloHelper.get_url_for_enrich_person_request(
             lead, reveal_email, reveal_phone, webhook_url
         )
+        print(f"[APOLLO ENRICH] URL: {url}")
+        print(f"[APOLLO ENRICH] Lead: {lead.get('username', 'Unknown')}, Apollo ID: {lead.get('apollo_id', 'None')}")
+        print(f"[APOLLO ENRICH] reveal_email={reveal_email}, reveal_phone={reveal_phone}")
         async with httpx.AsyncClient() as client:
             response = await client.post(url, headers=ApolloService.HEADERS)
-            return ApolloService._process_response(response)
+            result = ApolloService._process_response(response)
+            print(f"[APOLLO ENRICH] Response status: {response.status_code}")
+            print(f"[APOLLO ENRICH] Response data: {result}")
+            return result
 
     @staticmethod
     async def enrich_people_bulk(
@@ -389,6 +528,92 @@ class ApolloService:
         return results
 
     @staticmethod
+    async def find_decision_makers(
+        company_name: str,
+        job_titles: List[str],
+        max_results: int = 3
+    ) -> List[Dict[str, Any]]:
+        """
+        Find decision-makers at a company for job signal opportunities
+        PRD Section 8: Decision-Maker Connection Feature
+
+        Args:
+            company_name: Company name from job posting
+            job_titles: List of decision-maker titles to search for (e.g., ["CTO", "VP Engineering"])
+            max_results: Maximum number of contacts to return (default: 3)
+
+        Returns:
+            List of decision-makers with contact details
+        """
+        url = f"{ApolloService.BASE_URL}/mixed_people/search"
+
+        # Build Apollo search payload
+        # Search for people at this company with these job titles
+        payload = {
+            "q_organization_name": company_name,
+            "person_titles": job_titles,
+            "page": 1,
+            "per_page": max_results,
+            "organization_num_employees_ranges": ["1,10", "11,50", "51,200", "201,500", "501,1000", "1001,5000", "5001,10000", "10001+"],
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    url,
+                    json=payload,
+                    headers=ApolloService.HEADERS
+                )
+
+                if response.status_code != 200:
+                    error_message = f"Apollo API error: {response.status_code}"
+                    print(f"❌ {error_message} - {response.text}")
+
+                    # Raise exception for API errors so endpoint can handle gracefully
+                    if response.status_code == 403:
+                        raise Exception("Apollo API service temporarily unavailable")
+                    elif response.status_code == 429:
+                        raise Exception("Rate limit exceeded, please try again later")
+                    else:
+                        raise Exception("Decision-maker lookup service unavailable")
+
+                result = response.json()
+                people = result.get("people", [])
+
+                # Format results to match PRD Section 8.4 requirements
+                decision_makers = []
+                for person in people[:max_results]:
+                    # Extract contact details
+                    name = person.get("name") or f"{person.get('first_name', '')} {person.get('last_name', '')}".strip()
+                    title = person.get("title") or person.get("headline", "")
+                    email = person.get("email")
+                    phone = person.get("phone_numbers", [{}])[0].get("raw_number") if person.get("phone_numbers") else None
+                    linkedin_url = person.get("linkedin_url")
+                    organization_name = person.get("organization", {}).get("name") or company_name
+
+                    # Only include if we have at least name and email
+                    if name and email:
+                        decision_makers.append({
+                            "name": name,
+                            "title": title,
+                            "email": email,
+                            "phone": phone,
+                            "linkedin_url": linkedin_url,
+                            "organization_name": organization_name,
+                            "id": person.get("id")
+                        })
+
+                print(f"✅ Found {len(decision_makers)} decision-makers at {company_name}")
+                return decision_makers
+
+        except Exception as e:
+            print(f"❌ Error finding decision-makers: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            # Re-raise the exception so endpoint can handle it properly
+            raise
+
+    @staticmethod
     async def enrich_organizations_bulk(domains: List[str]) -> dict:
         """
         Enrich a list of up to 10 organizations using Apollo's bulk enrich API.
@@ -437,12 +662,14 @@ class ApolloService:
         db: AsyncIOMotorDatabase, lead_id: str, response: dict
     ):
         email = response.get("person", {}).get("email", "")
+        print(f"[EMAIL SAVE] Lead ID: {lead_id}, Email being saved: {email}")
         if email:
             updated_lead = (
                 await LeadRepository.update_lead(
                     db, lead_id, LeadUpdate(lead_email=email)
                 )
             ).get("responseData", {})
+            print(f"[EMAIL SAVE] Updated lead with email: {email}")
             if email != "UNAVAILABLE":
                 await UriTaskManagerService.update_user_feature_limit_specific_limit(
                     updated_lead.get("assigned_to", ""),
@@ -474,32 +701,101 @@ class ApolloService:
         reveal_phone: bool = False,
         reveal_email: bool = False,
     ):
-        phone = response.get("organization", {}).get("phone", "")
-        website_url = response.get("organization", {}).get("website_url", "")
-        extracted_email = await ApolloService.get_org_email_from_website(website_url)
-        update_data = LeadUpdate()
-        if reveal_phone and phone:
-            update_data.phone = phone
-        if reveal_email and extracted_email != "None":
-            update_data.lead_email = extracted_email
+        """
+        Process Apollo organization enrichment response and save to database.
+        Similar to _process_person_email_enrichment_response but for organizations.
+        """
+        organization = response.get("organization", {})
+        phone = organization.get("phone", "")
 
+        # Apollo organization API returns contact info differently than person API
+        # Organizations may have: primary_phone, phone, or sanitized_phone
+        if not phone:
+            phone = organization.get("primary_phone", "")
+        if not phone:
+            phone = organization.get("sanitized_phone", "")
+
+        # For organizations, email is typically in the format info@domain.com, contact@domain.com
+        # Apollo may provide this in the organization object or we construct it from domain
+        email = organization.get("email", "")
+        if not email:
+            # Try to get from organization contact fields
+            email = organization.get("organization_email", "")
+
+        # If still no email, try to extract from primary domain
+        if not email and reveal_email:
+            primary_domain = organization.get("primary_domain", "")
+            website_url = organization.get("website_url", "")
+
+            print(f"[ORG EMAIL] No direct email from Apollo. Domain: {primary_domain}, Website: {website_url}")
+
+            if primary_domain:
+                # Common organizational email patterns
+                email = f"info@{primary_domain}"
+                print(f"[ORG EMAIL] Generated generic email: {email}")
+            elif website_url:
+                # Extract domain from website URL as fallback
+                try:
+                    from urllib.parse import urlparse
+                    parsed = urlparse(website_url)
+                    domain = parsed.netloc.replace('www.', '')
+                    if domain:
+                        email = f"info@{domain}"
+                        print(f"[ORG EMAIL] Generated email from URL: {email}")
+                except:
+                    pass
+
+        print(f"[ORG ENRICHMENT] Processing response for lead_id: {lead_id}")
+        print(f"[ORG ENRICHMENT] Phone: {phone or 'None'}")
+        print(f"[ORG ENRICHMENT] Email: {email or 'None'}")
+        print(f"[ORG ENRICHMENT] reveal_phone={reveal_phone}, reveal_email={reveal_email}")
+
+        # Build update data
+        update_data = LeadUpdate()
+
+        if reveal_phone:
+            if phone:
+                update_data.phone = phone
+                print(f"[ORG ENRICHMENT] Will update phone: {phone}")
+            else:
+                update_data.phone = "UNAVAILABLE"
+                print(f"[ORG ENRICHMENT] No phone found, setting to UNAVAILABLE")
+
+        if reveal_email:
+            if email:
+                update_data.lead_email = email
+                print(f"[ORG ENRICHMENT] Will update email: {email}")
+            else:
+                update_data.lead_email = "UNAVAILABLE"
+                print(f"[ORG ENRICHMENT] No email found, setting to UNAVAILABLE")
+
+        # Save to database if we have any data to update
         if update_data.phone or update_data.lead_email:
             updated_lead = (
                 await LeadRepository.update_lead(db, lead_id, update_data)
             ).get("responseData", {})
 
-            if reveal_phone:
+            print(f"[ORG ENRICHMENT] ✅ Updated lead in database")
+
+            # Update feature limits
+            if reveal_phone and phone and phone != "UNAVAILABLE":
                 await UriTaskManagerService.update_user_feature_limit_specific_limit(
                     updated_lead.get("assigned_to", ""),
                     EndpointsEnum.LEAD_ENRICHMENT_PHONE.value,
                     0,
                 )
-            if reveal_email:
+                print(f"[ORG ENRICHMENT] ✅ Updated phone feature limit")
+
+            if reveal_email and email and email != "UNAVAILABLE":
                 await UriTaskManagerService.update_user_feature_limit_specific_limit(
                     updated_lead.get("assigned_to", ""),
                     EndpointsEnum.LEAD_ENRICHMENT_EMAIL.value,
                     0,
                 )
+                print(f"[ORG ENRICHMENT] ✅ Updated email feature limit")
+        else:
+            print(f"[ORG ENRICHMENT] ⚠️ No data to update")
+
         return response
 
     @staticmethod
@@ -573,6 +869,11 @@ class ApolloService:
     ) -> Optional[List[LeadCreate]]:
         people = search_result.get("people", [])
 
+        print(f"[PEOPLE RESULT] Processing {len(people)} people from search result")
+        if people:
+            # Log first person's keys to understand response structure
+            print(f"[PEOPLE RESULT] First person keys: {list(people[0].keys())[:10]}")
+
         if not people or not user_id:
             return None
 
@@ -589,6 +890,11 @@ class ApolloService:
             lead_to_create_dict["assigned_to"] = user_id
             lead_to_create_dict["lead_form_snapshot_id"] = (
                 latest_lead_form_snapshot.lead_form_snapshot_id
+                if latest_lead_form_snapshot
+                else None
+            )
+            lead_to_create_dict["form_title"] = (
+                latest_lead_form_snapshot.form_title
                 if latest_lead_form_snapshot
                 else None
             )
@@ -614,7 +920,7 @@ class ApolloService:
 
         latest_lead_form_snapshot: LeadFormSnapshot = (
             await ApolloService.get_latest_lead_form_snapshot(
-                db, user_id=user_id, form_type=LeadFormTypeEnum.PERSON
+                db, user_id=user_id, form_type=LeadFormTypeEnum.ORGANIZATION
             )
         ).get("responseData")
 
@@ -627,6 +933,11 @@ class ApolloService:
             lead_to_create_dict["assigned_to"] = user_id
             lead_to_create_dict["lead_form_snapshot_id"] = (
                 latest_lead_form_snapshot.lead_form_snapshot_id
+                if latest_lead_form_snapshot
+                else None
+            )
+            lead_to_create_dict["form_title"] = (
+                latest_lead_form_snapshot.form_title
                 if latest_lead_form_snapshot
                 else None
             )

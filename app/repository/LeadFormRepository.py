@@ -35,28 +35,9 @@ class LeadFormRepository:
     @staticmethod
     async def create(db: AsyncIOMotorDatabase, lead_form: LeadFormCreate):
         lead_form_data = lead_form.dict()
-        existing_instance = await db[LeadFormRepository.COLLECTION_NAME].find_one(
-            {
-                "user_id": lead_form_data.get("user_id"),
-                "form_type": lead_form_data.get("form_type"),
-            }
-        )
 
-        if existing_instance:
-            # Check if any leads exist for this form
-            leads_count = await db["leads"].count_documents({
-                "user_id": lead_form_data.get("user_id"),
-                "form_id": existing_instance.get("form_id")
-            })
-
-            if leads_count > 0:
-                # Leads exist - user should update instead
-                return UriResponse.conflict_response("lead form", "already exists with leads")
-            else:
-                # No leads yet - allow replacing the form
-                await db[LeadFormRepository.COLLECTION_NAME].delete_one({
-                    "_id": existing_instance["_id"]
-                })
+        # Multi-form support: Allow multiple forms per user per type
+        # No uniqueness constraint - users can create as many forms as needed
 
         await db[LeadFormRepository.COLLECTION_NAME].insert_one(lead_form_data)
 
@@ -256,11 +237,157 @@ class LeadFormRepository:
 
     @staticmethod
     async def delete(db: AsyncIOMotorDatabase, lead_form_id: str):
+        """
+        Delete a lead form with CASCADE DELETE.
+
+        PRD Section 4.6: Deleting a form must delete:
+        - The form itself
+        - All associated snapshots
+        - All associated leads
+        - All associated spam items
+
+        Args:
+            db: Database connection
+            lead_form_id: Lead form ID to delete
+
+        Returns:
+            UriResponse with deletion details
+        """
         if not ObjectId.is_valid(lead_form_id):
             return UriResponse.custom_response("Invalid lead form ID")
 
+        # Import repositories (avoid circular imports)
+        from app.repository.LeadFormSnapshotRepository import LeadFormSnapshotRepository
+        from app.repository.LeadRepository import LeadRepository
+        from app.repository.SpamLeadRepository import SpamLeadRepository
+
+        # Step 1: Get all snapshot IDs for this form
+        snapshot_ids = await LeadFormSnapshotRepository.get_snapshot_ids_by_form_id(
+            db, lead_form_id
+        )
+
+        # Step 2: Delete all leads associated with these snapshots
+        leads_deleted = 0
+        if snapshot_ids:
+            leads_deleted = await LeadRepository.delete_leads_by_snapshot_ids(
+                db, snapshot_ids
+            )
+
+        # Step 3: Delete all spam associated with these snapshots
+        spam_deleted = 0
+        if snapshot_ids:
+            spam_deleted = await SpamLeadRepository.delete_spam_by_snapshot_ids(
+                db, snapshot_ids
+            )
+
+        # Step 4: Delete all snapshots for this form
+        snapshots_deleted = await LeadFormSnapshotRepository.delete_snapshots_by_form_id(
+            db, lead_form_id
+        )
+
+        # Step 5: Delete the form itself
         result = await db[LeadFormRepository.COLLECTION_NAME].delete_one(
             {"lead_form_id": lead_form_id}
         )
 
-        return UriResponse.delete_response("Lead form", result.deleted_count > 0)
+        if result.deleted_count == 0:
+            return UriResponse.custom_response("Lead form not found", 404)
+
+        # Return success with details
+        return UriResponse.success_response(
+            f"Lead form deleted successfully. "
+            f"Also deleted: {snapshots_deleted} snapshots, {leads_deleted} leads, {spam_deleted} spam items."
+        )
+
+    # ========== Multi-Form Support Methods (PRD Section 4.1) ==========
+
+    @staticmethod
+    async def get_forms_by_user_and_type(
+        db: AsyncIOMotorDatabase, user_id: str, form_type: LeadFormTypeEnum
+    ) -> List[dict]:
+        """
+        Get all lead forms for a specific user and form type.
+        Supports multiple forms per user per type (PRD 4.1).
+        """
+        cursor = db[LeadFormRepository.COLLECTION_NAME].find(
+            {"user_id": user_id, "form_type": form_type.value}
+        ).sort("created_date", -1)  # Most recent first
+
+        results = await cursor.to_list(length=100)
+
+        if not results:
+            return []
+
+        return [LeadForm(**form).dict() for form in results]
+
+    @staticmethod
+    async def set_default_form(
+        db: AsyncIOMotorDatabase,
+        user_id: str,
+        form_type: LeadFormTypeEnum,
+        lead_form_id: str,
+    ):
+        """
+        Mark one form as default for a user and type.
+        Unmarks all other forms of the same type.
+        """
+        # First, unmark all forms of this type for this user
+        await db[LeadFormRepository.COLLECTION_NAME].update_many(
+            {"user_id": user_id, "form_type": form_type.value},
+            {"$set": {"is_default": False}},
+        )
+
+        # Then mark the specified form as default
+        result = await db[LeadFormRepository.COLLECTION_NAME].update_one(
+            {"lead_form_id": lead_form_id, "user_id": user_id},
+            {"$set": {"is_default": True}},
+        )
+
+        if result.matched_count == 0:
+            return UriResponse.custom_response("Lead form not found", 404)
+
+        return UriResponse.success_response("Default form set successfully")
+
+    @staticmethod
+    async def get_default_form(
+        db: AsyncIOMotorDatabase, user_id: str, form_type: LeadFormTypeEnum
+    ):
+        """
+        Get the default form for a user and type.
+        Falls back to most recent form if no default is set.
+        """
+        # Try to get default form
+        result = await db[LeadFormRepository.COLLECTION_NAME].find_one(
+            {"user_id": user_id, "form_type": form_type.value, "is_default": True}
+        )
+
+        # If no default, get most recent form
+        if not result:
+            result = await db[LeadFormRepository.COLLECTION_NAME].find_one(
+                {"user_id": user_id, "form_type": form_type.value},
+                sort=[("created_date", -1)],
+            )
+
+        if not result:
+            return UriResponse.get_single_data_response("Lead form", None)
+
+        return UriResponse.get_single_data_response(
+            "Lead form", LeadForm(**result).dict()
+        )
+
+    @staticmethod
+    async def migrate_existing_forms_to_multi_form_support(
+        db: AsyncIOMotorDatabase,
+    ):
+        """
+        One-time migration to add multi-form support fields to existing forms.
+        - Sets is_default=True for all existing forms (backward compatibility)
+        - Ensures existing single-form users see no change
+        """
+        result = await db[LeadFormRepository.COLLECTION_NAME].update_many(
+            {"is_default": {"$exists": False}},  # Only update forms without is_default
+            {"$set": {"is_default": True}},
+        )
+
+        print(f"✅ Migrated {result.modified_count} existing forms to multi-form support")
+        return result.modified_count

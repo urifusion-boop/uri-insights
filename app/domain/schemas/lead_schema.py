@@ -1,4 +1,4 @@
-from typing import Optional, List
+from typing import Optional, List, Union, Any
 from datetime import datetime
 from pydantic import BaseModel, Field
 from app.core.helpers.date_helper import DateHelper
@@ -21,6 +21,31 @@ class CommunicationEntry(BaseModel):
     message: Optional[str] = None
     medium: Optional[str] = None  # e.g., "email", "call", "LinkedIn"
     status: Optional[str] = None  # e.g., "sent", "opened", "responded"
+
+    class Config:
+        extra = "forbid"
+
+
+class AINextSteps(BaseModel):
+    """For reading from database - flexible to handle old data formats"""
+    steps: Optional[Union[List[str], List[dict], List[Any]]] = None  # Support both string lists and complex objects
+    generated_at: Optional[str] = None
+    based_on_goal: Optional[str] = None
+    summary: Optional[str] = None
+
+    class Config:
+        extra = "allow"  # Allow extra fields for backward compatibility with existing data
+
+
+class AINextStepsStrict(BaseModel):
+    """For OpenAI structured output - strict validation"""
+    steps: Optional[List[str]] = None
+    generated_at: Optional[str] = None
+    based_on_goal: Optional[str] = None
+    summary: Optional[str] = None
+
+    class Config:
+        extra = "forbid"
 
 
 class LeadBase(BaseModel):
@@ -96,6 +121,33 @@ class LeadBase(BaseModel):
     intent_reasoning: Optional[str] = None  # Brief explanation of intent analysis
     content_hash: Optional[str] = None  # Hash of normalized content to detect retweets/shares
 
+    # Job Signal Fields (for leads from job boards)
+    job_posting_url: Optional[str] = None  # URL to the job posting
+    job_title_field: Optional[str] = None  # Job title from posting (renamed to avoid conflict with job_title)
+    hiring_company: Optional[str] = None  # Company posting the job
+    problem_solution_match: Optional[float] = None  # Score: How well user's solution addresses the hiring problem (0-1)
+    hiring_intent_score: Optional[float] = None  # Score: How urgent/serious is the hiring need (0-1)
+    commercial_relevance: Optional[float] = None  # Score: Calculated from problem_match + hiring_intent (0-1)
+    implied_problems: Optional[List[str]] = None  # AI-generated list of business problems this hiring suggests
+    job_source: Optional[str] = None  # Source of job posting: "LinkedIn Jobs", "Jobberman"
+    company_confidence: Optional[float] = None  # PRD Sections 14-16: Confidence that company can be verified (0-1)
+
+    # AI Next Steps - Actionable recommendations based on user's goal
+    ai_next_steps: Optional[AINextSteps] = None
+
+    # Form Title - Populated from lead_form_snapshots via aggregation
+    form_title: Optional[str] = None  # Form title from the snapshot that generated this lead
+
+    # Lazarus Protocol - Resurrection tracking fields
+    is_lazarus_monitored: Optional[bool] = False  # Is this lead being monitored by Lazarus?
+    lazarus_focus_id: Optional[str] = None  # Link to focus_contacts collection
+    lazarus_company_monitor_id: Optional[str] = None  # Link to company_monitors collection
+    resurrection_count: Optional[int] = 0  # How many times has this lead been resurrected?
+    last_resurrection_date: Optional[datetime] = None  # When was the last resurrection?
+    last_resurrection_type: Optional[str] = None  # Type of alert that triggered resurrection
+    marked_dead_date: Optional[datetime] = None  # When was this lead marked as DEAD?
+    marked_dead_reason: Optional[str] = None  # Why was this lead marked as DEAD?
+
     class Config:
         json_encoders = {datetime: lambda v: DateHelper.to_iso8601_utc(v) if v else None}
 
@@ -108,6 +160,11 @@ class LeadCreate(LeadBase):
     """
 
     lead_id: str = Field(default_factory=lambda: str(ObjectId()))
+    ai_next_steps: Optional[AINextStepsStrict] = None  # Override with strict version for OpenAI
+
+    class Config:
+        extra = "forbid"  # Only for OpenAI structured output validation
+        json_encoders = {datetime: lambda v: DateHelper.to_iso8601_utc(v) if v else None}
 
 
 class LeadUpdate(BaseModel):
@@ -166,6 +223,20 @@ class LeadUpdate(BaseModel):
     intent_category: Optional[IntentCategoryEnum] = None
     final_score: Optional[float] = None
     intent_reasoning: Optional[str] = None
+
+    # Job Signal Fields (for updates)
+    job_posting_url: Optional[str] = None
+    job_title_field: Optional[str] = None
+    hiring_company: Optional[str] = None
+    problem_solution_match: Optional[float] = None
+    hiring_intent_score: Optional[float] = None
+    commercial_relevance: Optional[float] = None
+    implied_problems: Optional[List[str]] = None
+    job_source: Optional[str] = None
+    company_confidence: Optional[float] = None
+
+    # AI Next Steps (for updates)
+    ai_next_steps: Optional[AINextSteps] = None
 
     last_updated: datetime = Field(default_factory=datetime.utcnow)
 
