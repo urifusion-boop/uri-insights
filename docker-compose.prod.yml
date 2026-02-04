@@ -19,7 +19,7 @@ services:
       - "9445:443"
 
   uri-insight-prod.worker:
-    image: uriteam/urisvc:uriinsightworkerprod
+    image: uriteam/urisvc:uriinsightworker
     env_file:
       - .env
     environment:
