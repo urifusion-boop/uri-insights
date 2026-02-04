@@ -20,7 +20,6 @@ services:
 
   uri-insight-prod.worker:
     image: uriteam/urisvc:uriinsightworkerprod
-    container_name: uri-insight-prod.worker
     env_file:
       - .env
     environment:
