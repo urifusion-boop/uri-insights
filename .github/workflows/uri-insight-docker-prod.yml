@@ -76,20 +76,22 @@ jobs:
           timeout: 120s # SSH connection timeout
           command_timeout: 15m # Command execution timeout
           script: |
+            # Ensure directory exists with correct ownership
+            sudo mkdir -p /home/uriprod/uri-insight
+            sudo chown -R uriprod:uriprod /home/uriprod/uri-insight
+
+            # Copy docker-compose file with proper permissions
+            sudo cp /tmp/docker-compose.prod.yml /home/uriprod/uri-insight/docker-compose.yml
+            sudo chown uriprod:uriprod /home/uriprod/uri-insight/docker-compose.yml
+
             sudo su - uriprod -c "
-            if [ ! -d /home/uriprod/uri-insight ]; then
-              mkdir -p /home/uriprod/uri-insight;
-            fi
             cd /home/uriprod/uri-insight
 
-            # Copy docker-compose file from tmp to working directory
-            cp /tmp/docker-compose.prod.yml /home/uriprod/uri-insight/docker-compose.prod.yml
-
             echo '${{ secrets.DOCKER_PASSWORD }}' | docker login -u '${{ secrets.DOCKER_USERNAME }}' --password-stdin
-            docker-compose -f docker-compose.prod.yml down
-            docker-compose -f docker-compose.prod.yml pull
-            docker-compose -f docker-compose.prod.yml up -d --scale uri-insight.worker=10
+            docker-compose down
+            docker-compose pull
+            docker-compose up -d --scale uri-insight-prod.worker=10
 
-            # Cleanup redundant image
+            # Cleanup redundant images
             docker image prune -f
             "
