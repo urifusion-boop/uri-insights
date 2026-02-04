@@ -91,6 +91,7 @@ jobs:
             docker-compose down
             docker-compose pull
             docker-compose up -d
+            docker-compose up -d --scale uri-insight-prod.worker=10 --no-recreate
 
             # Cleanup redundant images
             docker image prune -f
