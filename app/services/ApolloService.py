@@ -512,11 +512,22 @@ class ApolloService:
 
                 # Extract enriched people from response
                 matches = result.get("matches", [])
-                for match in matches:
+                print(f"[AUTO ENRICH] Response structure - matches count: {len(matches)}")
+                if matches and len(matches) > 0:
+                    print(f"[AUTO ENRICH] First match keys: {list(matches[0].keys())}")
+
+                for idx, match in enumerate(matches):
+                    print(f"[AUTO ENRICH] Match {idx} keys: {list(match.keys())}")
                     enriched_person = match.get("person", {})
+                    if not enriched_person:
+                        # Try alternative response structure
+                        enriched_person = match
+
                     if enriched_person:
                         enriched_people.append(enriched_person)
-                        print(f"[AUTO ENRICH] ✓ Enriched: {enriched_person.get('name', 'Unknown')}")
+                        print(f"[AUTO ENRICH] ✓ Enriched: {enriched_person.get('name', 'Unknown')} (has {len(enriched_person)} fields)")
+                    else:
+                        print(f"[AUTO ENRICH] ✗ Match {idx} has no person data")
             except Exception as e:
                 print(f"[AUTO ENRICH] ✗ Batch enrichment failed: {str(e)}")
                 # Fallback: use original data for this batch
