@@ -457,6 +457,75 @@ class ApolloService:
             return result
 
     @staticmethod
+    async def auto_enrich_people_after_search(people: List[dict]) -> List[dict]:
+        """
+        Auto-enrich people after search to get full profile data (photo, linkedin_url, name)
+        WITHOUT revealing email/phone (those cost credits and are only revealed when user clicks).
+
+        Args:
+            people (List[dict]): List of people from Apollo search (with apollo_id).
+
+        Returns:
+            List[dict]: List of enriched people with full profile data.
+        """
+        if not people:
+            return []
+
+        print(f"[AUTO ENRICH] Starting auto-enrichment for {len(people)} people")
+
+        # Build enrichment details from search results
+        # We use apollo_id for fastest/most reliable matching
+        details = []
+        for person in people:
+            apollo_id = person.get("id")
+            if apollo_id:
+                details.append({"id": apollo_id})
+            else:
+                # Fallback: use name and organization if no apollo_id
+                first_name = person.get("first_name", "")
+                organization = person.get("organization", {})
+                org_name = organization.get("name", "")
+                if first_name and org_name:
+                    details.append({
+                        "first_name": first_name,
+                        "organization_name": org_name
+                    })
+
+        if not details:
+            print("[AUTO ENRICH] No valid details for enrichment, returning original data")
+            return people
+
+        # Enrich in batches of 10 (Apollo bulk API limit)
+        enriched_people = []
+        batch_size = 10
+
+        for i in range(0, len(details), batch_size):
+            batch = details[i:i + batch_size]
+            print(f"[AUTO ENRICH] Enriching batch {i//batch_size + 1} ({len(batch)} people)")
+
+            try:
+                result = await ApolloService.enrich_people_bulk(
+                    details=batch,
+                    reveal_personal_emails=False,  # Don't reveal email (costs credits)
+                    reveal_phone_number=False,     # Don't reveal phone (costs credits)
+                )
+
+                # Extract enriched people from response
+                matches = result.get("matches", [])
+                for match in matches:
+                    enriched_person = match.get("person", {})
+                    if enriched_person:
+                        enriched_people.append(enriched_person)
+                        print(f"[AUTO ENRICH] ✓ Enriched: {enriched_person.get('name', 'Unknown')}")
+            except Exception as e:
+                print(f"[AUTO ENRICH] ✗ Batch enrichment failed: {str(e)}")
+                # Fallback: use original data for this batch
+                enriched_people.extend(people[i:i + batch_size])
+
+        print(f"[AUTO ENRICH] Complete. Enriched {len(enriched_people)} people")
+        return enriched_people if enriched_people else people
+
+    @staticmethod
     async def enrich_people_bulk(
         details: List[dict],
         reveal_personal_emails: bool = False,
@@ -485,11 +554,15 @@ class ApolloService:
 
         payload = {"details": details}
         url = ApolloHelper.format_url(url, params)
+        print(f"[ENRICH BULK] URL: {url}")
+        print(f"[ENRICH BULK] Payload: {len(details)} people")
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 url, json=payload, headers=ApolloService.HEADERS
             )
-            return ApolloService._process_response(response)
+            result = ApolloService._process_response(response)
+            print(f"[ENRICH BULK] Response: {response.status_code}, Matches: {len(result.get('matches', []))}")
+            return result
 
     @staticmethod
     @ApolloHelper.cache_result()
@@ -877,6 +950,12 @@ class ApolloService:
         if not people or not user_id:
             return None
 
+        # Auto-enrich people to get full profile data (photo, linkedin_url, name)
+        # WITHOUT revealing email/phone (those are only revealed when user clicks)
+        print(f"[PEOPLE RESULT] Auto-enriching {len(people)} people to get full profile data...")
+        enriched_people = await ApolloService.auto_enrich_people_after_search(people)
+        print(f"[PEOPLE RESULT] Enrichment complete. Using enriched data for lead creation.")
+
         latest_lead_form_snapshot: LeadFormSnapshot = (
             await ApolloService.get_latest_lead_form_snapshot(
                 db, user_id=user_id, form_type=LeadFormTypeEnum.PERSON
@@ -885,8 +964,8 @@ class ApolloService:
 
         tasks = []
 
-        for person in people:
-            lead_to_create_dict = LeadHelper.extract_apollo_person_lead(person)
+        for enriched_person in enriched_people:
+            lead_to_create_dict = LeadHelper.extract_apollo_person_lead(enriched_person)
             lead_to_create_dict["assigned_to"] = user_id
             lead_to_create_dict["lead_form_snapshot_id"] = (
                 latest_lead_form_snapshot.lead_form_snapshot_id
@@ -900,13 +979,13 @@ class ApolloService:
             )
 
             # Safely remove employment_history if it exists (may not be present in new API)
-            person.pop("employment_history", None)
+            enriched_person.pop("employment_history", None)
             tasks.append(
-                ApolloService.perform_ai_lead_enrichment(lead_to_create_dict, person)
+                ApolloService.perform_ai_lead_enrichment(lead_to_create_dict, enriched_person)
             )
 
         leads_to_create = await asyncio.gather(*tasks)
-        await ApolloRepository.create_multiple(db, people)
+        await ApolloRepository.create_multiple(db, enriched_people)
 
         return leads_to_create
 
