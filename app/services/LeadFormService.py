@@ -67,11 +67,55 @@ class LeadFormService:
         if lead_form.form_type in non_apollo_form_types:
             return create_response
 
-        lead_form = create_response.get("responseData", {})
+        lead_form_data = create_response.get("responseData", {})
+        monitoring_interval_hours = lead_form_data.get("monitoring_interval_hours", 0)
 
-        if background_tasks:
+        # Queue-based architecture: Queue Apollo jobs to Azure Service Bus for recurring monitoring
+        # BackgroundTasks: For one-time jobs (monitoring_interval_hours = 0)
+        if monitoring_interval_hours and monitoring_interval_hours > 0:
+            # RECURRING JOB: Queue to Azure Service Bus with re-queuing logic
+            print(f"📤 Queueing recurring Apollo job (every {monitoring_interval_hours}h) to Azure Service Bus")
+
+            from app.services.azure.producers.LeadGenerationProducer import LeadGenerationProducer
+            from app.repository.LeadGenerationJobRepository import LeadGenerationJobRepository
+            from app.domain.enums.queue_message_type_enum import LeadGenerationQueueMessageTypeEnum
+
+            # Create job tracking record
+            job_id = await LeadGenerationJobRepository.create_job(
+                db=db,
+                lead_form_id=lead_form_data.get("lead_form_id"),
+                user_id=lead_form_data.get("user_id"),
+                status="queued",
+                progress=0,
+                message=f"Queued recurring Apollo job (every {monitoring_interval_hours}h)"
+            )
+
+            # Add job_id to lead_form for worker tracking
+            lead_form_with_job = {**lead_form_data, "job_id": job_id}
+
+            # Determine message type based on form type
+            form_type = lead_form_data.get("form_type")
+            if form_type == "PERSON":
+                message_type = LeadGenerationQueueMessageTypeEnum.APOLLO_PERSON_LEAD_GENERATION.value
+            elif form_type == "ORGANIZATION":
+                message_type = LeadGenerationQueueMessageTypeEnum.APOLLO_ORGANIZATION_LEAD_GENERATION.value
+            else:
+                raise ValueError(f"Invalid form_type for Apollo: {form_type}")
+
+            # Queue immediately (no delay for first execution)
+            await LeadGenerationProducer.queue_lead_generation_job(
+                lead_form_id=lead_form_data.get("lead_form_id"),
+                user_id=lead_form_data.get("user_id"),
+                lead_form=lead_form_with_job,
+                message_type=message_type
+            )
+
+            print(f"✅ Recurring Apollo job {job_id} queued successfully")
+        elif background_tasks:
+            # ONE-TIME JOB: Use BackgroundTasks for immediate execution
+            print(f"🔄 Triggering one-time Apollo job via BackgroundTasks")
             background_tasks.add_task(
-                LeadService.trigger_apollo_leads_generation, lead_form, db
+                LeadService.trigger_apollo_leads_generation, lead_form_data, db
             )
 
         return create_response

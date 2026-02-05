@@ -9,6 +9,7 @@ from app.domain.enums.queue_enum import QueueEnum
 from app.domain.enums.queue_message_type_enum import LeadGenerationQueueMessageTypeEnum
 from app.services.azure.AzureServiceBusConsumer import AzureServiceBusConsumer
 from app.services.ConversationalLeadJobService import ConversationalLeadJobService
+from app.services.ApolloLeadJobService import ApolloLeadJobService
 from app.database import get_db
 
 
@@ -55,6 +56,20 @@ class LeadGenerationConsumer(AzureServiceBusConsumer):
             # Route to appropriate handler based on message type
             if message_type == LeadGenerationQueueMessageTypeEnum.CONVERSATIONAL_LEAD_GENERATION.value:
                 await self._handle_conversational_lead_generation(
+                    lead_form_id=lead_form_id,
+                    user_id=user_id,
+                    lead_form=lead_form,
+                    job_id=job_id
+                )
+            elif message_type == LeadGenerationQueueMessageTypeEnum.APOLLO_PERSON_LEAD_GENERATION.value:
+                await self._handle_apollo_lead_generation(
+                    lead_form_id=lead_form_id,
+                    user_id=user_id,
+                    lead_form=lead_form,
+                    job_id=job_id
+                )
+            elif message_type == LeadGenerationQueueMessageTypeEnum.APOLLO_ORGANIZATION_LEAD_GENERATION.value:
+                await self._handle_apollo_lead_generation(
                     lead_form_id=lead_form_id,
                     user_id=user_id,
                     lead_form=lead_form,
@@ -122,6 +137,77 @@ class LeadGenerationConsumer(AzureServiceBusConsumer):
 
         except Exception as e:
             print(f"❌ Error in sales signal generation: {str(e)}")
+            import traceback
+            traceback.print_exc()
+
+            # Update job status to failed
+            if job_id:
+                try:
+                    from app.repository.LeadGenerationJobRepository import LeadGenerationJobRepository
+                    await LeadGenerationJobRepository.update_job(
+                        db=self.db,
+                        job_id=job_id,
+                        status="failed",
+                        progress=0,
+                        error=str(e)
+                    )
+                except Exception as update_error:
+                    print(f"⚠️ Failed to update job status: {update_error}")
+
+            # Re-raise to trigger Azure Service Bus retry
+            raise
+
+    async def _handle_apollo_lead_generation(
+        self,
+        lead_form_id: str,
+        user_id: str,
+        lead_form: dict,
+        job_id: str | None = None
+    ):
+        """
+        Process Apollo lead generation job (Individual or Organizational).
+
+        This runs the Apollo lead generation pipeline:
+        1. Call Apollo API (people search or organization search)
+        2. Auto-enrich results to get full profile data
+        3. Save leads to database
+        4. Update job status
+        5. Re-queue for next cycle if monitoring_interval_hours > 0
+        """
+        try:
+            # CRITICAL: Check if job is already being processed by another worker
+            if job_id:
+                from app.repository.LeadGenerationJobRepository import LeadGenerationJobRepository
+                job = await LeadGenerationJobRepository.get_job_status(self.db, job_id)
+
+                if job and job.get("status") != "queued":
+                    print(f"⏭️ SKIPPING: Job {job_id} already being processed (status: {job.get('status')})")
+                    return
+
+                # Atomically update status to 'processing' to claim this job
+                await LeadGenerationJobRepository.update_job(
+                    db=self.db,
+                    job_id=job_id,
+                    status="processing",
+                    progress=1,
+                    message="Worker claimed this job, starting Apollo lead generation..."
+                )
+                print(f"✅ Worker claimed job {job_id}")
+
+            print(f"🚀 Starting Apollo lead generation for form {lead_form_id}")
+
+            # Run the Apollo lead generation pipeline
+            stats = await ApolloLeadJobService.process_apollo_job(
+                db=self.db,
+                lead_form=lead_form,
+                job_id=job_id
+            )
+
+            print(f"✅ Apollo lead generation completed for job {job_id}")
+            print(f"   Stats: {stats}")
+
+        except Exception as e:
+            print(f"❌ Error in Apollo lead generation: {str(e)}")
             import traceback
             traceback.print_exc()
 

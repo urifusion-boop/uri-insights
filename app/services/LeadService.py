@@ -1371,11 +1371,15 @@ class LeadService:
         print("\n\nNext: generate_conversational_leads")
         await LeadService.generate_conversational_leads_background_job(db=db)
 
-        print("\n\nNext: generate_apollo_person_leads_background_job")
-        await LeadService.generate_apollo_person_leads_background_job(db=db)
-
-        print("\n\nNext: generate_apollo_organization_leads_background_job")
-        await LeadService.generate_apollo_organization_leads_background_job(db=db)
+        # NOTE: Apollo leads (Individual/Organizational) are now handled by Azure Service Bus queue
+        # with per-user frequency control. The old APScheduler global jobs are deprecated.
+        # See: ApolloLeadJobService.py and LeadFormService.create() for the new architecture.
+        #
+        # print("\n\nNext: generate_apollo_person_leads_background_job")
+        # await LeadService.generate_apollo_person_leads_background_job(db=db)
+        #
+        # print("\n\nNext: generate_apollo_organization_leads_background_job")
+        # await LeadService.generate_apollo_organization_leads_background_job(db=db)
 
         print("Completed all lead generation tasks.")
 

@@ -54,6 +54,8 @@ class LeadFormNotificationMessageTypeEnum(Enum):
 class LeadGenerationQueueMessageTypeEnum(Enum):
     """Message types for async lead generation jobs"""
     CONVERSATIONAL_LEAD_GENERATION = "CONVERSATIONAL_LEAD_GENERATION"
+    APOLLO_PERSON_LEAD_GENERATION = "APOLLO_PERSON_LEAD_GENERATION"
+    APOLLO_ORGANIZATION_LEAD_GENERATION = "APOLLO_ORGANIZATION_LEAD_GENERATION"
 
 
 # Alias for backwards compatibility
