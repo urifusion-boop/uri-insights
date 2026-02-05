@@ -888,19 +888,30 @@ class ApolloService:
     ):
         if not lead_form:
             return
-        pagination_data = search_result.get("pagination", {})
-        total_entries = pagination_data.get("total_entries", 0)
-        total_pages = pagination_data.get("total_pages", 0)
-        page = lead_form.get("page", 0)
-        lead_form_id = lead_form.get("lead_form_id", "")
+
         lead_form_type = lead_form.get("form_type", "")
         user_id = lead_form.get("user_id", "")
-        if total_entries == 0:
-            print("Apollo search turn up empty.")
-            await ApolloService.handle_empty_search_result(
-                user_id, lead_form_type=lead_form_type
-            )
-        elif (page + 1) >= total_pages:
+        lead_form_id = lead_form.get("lead_form_id", "")
+        page = lead_form.get("page", 0)
+
+        # Check ACTUAL data array, not just pagination metadata
+        # Pagination metadata can be stale/cached/incorrect, but the actual data is the source of truth
+        actual_data = search_result.get("people", []) if lead_form_type == "PERSON" else search_result.get("organizations", [])
+
+        print(f"[SEARCH RESULT] Form type: {lead_form_type}, Actual data count: {len(actual_data)}")
+
+        if len(actual_data) == 0:
+            print("Apollo search returned no results (actual data array is empty).")
+            await ApolloService.handle_empty_search_result(user_id, lead_form_type=lead_form_type)
+            return
+
+        # Handle pagination advancement
+        pagination_data = search_result.get("pagination", {})
+        total_pages = pagination_data.get("total_pages", 0)
+
+        print(f"[SEARCH RESULT] Page {page + 1}/{total_pages}, Data count: {len(actual_data)}")
+
+        if (page + 1) >= total_pages:
             print("Pagination limit reached for Apollo search")
             await ApolloService.handle_pagination_end_result(db, lead_form=lead_form)
         else:
