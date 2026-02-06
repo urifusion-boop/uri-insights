@@ -326,6 +326,12 @@ class LeadFormService:
 
         ai_response = await AIService.structured_chat_completion(ai_model, result_model)
 
+        # Check if AI service returned an error
+        if isinstance(ai_response, dict) and "error" in ai_response:
+            return UriResponse.custom_response(
+                ai_response["error"], 503, False  # 503 Service Unavailable
+            )
+
         extracted_response = LeadFormHelper.process_auto_generated_inputs(
             AIService.extract_ai_result(ai_response)
         )

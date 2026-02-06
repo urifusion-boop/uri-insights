@@ -26,9 +26,14 @@ class SocialMediaPostService:
     @staticmethod
     async def post_scheduled_posts(db: AsyncIOMotorDatabase):
         print("Running background job")
-        scheduled_posts: List[SocialMediaPost] = (
-            await SocialMediaPostService.get_all_scheduled_posts(db)
-        )
+        try:
+            scheduled_posts: List[SocialMediaPost] = (
+                await SocialMediaPostService.get_all_scheduled_posts(db)
+            )
+        except Exception as db_error:
+            print(f"\n⚠️ MongoDB connection error in scheduled posts job: {db_error}")
+            print("Skipping this iteration, will retry in next cycle")
+            return  # Skip this iteration if database is unavailable
 
         try:
             for post in scheduled_posts:
