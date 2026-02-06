@@ -43,15 +43,28 @@ class ApolloService:
 
     @staticmethod
     async def handle_people_leads_gen(lead_form: dict, db: AsyncIOMotorDatabase):
+        print(f"\n{'='*80}")
+        print(f"[PEOPLE LEADS GEN] Starting lead generation")
+        print(f"[PEOPLE LEADS GEN] Form: {lead_form.get('form_title', 'Unknown')}")
+        print(f"[PEOPLE LEADS GEN] User: {lead_form.get('user_id', 'Unknown')}")
+        print(f"{'='*80}\n")
+
         search_result = await ApolloService.search_people(lead_form=lead_form)
         if not search_result:
             raise ValueError("Apollo leads gen failed.")
 
         await ApolloService.handle_search_result(search_result, lead_form, db)
 
-        return await ApolloService.handle_people_search_result(
+        result = await ApolloService.handle_people_search_result(
             search_result, lead_form.get("user_id", ""), db
         )
+
+        print(f"\n[PEOPLE LEADS] ✅ COMPLETED")
+        print(f"[PEOPLE LEADS] Leads to create: {len(result) if result else 0}")
+        if result and len(result) > 0:
+            print(f"[PEOPLE LEADS] Sample lead names: {[f\"{r.first_name} {r.last_name}\" for r in result[:3]]}")
+        print(f"{'='*80}\n")
+        return result
 
     @staticmethod
     async def handle_organization_leads_gen(lead_form: dict, db: AsyncIOMotorDatabase):
@@ -264,19 +277,35 @@ class ApolloService:
         lead_id = lead.get("lead_id", "")
         cache_key = f"email-{ApolloHelper.generate_apollo_lead_cache_key(lead)}"
 
+        print(f"\n{'='*80}")
+        print(f"[EMAIL ENRICHMENT] Starting enrichment request")
+        print(f"[EMAIL ENRICHMENT] Lead ID: {lead_id}")
+        print(f"[EMAIL ENRICHMENT] Lead Username: {lead.get('username', 'Unknown')}")
+        print(f"[EMAIL ENRICHMENT] Lead Name: {lead.get('name', 'Unknown')}")
+        print(f"[EMAIL ENRICHMENT] Lead has apollo_id: {bool(lead.get('apollo_id'))}")
+        print(f"[EMAIL ENRICHMENT] Lead has linkedin_url: {bool(lead.get('linkedin_url'))}")
+        print(f"[EMAIL ENRICHMENT] Cache key: {cache_key}")
+
         # Try to get email from cache
         email = await CacheRepository.get_cache(db, cache_key=cache_key)
+        print(f"[EMAIL ENRICHMENT] Email from cache: {email or 'None'}")
 
         # Try to enrich if not cached
         if not email:
+            print(f"[EMAIL ENRICHMENT] Calling Apollo API to enrich...")
             response = await ApolloService.enrich_person(lead, reveal_email=True)
-            email = response.get("person", {}).get("email", "")
-            email_status = response.get("person", {}).get("email_status", "")
-            revealed = response.get("person", {}).get("revealed_for_current_team", False)
 
-            print(f"[EMAIL ENRICHMENT] Lead: {lead.get('username', 'Unknown')}")
-            print(f"[EMAIL ENRICHMENT] Apollo Response: {response}")
-            print(f"[EMAIL ENRICHMENT] Extracted Email: {email}")
+            print(f"[EMAIL ENRICHMENT] Apollo API Response Keys: {list(response.keys())}")
+            print(f"[EMAIL ENRICHMENT] Full Response: {response}")
+
+            person_data = response.get("person", {})
+            print(f"[EMAIL ENRICHMENT] Person data keys: {list(person_data.keys()) if person_data else 'None'}")
+
+            email = person_data.get("email", "")
+            email_status = person_data.get("email_status", "")
+            revealed = person_data.get("revealed_for_current_team", False)
+
+            print(f"[EMAIL ENRICHMENT] Extracted Email: '{email}'")
             print(f"[EMAIL ENRICHMENT] Email Status: {email_status}")
             print(f"[EMAIL ENRICHMENT] Revealed for team: {revealed}")
 
@@ -288,6 +317,7 @@ class ApolloService:
         # Normalize payload
         email = email or "UNAVAILABLE"
         print(f"[EMAIL ENRICHMENT] Final Email Value: {email}")
+        print(f"{'='*80}\n")
         payload = {"person": {"email": email}} if isinstance(email, str) else email
 
         # Process and persist
@@ -898,10 +928,19 @@ class ApolloService:
         # Pagination metadata can be stale/cached/incorrect, but the actual data is the source of truth
         actual_data = search_result.get("people", []) if lead_form_type == "PERSON" else search_result.get("organizations", [])
 
-        print(f"[SEARCH RESULT] Form type: {lead_form_type}, Actual data count: {len(actual_data)}")
+        print(f"\n{'='*80}")
+        print(f"[SEARCH RESULT HANDLER] Processing search results")
+        print(f"[SEARCH RESULT HANDLER] Form type: {lead_form_type}")
+        print(f"[SEARCH RESULT HANDLER] Form title: {lead_form.get('form_title', 'Unknown')}")
+        print(f"[SEARCH RESULT HANDLER] User ID: {user_id}")
+        print(f"[SEARCH RESULT HANDLER] Page: {page}")
+        print(f"[SEARCH RESULT HANDLER] Actual data count: {len(actual_data)}")
+        print(f"[SEARCH RESULT HANDLER] Pagination metadata: {search_result.get('pagination', {})}")
+        print(f"{'='*80}\n")
 
         if len(actual_data) == 0:
-            print("Apollo search returned no results (actual data array is empty).")
+            print(f"⚠️ [EMPTY RESULT] Sending 'All Caught Up' email to user {user_id}")
+            print(f"⚠️ [EMPTY RESULT] This means NO leads were found by Apollo API")
             await ApolloService.handle_empty_search_result(user_id, lead_form_type=lead_form_type)
             return
 
