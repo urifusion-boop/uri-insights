@@ -37,11 +37,18 @@ async def create_person_search_lead_form(
     db: AsyncIOMotorDatabase = Depends(get_db_dependency),
     _: dict = Depends(enforce_feature_limit),
 ):
-    payload = LeadFormCreate(**data.dict())
-    result = await LeadFormService.create(db, payload, background_tasks)
-    return UriResponse.get_status_response(
-        response=jsonable_encoder(result), status_code=result["responseCode"]
-    )
+    try:
+        payload = LeadFormCreate(**data.dict())
+        result = await LeadFormService.create(db, payload, background_tasks)
+        return UriResponse.get_status_response(
+            response=jsonable_encoder(result), status_code=result["responseCode"]
+        )
+    except Exception as e:
+        print(f"\n❌ ERROR creating person search lead form:")
+        print(f"   Error type: {type(e).__name__}")
+        print(f"   Error message: {str(e)}")
+        print(f"   Received data: {data.dict() if hasattr(data, 'dict') else 'Unable to serialize'}")
+        raise
 
 
 @router.post("/organization-search/create")

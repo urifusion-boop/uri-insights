@@ -69,6 +69,7 @@ class BaseFormInput(BaseModel):
     add_to_history: Optional[bool] = None
     auto_generate: Optional[bool] = None
     lead_generation_goal: Optional[str] = None  # User's business goal/reason for generating leads
+    monitoring_interval_hours: Optional[int] = 0  # 0 = one-time only, >0 = recurring interval in hours
 
 
 # --- Person Search Form ---
