@@ -62,7 +62,8 @@ class ApolloService:
         print(f"\n[PEOPLE LEADS] ✅ COMPLETED")
         print(f"[PEOPLE LEADS] Leads to create: {len(result) if result else 0}")
         if result and len(result) > 0:
-            print(f"[PEOPLE LEADS] Sample lead names: {[f\"{r.first_name} {r.last_name}\" for r in result[:3]]}")
+            sample_names = [f"{r.first_name} {r.last_name}" for r in result[:3]]
+            print(f"[PEOPLE LEADS] Sample lead names: {sample_names}")
         print(f"{'='*80}\n")
         return result
 
