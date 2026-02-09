@@ -157,6 +157,33 @@ async def fetch_conversational_leads(
             status_code=403
         )
 
+    # Check credits for Sales Signal scan (7 credits per scan)
+    from app.services.uri_microservices.UriTaskManagerService import UriTaskManagerService
+
+    try:
+        credit_check = await UriTaskManagerService.check_payment_balance(
+            user_id=user_id,
+            action_type="SALES_SIGNAL_SCAN",
+            payment_mode="CREDITS",
+            quantity=1
+        )
+
+        if credit_check.get("status") and credit_check.get("responseData"):
+            balance_data = credit_check["responseData"]
+            if not balance_data.get("hasSufficientBalance"):
+                return UriResponse.get_status_response(
+                    response={
+                        "message": "Insufficient credits for sales signal scan. Requires 7 credits.",
+                        "required_credits": balance_data.get("requiredAmount", 7),
+                        "available_credits": balance_data.get("availableBalance", 0),
+                        "limit_exceeded": True
+                    },
+                    status_code=403
+                )
+    except Exception as e:
+        print(f"⚠️ Credit check failed: {str(e)}")
+        # Continue anyway if credit check fails (for backward compatibility)
+
     # Create job tracking document
     try:
         from app.repository.LeadGenerationJobRepository import LeadGenerationJobRepository

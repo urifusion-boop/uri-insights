@@ -879,6 +879,34 @@ async def scan_single_focus_contact(
     db: AsyncIOMotorDatabase = Depends(get_db_dependency),
 ):
     """Scan a single specific focus contact immediately"""
+    # Check credits for Lazarus scan (10 credits per scan)
+    from app.services.uri_microservices.UriTaskManagerService import UriTaskManagerService
+
+    try:
+        credit_check = await UriTaskManagerService.check_payment_balance(
+            user_id=user_id,
+            action_type="LAZARUS_SCAN",
+            payment_mode="CREDITS",
+            quantity=1
+        )
+
+        if credit_check.get("status") and credit_check.get("responseData"):
+            balance_data = credit_check["responseData"]
+            if not balance_data.get("hasSufficientBalance"):
+                return UriResponse.custom_response(
+                    message="Insufficient credits for Lazarus scan. Requires 10 credits.",
+                    error_code=403,
+                    success=False,
+                    data={
+                        "required_credits": balance_data.get("requiredAmount", 10),
+                        "available_credits": balance_data.get("availableBalance", 0),
+                        "limit_exceeded": True
+                    }
+                )
+    except Exception as e:
+        print(f"⚠️ Credit check failed: {str(e)}")
+        # Continue anyway if credit check fails
+
     result = await LazarusMonitoringService.scan_single_focus_contact(db, user_id, focus_id)
 
     if not result.get("success"):
@@ -888,6 +916,18 @@ async def scan_single_focus_contact(
             success=False,
             data=result,
         )
+
+    # Deduct credits after successful scan (10 credits)
+    try:
+        await UriTaskManagerService.deduct_payment(
+            user_id=user_id,
+            action_type="LAZARUS_SCAN",
+            payment_mode="CREDITS",
+            quantity=1
+        )
+        print(f"💳 Deducted 10 credits for Lazarus scan (user: {user_id}, focus: {focus_id})")
+    except Exception as credit_error:
+        print(f"⚠️ Failed to deduct credits: {str(credit_error)}")
 
     return UriResponse.custom_response(
         message="Focus contact scanned successfully",
@@ -966,6 +1006,34 @@ async def trigger_auto_detection_scan(
     Manually trigger auto-detection scan for dead leads
     Scans user's leads based on their configured rules
     """
+    # Check credits for Lazarus auto-detection scan (10 credits per scan)
+    from app.services.uri_microservices.UriTaskManagerService import UriTaskManagerService
+
+    try:
+        credit_check = await UriTaskManagerService.check_payment_balance(
+            user_id=user_id,
+            action_type="LAZARUS_SCAN",
+            payment_mode="CREDITS",
+            quantity=1
+        )
+
+        if credit_check.get("status") and credit_check.get("responseData"):
+            balance_data = credit_check["responseData"]
+            if not balance_data.get("hasSufficientBalance"):
+                return UriResponse.custom_response(
+                    message="Insufficient credits for Lazarus auto-detection scan. Requires 10 credits.",
+                    error_code=403,
+                    success=False,
+                    data={
+                        "required_credits": balance_data.get("requiredAmount", 10),
+                        "available_credits": balance_data.get("availableBalance", 0),
+                        "limit_exceeded": True
+                    }
+                )
+    except Exception as e:
+        print(f"⚠️ Credit check failed: {str(e)}")
+        # Continue anyway if credit check fails
+
     from app.services.AutoDeadLeadDetectionService import AutoDeadLeadDetectionService
 
     # Get user's detection rules
@@ -984,6 +1052,18 @@ async def trigger_auto_detection_scan(
 
     # Save to history
     await AutoDeadLeadDetectionService.save_scan_result(db, user_id, scan_result)
+
+    # Deduct credits after successful scan (10 credits)
+    try:
+        await UriTaskManagerService.deduct_payment(
+            user_id=user_id,
+            action_type="LAZARUS_SCAN",
+            payment_mode="CREDITS",
+            quantity=1
+        )
+        print(f"💳 Deducted 10 credits for Lazarus auto-detection scan (user: {user_id})")
+    except Exception as credit_error:
+        print(f"⚠️ Failed to deduct credits: {str(credit_error)}")
 
     return UriResponse.custom_response(
         "Auto-detection scan completed successfully",
