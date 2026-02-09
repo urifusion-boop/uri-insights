@@ -992,7 +992,7 @@ class ConversationalLeadJobService:
                         # PRD: Fetch from user onboarding if solution_context not provided
                         if not solution_context or solution_context.strip() == "":
                             print(f"   📥 No solution_context, fetching from user onboarding...")
-                            from app.services.uri_microservices.UriBackendService import UriBackendService
+                            # UriBackendService already imported at top of file
                             user_details = await UriBackendService.get_user_details(user_id)
 
                             if user_details and user_details.get("businessDetails"):
