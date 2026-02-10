@@ -24,12 +24,23 @@ class BaseScraper:
                         else None
                     ),
                     headers=self.headers,
+                    timeout=30,
                 )
+                print(f"[SCRAPER] Response status: {response.status_code}")
+                if response.status_code != 200:
+                    print(f"[SCRAPER] ❌ Error response: {response.text[:1000]}")
                 return response
+            except requests.exceptions.Timeout:
+                print(f"[SCRAPER] ⏱️ Request timeout (attempt {retry_count + 1}/{self.max_retries})")
+            except requests.exceptions.ConnectionError as e:
+                print(f"[SCRAPER] 🔌 Connection error (attempt {retry_count + 1}/{self.max_retries}): {str(e)[:200]}")
             except ValueError as e:
-                print("Value Error occurred in async data scraping: ", e)
+                print(f"[SCRAPER] ❌ Value Error (attempt {retry_count + 1}/{self.max_retries}): {e}")
             except Exception as e:
-                print("Exception occurred: ", e)
+                print(f"[SCRAPER] ❌ Exception (attempt {retry_count + 1}/{self.max_retries}): {str(e)[:200]}")
             finally:
                 retry_count += 1
-            print("Retrying request")
+            if retry_count < self.max_retries:
+                print(f"[SCRAPER] 🔄 Retrying request ({retry_count}/{self.max_retries})...")
+        print(f"[SCRAPER] ❌ All {self.max_retries} retry attempts failed")
+        return None
