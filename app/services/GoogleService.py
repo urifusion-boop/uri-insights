@@ -132,13 +132,33 @@ class GoogleService:
 
         # Make the initial request and check totalResults
         url = f"{base_url}&start={start_index}&num={max_results_per_page}"
+        print(f"[GOOGLE SEARCH] 🔍 Fetching URL: {url[:200]}...")
         response = ScraperFactory.get_scraper("google", url).fetch_data()
+
         if not response:
+            print(f"[GOOGLE SEARCH] ❌ No response from scraper (returned None)")
             return None
-        data = response.json()
+
+        print(f"[GOOGLE SEARCH] Response status: {response.status_code}")
+
+        if response.status_code != 200:
+            error_text = response.text[:500] if response.text else "No error message"
+            print(f"[GOOGLE SEARCH] ❌ API Error ({response.status_code}): {error_text}")
+            return None
+
+        try:
+            data = response.json()
+        except Exception as e:
+            print(f"[GOOGLE SEARCH] ❌ Failed to parse JSON: {e}")
+            print(f"[GOOGLE SEARCH] Response text: {response.text[:500]}")
+            return None
+
+        items_count = len(data.get("items", []))
+        total_results = int(data.get("searchInformation", {}).get("totalResults", 0))
+        print(f"[GOOGLE SEARCH] ✅ Got {items_count} items (total available: {total_results})")
+
         # Initialize all_items with the first batch of results
         all_items.extend(data.get("items", []))
-        total_results = int(data.get("searchInformation", {}).get("totalResults", 0))
 
         # Loop to retrieve additional pages, with a maximum of 5 iterations
         while len(all_items) < total_results:
