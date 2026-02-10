@@ -1668,6 +1668,22 @@ class ConversationalLeadJobService:
                     print(f"⚠️ Failed to deduct credits: {str(credit_error)}")
                     # Don't fail the job if credit deduction fails
 
+                # Deduct credits for each qualified lead found (1 credit per lead)
+                qualified_leads_count = stats.get('new_leads_saved', 0)
+                if qualified_leads_count > 0:
+                    try:
+                        from app.services.uri_microservices.UriTaskManagerService import UriTaskManagerService
+                        await UriTaskManagerService.deduct_payment(
+                            user_id=user_id,
+                            action_type="SALES_SIGNAL_VERIFIED",
+                            payment_mode="CREDITS",
+                            quantity=qualified_leads_count
+                        )
+                        print(f"💳 Deducted {qualified_leads_count} credits for {qualified_leads_count} qualified sales signals (user: {user_id})")
+                    except Exception as credit_error:
+                        print(f"⚠️ Failed to deduct per-lead credits: {str(credit_error)}")
+                        # Don't fail the job if credit deduction fails
+
                 # Check if this is a recurring monitoring job (ONLY for conversational leads)
                 monitoring_interval_hours = lead_form.get("monitoring_interval_hours", 0)
 

@@ -276,6 +276,7 @@ class ApolloService:
             return UriResponse.custom_response("Lead not found for enrichment.", 404)
 
         lead_id = lead.get("lead_id", "")
+        user_id = lead.get("user_id", "")
         cache_key = f"email-{ApolloHelper.generate_apollo_lead_cache_key(lead)}"
 
         print(f"\n{'='*80}")
@@ -290,6 +291,35 @@ class ApolloService:
         # Try to get email from cache
         email = await CacheRepository.get_cache(db, cache_key=cache_key)
         print(f"[EMAIL ENRICHMENT] Email from cache: {email or 'None'}")
+
+        # Check credits before enrichment (1 credit for email)
+        if not email and user_id:
+            try:
+                credit_check = await UriTaskManagerService.check_payment_balance(
+                    user_id=user_id,
+                    action_type="ENRICHMENT_EMAIL",
+                    payment_mode="CREDITS",
+                    quantity=1
+                )
+
+                if credit_check.get("status") and credit_check.get("responseData"):
+                    balance_data = credit_check["responseData"]
+                    if not balance_data.get("hasSufficientBalance"):
+                        print(f"[EMAIL ENRICHMENT] ❌ Insufficient credits")
+                        return UriResponse.custom_response(
+                            message="Insufficient credits for email enrichment. Requires 1 credit.",
+                            error_code=403,
+                            success=False,
+                            data={
+                                "required_credits": balance_data.get("requiredAmount", 1),
+                                "available_credits": balance_data.get("availableBalance", 0),
+                                "limit_exceeded": True
+                            }
+                        )
+                print(f"[EMAIL ENRICHMENT] ✅ Credit check passed")
+            except Exception as e:
+                print(f"[EMAIL ENRICHMENT] ⚠️ Credit check failed: {str(e)}")
+                # Continue anyway for backward compatibility
 
         # Try to enrich if not cached
         if not email:
@@ -318,6 +348,21 @@ class ApolloService:
         # Normalize payload
         email = email or "UNAVAILABLE"
         print(f"[EMAIL ENRICHMENT] Final Email Value: {email}")
+
+        # Deduct credits after successful enrichment (1 credit for email)
+        if email and email != "UNAVAILABLE" and user_id:
+            try:
+                await UriTaskManagerService.deduct_payment(
+                    user_id=user_id,
+                    action_type="ENRICHMENT_EMAIL",
+                    payment_mode="CREDITS",
+                    quantity=1
+                )
+                print(f"[EMAIL ENRICHMENT] 💳 Deducted 1 credit for email enrichment (user: {user_id})")
+            except Exception as credit_error:
+                print(f"[EMAIL ENRICHMENT] ⚠️ Failed to deduct credits: {str(credit_error)}")
+                # Don't fail the enrichment if credit deduction fails
+
         print(f"{'='*80}\n")
         payload = {"person": {"email": email}} if isinstance(email, str) else email
 
@@ -331,6 +376,7 @@ class ApolloService:
         lead: dict, db: AsyncIOMotorDatabase, webhook_url: Optional[str]
     ):
         lead_id = lead.get("lead_id", "")
+        user_id = lead.get("user_id", "")
 
         # Handle leads that don't have their corresponding apollo_ids
         if not (lead.get("apollo_id")):
@@ -349,6 +395,36 @@ class ApolloService:
             response = (await ApolloRepository.get_by_id(db, apollo_id)).get(
                 "responseData", {}
             )
+
+        # Check credits before enrichment (7 credits for phone)
+        if not phone and user_id:
+            try:
+                credit_check = await UriTaskManagerService.check_payment_balance(
+                    user_id=user_id,
+                    action_type="ENRICHMENT_PHONE",
+                    payment_mode="CREDITS",
+                    quantity=1
+                )
+
+                if credit_check.get("status") and credit_check.get("responseData"):
+                    balance_data = credit_check["responseData"]
+                    if not balance_data.get("hasSufficientBalance"):
+                        print(f"[PHONE ENRICHMENT] ❌ Insufficient credits")
+                        return UriResponse.custom_response(
+                            message="Insufficient credits for phone enrichment. Requires 7 credits.",
+                            error_code=403,
+                            success=False,
+                            data={
+                                "required_credits": balance_data.get("requiredAmount", 7),
+                                "available_credits": balance_data.get("availableBalance", 0),
+                                "limit_exceeded": True
+                            }
+                        )
+                print(f"[PHONE ENRICHMENT] ✅ Credit check passed")
+            except Exception as e:
+                print(f"[PHONE ENRICHMENT] ⚠️ Credit check failed: {str(e)}")
+                # Continue anyway for backward compatibility
+
         # Trigger apollo webhook process if phone number isn't already in DB
         if not phone:
             print(f"[PHONE ENRICHMENT] Lead: {lead.get('username', 'Unknown')} - No phone in DB, calling Apollo API...")
@@ -360,6 +436,20 @@ class ApolloService:
                 db, lead_id, LeadUpdate(phone="PROCESSING")
             )
             print(f"[PHONE ENRICHMENT] Phone set to PROCESSING (awaiting webhook)")
+
+            # Deduct credits after successful phone enrichment request (7 credits)
+            if user_id:
+                try:
+                    await UriTaskManagerService.deduct_payment(
+                        user_id=user_id,
+                        action_type="ENRICHMENT_PHONE",
+                        payment_mode="CREDITS",
+                        quantity=1
+                    )
+                    print(f"[PHONE ENRICHMENT] 💳 Deducted 7 credits for phone enrichment (user: {user_id})")
+                except Exception as credit_error:
+                    print(f"[PHONE ENRICHMENT] ⚠️ Failed to deduct credits: {str(credit_error)}")
+                    # Don't fail the enrichment if credit deduction fails
         else:
             print(f"[PHONE ENRICHMENT] Lead: {lead.get('username', 'Unknown')} - Phone found in DB: {phone}")
 
