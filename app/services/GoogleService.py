@@ -195,39 +195,36 @@ class GoogleService:
 
     @staticmethod
     async def construct_keyword_tracking_query_url(params: GoogleSearchParams) -> str:
+        from urllib.parse import quote_plus
+
+        # Build the query parts
+        query_parts = []
+
         # `includes` - Enforce presence in title and snippet
-        includes_query = (
-            [
-                f'intitle:"{keyword}" OR intext:"{keyword}"'
+        if params.includes:
+            includes_parts = [
+                f'(intitle:"{keyword}" OR intext:"{keyword}")'
                 for keyword in params.includes
             ]
-            if params.includes
-            else []
-        )
-
-        params.includes = includes_query
+            query_parts.append(" ".join(includes_parts))
 
         # `or_terms` - Enforce presence in title
-        or_terms_query = (
-            " ".join([f'intitle:"{term}"' for term in params.or_terms.split()])
-            if params.or_terms
-            else ""
-        )
-
-        params.or_terms = or_terms_query
+        if params.or_terms:
+            or_terms_query = " ".join([f'intitle:"{term}"' for term in params.or_terms.split()])
+            query_parts.append(or_terms_query)
 
         # `platforms` - Restrict search to specific sites
-        platforms_query = (
-            " ".join([f"site:{platform}" for platform in params.platforms])
-            if params.platforms
-            else ""
-        )
+        if params.platforms:
+            platform_parts = [f"site:{platform}" for platform in params.platforms]
+            query_parts.append(f"({' OR '.join(platform_parts)})")
 
-        # params.platforms = platforms_query
+        # Combine all query parts
+        query = " ".join(query_parts)
 
-        url = TextHelper.construct_query_url(params)
-        print("Query Url : ", url)
-        return url
+        print(f"[QUERY CONSTRUCTION] Raw query: {query}")
+        print(f"[QUERY CONSTRUCTION] URL-encoded query: {quote_plus(query)}")
+
+        return quote_plus(query)
 
     @staticmethod
     async def construct_lead_tracking_query_url(params: GoogleSearchParams) -> str:
