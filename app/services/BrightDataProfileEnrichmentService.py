@@ -167,15 +167,28 @@ class BrightDataProfileEnrichmentService:
                     "profile": {}
                 }
 
+            # Log full result.data before parsing
+            print(f"🔍 RAW result.data type: {type(result.data)}")
+            print(f"🔍 RAW result.data: {str(result.data)[:3000]}")
+
             # Get first profile - handle both list and dict formats
             if isinstance(result.data, dict):
                 raw_profile = list(result.data.values())[0]
             else:
                 raw_profile = result.data[0]
 
-            # Log sample structure for debugging
-            logger.info(f"🔍 Bright Data raw_profile type: {type(raw_profile)}")
-            logger.info(f"🔍 Bright Data raw_profile keys: {list(raw_profile.keys()) if isinstance(raw_profile, dict) else str(raw_profile)[:500]}")
+            print(f"🔍 raw_profile type: {type(raw_profile)}")
+            print(f"🔍 raw_profile value: {str(raw_profile)[:3000]}")
+
+            # If raw_profile is a string, try to parse as JSON
+            if isinstance(raw_profile, str):
+                import json as _json
+                try:
+                    raw_profile = _json.loads(raw_profile)
+                    print(f"🔍 Parsed JSON string successfully, keys: {list(raw_profile.keys())}")
+                except Exception:
+                    print(f"💥 raw_profile is a plain string, not JSON: {raw_profile[:500]}")
+                    return {"success": False, "error_message": f"Unexpected string from Bright Data: {raw_profile[:200]}", "profile": {}}
 
             # Parse and normalize profile data
             profile = self._parse_profile_data(raw_profile)
@@ -192,9 +205,12 @@ class BrightDataProfileEnrichmentService:
             }
 
         except Exception as e:
-            logger.error(f"Error scraping profile from Bright Data: {str(e)}")
             import traceback
             traceback.print_exc()
+            logger.error(f"Error scraping profile from Bright Data: {str(e)}")
+            print(f"💥 BRIGHT DATA ERROR: {str(e)}")
+            print(f"💥 BRIGHT DATA result type was: {type(result) if 'result' in locals() else 'result not set'}")
+            print(f"💥 BRIGHT DATA result.data was: {getattr(result, 'data', 'NO DATA') if 'result' in locals() else 'result not set'}")
             return {
                 "success": False,
                 "error_message": str(e),
