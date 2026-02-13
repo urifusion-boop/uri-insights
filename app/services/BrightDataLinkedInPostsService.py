@@ -212,11 +212,10 @@ class BrightDataLinkedInPostsService:
             # Use Bright Data client as async context manager
             # NOTE: SDK uses async dataset mode which takes 30-60s to build
             # We need a much longer timeout to allow dataset building + polling
+            # The API expects "url" parameter, not "profile_url" (and no date filters for now)
             async with self.BrightDataClient(token=self.api_token) as client:
                 result = await client.search.linkedin.posts(
-                    profile_url=profile_url,
-                    start_date=start_date_str,
-                    end_date=end_date_str,
+                    url=profile_url,  # Use "url" not "profile_url"
                     timeout=max(timeout_seconds, 600)  # Minimum 10 minutes for dataset building
                 )
 
