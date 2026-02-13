@@ -141,6 +141,13 @@ class BrightDataProfileEnrichmentService:
                     timeout=timeout_seconds
                 )
 
+            # Log full raw result for debugging
+            logger.info(f"🔍 Bright Data result type: {type(result)}")
+            logger.info(f"🔍 Bright Data result attrs: {getattr(result, '__dict__', vars(result) if hasattr(result, '__dict__') else str(result))}")
+            logger.info(f"🔍 result.success: {getattr(result, 'success', 'MISSING')}")
+            logger.info(f"🔍 result.data type: {type(getattr(result, 'data', None))}")
+            logger.info(f"🔍 result.data value: {getattr(result, 'data', 'MISSING')}")
+
             # Check if request was successful
             if not result.success:
                 error_msg = getattr(result, 'error_message', 'Unknown error from Bright Data')
@@ -160,11 +167,15 @@ class BrightDataProfileEnrichmentService:
                     "profile": {}
                 }
 
-            # Get first profile (should be the only one for single URL)
-            raw_profile = result.data[0]
+            # Get first profile - handle both list and dict formats
+            if isinstance(result.data, dict):
+                raw_profile = list(result.data.values())[0]
+            else:
+                raw_profile = result.data[0]
 
             # Log sample structure for debugging
-            logger.debug(f"Bright Data profile keys: {list(raw_profile.keys())}")
+            logger.info(f"🔍 Bright Data raw_profile type: {type(raw_profile)}")
+            logger.info(f"🔍 Bright Data raw_profile keys: {list(raw_profile.keys()) if isinstance(raw_profile, dict) else str(raw_profile)[:500]}")
 
             # Parse and normalize profile data
             profile = self._parse_profile_data(raw_profile)
