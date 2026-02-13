@@ -92,7 +92,7 @@ class BrightDataTwitterService:
         """
         try:
             # Check if client is initialized
-            if not self.client:
+            if not self.BrightDataClient or not self.api_token:
                 return {
                     "success": False,
                     "error_message": "BrightData client not initialized. Please configure BRIGHTDATA_API_TOKEN and install brightdata-sdk.",
@@ -555,7 +555,7 @@ class BrightDataTwitterService:
             Dictionary with posts_by_url and all_posts
         """
         try:
-            if not self.client:
+            if not self.BrightDataClient or not self.api_token:
                 return {
                     "success": False,
                     "error_message": "BrightData client not initialized",

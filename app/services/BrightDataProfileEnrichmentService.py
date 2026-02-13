@@ -86,18 +86,10 @@ class BrightDataProfileEnrichmentService:
         """
         try:
             # Check if client is initialized
-            if not self.client:
-                return {
-                    "success": False,
-                    "error_message": "BrightData client not initialized. Please configure BRIGHTDATA_API_TOKEN and install brightdata-sdk.",
-                    "profile": {}
-                }
-
-            # Validate client is initialized
             if not self.BrightDataClient or not self.api_token:
                 return {
                     "success": False,
-                    "error_message": "Bright Data client not initialized. Check BRIGHTDATA_API_TOKEN configuration.",
+                    "error_message": "BrightData client not initialized. Please configure BRIGHTDATA_API_TOKEN and install brightdata-sdk.",
                     "profile": {}
                 }
 
@@ -390,7 +382,7 @@ class BrightDataProfileEnrichmentService:
             }
         """
         try:
-            if not self.client:
+            if not self.BrightDataClient or not self.api_token:
                 return {
                     url: {
                         "success": False,
