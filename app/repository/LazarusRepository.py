@@ -116,6 +116,18 @@ class LazarusRepository:
 
         contacts = []
         async for doc in cursor:
+            # Fix legacy data: convert dict languages to strings
+            if "languages" in doc and isinstance(doc["languages"], list):
+                fixed_languages = []
+                for lang in doc["languages"]:
+                    if isinstance(lang, dict):
+                        lang_name = lang.get("title") or lang.get("name") or lang.get("language")
+                        if lang_name:
+                            fixed_languages.append(lang_name)
+                    elif isinstance(lang, str):
+                        fixed_languages.append(lang)
+                doc["languages"] = fixed_languages
+
             contacts.append(FocusContact(**doc))
         return contacts
 
