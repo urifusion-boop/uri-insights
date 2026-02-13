@@ -154,9 +154,10 @@ class BrightDataTwitterService:
         try:
             # Use Bright Data client as async context manager
             async with self.BrightDataClient(token=self.api_token) as client:
-                result = await client.scrape.twitter.profiles(
-                    url=twitter_url,
-                    max_number_of_posts=max_number_of_posts,
+                # Twitter uses dataset API, not scrape.twitter
+                # Dataset ID for Twitter Profiles: gd_lwxmeb2u1cniijd7t4
+                result = await client.dataset(dataset_id="gd_lwxmeb2u1cniijd7t4").trigger(
+                    [{"url": twitter_url, "max_number_of_posts": max_number_of_posts}],
                     timeout=timeout_seconds
                 )
 

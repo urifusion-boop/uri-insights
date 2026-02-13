@@ -222,6 +222,13 @@ class BrightDataLinkedInPostsService:
             if not result.success:
                 error_msg = getattr(result, 'error_message', 'Unknown error from Bright Data')
                 logger.error(f"Bright Data request failed for {profile_url}: {error_msg}")
+                # Debug: Log full result details
+                logger.error(f"Full result object: success={result.success}, hasattr error_message={hasattr(result, 'error_message')}")
+                logger.error(f"Result dir: {[attr for attr in dir(result) if not attr.startswith('_')]}")
+                if hasattr(result, 'errors'):
+                    logger.error(f"Result errors: {result.errors}")
+                if hasattr(result, 'error'):
+                    logger.error(f"Result error: {result.error}")
                 return {
                     "success": False,
                     "error_message": error_msg,
