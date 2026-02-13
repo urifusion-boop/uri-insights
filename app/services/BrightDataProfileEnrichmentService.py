@@ -144,6 +144,12 @@ class BrightDataProfileEnrichmentService:
             # Check if request was successful
             if not result.success:
                 error_msg = getattr(result, 'error_message', 'Unknown error from Bright Data')
+                # Log full result for debugging
+                print(f"💥 Bright Data request FAILED")
+                print(f"💥 result.success: {result.success}")
+                print(f"💥 result attributes: {dir(result)}")
+                print(f"💥 result.__dict__: {getattr(result, '__dict__', 'NO __dict__')}")
+                print(f"💥 error_message: {error_msg}")
                 logger.error(f"Bright Data request failed: {error_msg}")
                 return {
                     "success": False,
