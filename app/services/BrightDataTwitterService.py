@@ -27,23 +27,27 @@ class BrightDataTwitterService:
     """
 
     def __init__(self):
-        """Initialize the service with Bright Data client"""
+        """Initialize the service with Bright Data API token"""
         try:
             from brightdata import BrightDataClient
 
             if not hasattr(settings, 'BRIGHTDATA_API_TOKEN') or not settings.BRIGHTDATA_API_TOKEN:
                 logger.warning("BRIGHTDATA_API_TOKEN not configured. Twitter scraping will not work.")
-                self.client = None
+                self.api_token = None
+                self.BrightDataClient = None
             else:
-                # Initialize Bright Data client
-                self.client = BrightDataClient(token=settings.BRIGHTDATA_API_TOKEN)
-                logger.info("✅ BrightData client initialized successfully for Twitter")
+                # Store API token and client class for async context manager usage
+                self.api_token = settings.BRIGHTDATA_API_TOKEN
+                self.BrightDataClient = BrightDataClient
+                logger.info("✅ BrightData API token configured successfully for Twitter")
         except ImportError:
             logger.error("brightdata-sdk package not installed. Run: pip install brightdata-sdk")
-            self.client = None
+            self.api_token = None
+            self.BrightDataClient = None
         except Exception as e:
-            logger.error(f"Failed to initialize BrightData client: {str(e)}")
-            self.client = None
+            logger.error(f"Failed to initialize BrightData: {str(e)}")
+            self.api_token = None
+            self.BrightDataClient = None
 
     async def enrich_profile(
         self,
@@ -148,12 +152,13 @@ class BrightDataTwitterService:
             Dictionary containing profile data and optional posts
         """
         try:
-            # Call Bright Data SDK (async method)
-            result = await self.client.scrape.twitter.profiles(
-                url=twitter_url,
-                max_number_of_posts=max_number_of_posts,
-                timeout=timeout_seconds
-            )
+            # Use Bright Data client as async context manager
+            async with self.BrightDataClient(token=self.api_token) as client:
+                result = await client.scrape.twitter.profiles(
+                    url=twitter_url,
+                    max_number_of_posts=max_number_of_posts,
+                    timeout=timeout_seconds
+                )
 
             # Check if request was successful
             if not result.success:

@@ -26,23 +26,27 @@ class BrightDataLinkedInPostsService:
     """
 
     def __init__(self):
-        """Initialize the service with Bright Data client"""
+        """Initialize the service with Bright Data API token"""
         try:
             from brightdata import BrightDataClient
 
             if not hasattr(settings, 'BRIGHTDATA_API_TOKEN') or not settings.BRIGHTDATA_API_TOKEN:
                 logger.warning("BRIGHTDATA_API_TOKEN not configured. LinkedIn posts scraping will not work.")
-                self.client = None
+                self.api_token = None
+                self.BrightDataClient = None
             else:
-                # Initialize Bright Data client
-                self.client = BrightDataClient(token=settings.BRIGHTDATA_API_TOKEN)
-                logger.info("✅ BrightData client initialized successfully for LinkedIn posts")
+                # Store API token and client class for async context manager usage
+                self.api_token = settings.BRIGHTDATA_API_TOKEN
+                self.BrightDataClient = BrightDataClient
+                logger.info("✅ BrightData API token configured successfully for LinkedIn posts")
         except ImportError:
             logger.error("brightdata-sdk package not installed. Run: pip install brightdata-sdk")
-            self.client = None
+            self.api_token = None
+            self.BrightDataClient = None
         except Exception as e:
-            logger.error(f"Failed to initialize BrightData client: {str(e)}")
-            self.client = None
+            logger.error(f"Failed to initialize BrightData: {str(e)}")
+            self.api_token = None
+            self.BrightDataClient = None
 
     async def fetch_linkedin_posts(
         self,
@@ -205,13 +209,14 @@ class BrightDataLinkedInPostsService:
             start_date_str = start_date.strftime("%Y-%m-%d")
             end_date_str = end_date.strftime("%Y-%m-%d")
 
-            # Call Bright Data SDK (async method)
-            result = await self.client.search.linkedin.posts(
-                profile_url=profile_url,
-                start_date=start_date_str,
-                end_date=end_date_str,
-                timeout=timeout_seconds
-            )
+            # Use Bright Data client as async context manager
+            async with self.BrightDataClient(token=self.api_token) as client:
+                result = await client.search.linkedin.posts(
+                    profile_url=profile_url,
+                    start_date=start_date_str,
+                    end_date=end_date_str,
+                    timeout=timeout_seconds
+                )
 
             # Check if request was successful
             if not result.success:

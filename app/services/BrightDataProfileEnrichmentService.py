@@ -27,24 +27,27 @@ class BrightDataProfileEnrichmentService:
     """
 
     def __init__(self):
-        """Initialize the service with Bright Data client"""
+        """Initialize the service with Bright Data API token"""
         try:
             from brightdata import BrightDataClient
 
             if not hasattr(settings, 'BRIGHTDATA_API_TOKEN') or not settings.BRIGHTDATA_API_TOKEN:
                 logger.warning("BRIGHTDATA_API_TOKEN not configured. Profile enrichment will not work.")
-                self.client = None
+                self.api_token = None
+                self.BrightDataClient = None
             else:
-                # Initialize Bright Data client
-                # SDK auto-loads from BRIGHTDATA_API_TOKEN env var or can be passed directly
-                self.client = BrightDataClient(token=settings.BRIGHTDATA_API_TOKEN)
-                logger.info("✅ BrightData client initialized successfully")
+                # Store API token and client class for async context manager usage
+                self.api_token = settings.BRIGHTDATA_API_TOKEN
+                self.BrightDataClient = BrightDataClient
+                logger.info("✅ BrightData API token configured successfully")
         except ImportError:
             logger.error("brightdata-sdk package not installed. Run: pip install brightdata-sdk")
-            self.client = None
+            self.api_token = None
+            self.BrightDataClient = None
         except Exception as e:
-            logger.error(f"Failed to initialize BrightData client: {str(e)}")
-            self.client = None
+            logger.error(f"Failed to initialize BrightData: {str(e)}")
+            self.api_token = None
+            self.BrightDataClient = None
 
     async def enrich_profile(
         self,
@@ -90,6 +93,14 @@ class BrightDataProfileEnrichmentService:
                     "profile": {}
                 }
 
+            # Validate client is initialized
+            if not self.BrightDataClient or not self.api_token:
+                return {
+                    "success": False,
+                    "error_message": "Bright Data client not initialized. Check BRIGHTDATA_API_TOKEN configuration.",
+                    "profile": {}
+                }
+
             # Validate LinkedIn URL
             if not linkedin_url or "linkedin.com/in/" not in linkedin_url:
                 return {
@@ -131,11 +142,12 @@ class BrightDataProfileEnrichmentService:
             Dictionary containing enriched profile data
         """
         try:
-            # Call Bright Data SDK (async method)
-            result = await self.client.scrape.linkedin.profiles(
-                url=linkedin_url,
-                timeout=timeout_seconds
-            )
+            # Use Bright Data client as async context manager
+            async with self.BrightDataClient(token=self.api_token) as client:
+                result = await client.scrape.linkedin.profiles(
+                    url=linkedin_url,
+                    timeout=timeout_seconds
+                )
 
             # Check if request was successful
             if not result.success:
@@ -409,11 +421,12 @@ class BrightDataProfileEnrichmentService:
 
             logger.info(f"🔍 Batch enriching {len(valid_urls)} LinkedIn profiles via Bright Data")
 
-            # Call Bright Data SDK (async method)
-            result = await self.client.scrape.linkedin.profiles(
-                url=valid_urls,  # SDK accepts list of URLs
-                timeout=timeout_seconds
-            )
+            # Use Bright Data client as async context manager
+            async with self.BrightDataClient(token=self.api_token) as client:
+                result = await client.scrape.linkedin.profiles(
+                    url=valid_urls,  # SDK accepts list of URLs
+                    timeout=timeout_seconds
+                )
 
             # Process results
             results = {}
