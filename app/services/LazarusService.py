@@ -160,21 +160,31 @@ class LazarusService:
 
                     # Check if any actual profile data was retrieved
                     has_profile_data = any([
-                        profile_data.get("profile_photo_url"),
+                        profile_data.get("profile_photo"),
                         profile_data.get("email"),
                         profile_data.get("phone"),
                         profile_data.get("current_company"),
-                        profile_data.get("current_title")
+                        profile_data.get("headline"),
+                        profile_data.get("about")
                     ])
 
                     if has_profile_data:
-                        # Update contact with enriched data
+                        # Update contact with enriched data from Bright Data
                         update_data = {
-                            "profile_photo_url": profile_data.get("profile_photo_url"),
+                            "profile_photo": profile_data.get("profile_photo"),
                             "email": profile_data.get("email"),
                             "phone": profile_data.get("phone"),
+                            "headline": profile_data.get("headline"),
+                            "location": profile_data.get("location"),
+                            "connections_count": profile_data.get("connections_count"),
+                            "about": profile_data.get("about"),
                             "current_company": profile_data.get("current_company") or contact_data.get("current_company"),
-                            "current_title": profile_data.get("current_title"),
+                            "current_position": profile_data.get("current_position"),
+                            "work_experience": profile_data.get("work_experience"),
+                            "education": profile_data.get("education"),
+                            "skills": profile_data.get("skills"),
+                            "languages": profile_data.get("languages"),
+                            "certifications": profile_data.get("certifications"),
                             "enrichment_status": "completed",
                             "enriched_at": datetime.utcnow()
                         }
