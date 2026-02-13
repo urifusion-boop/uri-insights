@@ -28,7 +28,7 @@ class UriTaskManagerService:
             print("Exception occurred in checking feature limit: ", e)
             log_data = {
                 "userId": user_id,
-                "exceptionDate": DateHelper.utc_now_iso(),
+                "exceptionDate": datetime.utcnow().isoformat() + "Z",
                 "method": "POST",
                 "status": 500,
                 "exception": "".join(
