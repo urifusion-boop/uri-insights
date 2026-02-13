@@ -288,13 +288,19 @@ class BrightDataProfileEnrichmentService:
             ""
         )
 
+        # Bright Data returns 'connections' and 'followers' as separate fields
         connections_count = (
-            raw_profile.get("connectionsCount") or
             raw_profile.get("connections") or
+            raw_profile.get("connectionsCount") or
             raw_profile.get("connectionCount") or
             raw_profile.get("followers") or
             0
         )
+        # Ensure it's an integer
+        try:
+            connections_count = int(connections_count) if connections_count else 0
+        except (ValueError, TypeError):
+            connections_count = 0
 
         # Extract current company - Bright Data returns it as a dict: {'name': '...', 'link': '...'}
         current_company = ""
@@ -376,16 +382,16 @@ class BrightDataProfileEnrichmentService:
             []
         )
 
-        # Build normalized profile data
+        # Build normalized profile data - use field names expected by Lazarus schema
         return {
             "email": email,
             "phone": phone,
             "full_name": full_name,
-            "headline": headline,
+            "headline": headline or f"{current_position} at {current_company}" if current_position and current_company else "",
             "location": location,
             "current_company": current_company,
             "current_position": current_position,
-            "profile_photo_url": profile_photo_url,
+            "profile_photo": profile_photo_url,  # Frontend expects 'profile_photo' not 'profile_photo_url'
             "connections_count": connections_count,
             "about": about,
             "work_experience": experience,
