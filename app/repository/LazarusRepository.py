@@ -91,7 +91,21 @@ class LazarusRepository:
         contact = await db["focus_contacts"].find_one(
             {"focus_id": focus_id, "user_id": user_id}
         )
-        return FocusContact(**contact) if contact else None
+        if contact:
+            # Fix legacy data: convert dict languages to strings
+            if "languages" in contact and isinstance(contact["languages"], list):
+                fixed_languages = []
+                for lang in contact["languages"]:
+                    if isinstance(lang, dict):
+                        lang_name = lang.get("title") or lang.get("name") or lang.get("language")
+                        if lang_name:
+                            fixed_languages.append(lang_name)
+                    elif isinstance(lang, str):
+                        fixed_languages.append(lang)
+                contact["languages"] = fixed_languages
+
+            return FocusContact(**contact)
+        return None
 
     @staticmethod
     async def get_focus_contacts_by_user(
