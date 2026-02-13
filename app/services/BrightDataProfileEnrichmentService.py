@@ -131,14 +131,10 @@ class BrightDataProfileEnrichmentService:
             Dictionary containing enriched profile data
         """
         try:
-            # Run Bright Data SDK call in executor to avoid blocking event loop
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                None,
-                lambda: self.client.scrape.linkedin.profiles(
-                    url=linkedin_url,
-                    timeout=timeout_seconds
-                )
+            # Call Bright Data SDK (async method)
+            result = await self.client.scrape.linkedin.profiles(
+                url=linkedin_url,
+                timeout=timeout_seconds
             )
 
             # Check if request was successful
@@ -413,14 +409,10 @@ class BrightDataProfileEnrichmentService:
 
             logger.info(f"🔍 Batch enriching {len(valid_urls)} LinkedIn profiles via Bright Data")
 
-            # Run batch request in executor
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                None,
-                lambda: self.client.scrape.linkedin.profiles(
-                    url=valid_urls,  # SDK accepts list of URLs
-                    timeout=timeout_seconds
-                )
+            # Call Bright Data SDK (async method)
+            result = await self.client.scrape.linkedin.profiles(
+                url=valid_urls,  # SDK accepts list of URLs
+                timeout=timeout_seconds
             )
 
             # Process results

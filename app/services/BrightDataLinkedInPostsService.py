@@ -205,16 +205,12 @@ class BrightDataLinkedInPostsService:
             start_date_str = start_date.strftime("%Y-%m-%d")
             end_date_str = end_date.strftime("%Y-%m-%d")
 
-            # Run Bright Data SDK call in executor to avoid blocking event loop
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                None,
-                lambda: self.client.search.linkedin.posts(
-                    profile_url=profile_url,
-                    start_date=start_date_str,
-                    end_date=end_date_str,
-                    timeout=timeout_seconds
-                )
+            # Call Bright Data SDK (async method)
+            result = await self.client.search.linkedin.posts(
+                profile_url=profile_url,
+                start_date=start_date_str,
+                end_date=end_date_str,
+                timeout=timeout_seconds
             )
 
             # Check if request was successful

@@ -148,15 +148,11 @@ class BrightDataTwitterService:
             Dictionary containing profile data and optional posts
         """
         try:
-            # Run Bright Data SDK call in executor to avoid blocking event loop
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                None,
-                lambda: self.client.scrape.twitter.profiles(
-                    url=twitter_url,
-                    max_number_of_posts=max_number_of_posts,
-                    timeout=timeout_seconds
-                )
+            # Call Bright Data SDK (async method)
+            result = await self.client.scrape.twitter.profiles(
+                url=twitter_url,
+                max_number_of_posts=max_number_of_posts,
+                timeout=timeout_seconds
             )
 
             # Check if request was successful
