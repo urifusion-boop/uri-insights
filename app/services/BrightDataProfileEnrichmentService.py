@@ -373,12 +373,24 @@ class BrightDataProfileEnrichmentService:
             []
         )
 
-        # Extract languages
-        languages = (
+        # Extract languages - Bright Data returns list of dicts like {'title': 'English', 'subtitle': '...'}
+        # We need to extract just the language names as strings
+        raw_languages = (
             raw_profile.get("languages") or
             raw_profile.get("languagesList") or
             []
         )
+        languages = []
+        if isinstance(raw_languages, list):
+            for lang in raw_languages:
+                if isinstance(lang, dict):
+                    # Extract just the language name from dict
+                    lang_name = lang.get("title") or lang.get("name") or lang.get("language")
+                    if lang_name:
+                        languages.append(lang_name)
+                elif isinstance(lang, str):
+                    # Already a string
+                    languages.append(lang)
 
         # Extract certifications
         certifications = (

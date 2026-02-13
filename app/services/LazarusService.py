@@ -454,9 +454,75 @@ class LazarusService:
                 },
             )
 
+        # Auto-trigger enrichment if LinkedIn URL is provided
+        linkedin_url = monitor_create.linkedin_url
+        if linkedin_url:
+            from app.services.BrightDataCompanyEnrichmentService import BrightDataCompanyEnrichmentService
+
+            print(f"[LAZARUS] Auto-enriching company: {monitor_create.company_name}")
+            print(f"[LAZARUS] LinkedIn URL: {linkedin_url}")
+
+            try:
+                # Update status to pending
+                await LazarusRepository.update_company_monitor(
+                    db, monitor_data["monitor_id"], user_id, {"enrichment_status": "pending"}
+                )
+
+                # Call company enrichment service
+                company_service = BrightDataCompanyEnrichmentService()
+                enrichment_result = await company_service.enrich_company(
+                    linkedin_url=linkedin_url,
+                    timeout_seconds=60
+                )
+
+                print(f"[LAZARUS] Company enrichment result success: {enrichment_result.get('success')}")
+
+                if enrichment_result.get("success"):
+                    # Map company data to CompanyMonitor fields
+                    update_data = {
+                        "logo": enrichment_result.get("logo"),
+                        "company_image": enrichment_result.get("company_image"),
+                        "about": enrichment_result.get("about"),
+                        "slogan": enrichment_result.get("slogan"),
+                        "description": enrichment_result.get("description"),
+                        "specialties": enrichment_result.get("specialties"),
+                        "organization_type": enrichment_result.get("organization_type"),
+                        "company_size": enrichment_result.get("company_size"),
+                        "industries": enrichment_result.get("industries"),
+                        "founded": enrichment_result.get("founded"),
+                        "headquarters": enrichment_result.get("headquarters"),
+                        "followers": enrichment_result.get("followers"),
+                        "employees": enrichment_result.get("employees"),
+                        "enriched_at": datetime.utcnow(),
+                        "enrichment_status": "completed"
+                    }
+
+                    # Remove None values
+                    update_data = {k: v for k, v in update_data.items() if v is not None}
+
+                    print(f"[LAZARUS] Updating company with enriched data: {list(update_data.keys())}")
+
+                    # Save enriched data to database
+                    await LazarusRepository.update_company_monitor(
+                        db, monitor_data["monitor_id"], user_id, update_data
+                    )
+
+                    print(f"[LAZARUS] ✅ Company auto-enrichment completed for: {monitor_create.company_name}")
+                else:
+                    error_msg = enrichment_result.get("error_message", "Unknown error")
+                    print(f"[LAZARUS] ⚠️  Company enrichment failed: {error_msg}")
+                    await LazarusRepository.update_company_monitor(
+                        db, monitor_data["monitor_id"], user_id, {"enrichment_status": "failed"}
+                    )
+
+            except Exception as e:
+                print(f"[LAZARUS] ⚠️  Company auto-enrichment error: {str(e)}")
+                import traceback
+                traceback.print_exc()
+
         return {
             "success": True,
-            "message": "Company monitor added successfully",
+            "message": "Company monitor added successfully" + (" and enrichment started" if linkedin_url else ""),
             "monitor_id": monitor_data["monitor_id"],
             "slots_used": slots.used_slots + 1,
             "slots_available": slots.max_slots - (slots.used_slots + 1),

@@ -168,9 +168,27 @@ class CompanyMonitor(BaseModel):
     # Identity
     company_name: str
     website_url: Optional[str] = None
+    linkedin_url: Optional[str] = None  # LinkedIn company page URL
     domain: Optional[str] = None  # Extracted from website_url
     location: Optional[str] = None  # e.g., "Lagos, Nigeria" or "Remote"
     country_code: Optional[str] = None  # e.g., "ng", "us", "uk" - for Google Search
+
+    # Enrichment data (from LinkedIn Companies API)
+    logo: Optional[str] = None
+    company_image: Optional[str] = None
+    about: Optional[str] = None
+    slogan: Optional[str] = None
+    description: Optional[str] = None
+    specialties: Optional[List[str]] = None
+    organization_type: Optional[str] = None
+    company_size: Optional[str] = None
+    industries: Optional[List[str]] = None
+    founded: Optional[int] = None
+    headquarters: Optional[str] = None
+    followers: Optional[int] = None
+    employees: Optional[int] = None
+    enriched_at: Optional[datetime] = None
+    enrichment_status: Optional[str] = None  # "pending", "completed", "failed"
 
     # Homepage tracking for pivots
     last_homepage_hash: Optional[str] = None  # MD5 hash
@@ -405,6 +423,7 @@ class CompanyMonitorCreate(BaseModel):
     """Create a new company monitor"""
     company_name: str
     website_url: Optional[str] = None
+    linkedin_url: Optional[str] = None  # LinkedIn company page URL
     location: Optional[str] = None  # e.g., "Lagos, Nigeria" or "Remote"
     country_code: Optional[str] = None  # e.g., "ng", "us", "uk"
     last_homepage_content: Optional[str] = None
