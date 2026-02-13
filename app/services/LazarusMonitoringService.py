@@ -21,7 +21,7 @@ from app.services.AIService import AIService
 from app.services.OpenAIApifyTwitterService import OpenAIApifyTwitterService
 from app.services.ApifyGoogleSearchService import ApifyGoogleSearchService
 from app.services.ApifyLinkedInJobsService import ApifyLinkedInJobsService
-from app.services.ApifyLinkedInPostScraperService import ApifyLinkedInPostScraperService
+from app.services.BrightDataLinkedInPostsService import BrightDataLinkedInPostsService
 from app.services.XUsersLookupService import XUsersLookupService
 from app.domain.requests.twitter_requests import CurrentUserLookupParams
 from app.domain.schemas.lazarus_schema import (
@@ -363,12 +363,12 @@ class LazarusMonitoringService:
 
             logger.info(f"🔍 Fetching LinkedIn posts for {len(linkedin_urls)} contacts")
 
-            # Use ApifyLinkedInPostScraperService to fetch posts
-            linkedin_service = ApifyLinkedInPostScraperService()
-            result = await linkedin_service.fetch_linkedin_posts(
+            # Use Bright Data LinkedIn Posts Service to fetch posts
+            linkedin_service = BrightDataLinkedInPostsService()
+            result = await linkedin_service.fetch_posts_batch(
                 linkedin_urls=linkedin_urls,
-                deep_scrape=True,
-                limit_per_source=10  # 10 posts per contact (2-4 weeks of activity)
+                limit_per_source=10,  # 10 posts per contact (2-4 weeks of activity)
+                days_back=7  # Weekly scans = last 7 days
             )
 
             if not result.get("success"):

@@ -147,9 +147,10 @@ class LazarusService:
                     db, contact_data["focus_id"], user_id, {"enrichment_status": "pending"}
                 )
 
-                # Call LinkedIn Profile Scraper
-                scraper_service = LinkedInProfileScraperService()
-                enrichment_result = await scraper_service.enrich_profile(
+                # Call Bright Data LinkedIn Profile Enrichment Service
+                from app.services.BrightDataProfileEnrichmentService import BrightDataProfileEnrichmentService
+                enrichment_service = BrightDataProfileEnrichmentService()
+                enrichment_result = await enrichment_service.enrich_profile(
                     linkedin_url=linkedin_url,
                     timeout_seconds=90
                 )
@@ -650,16 +651,16 @@ class LazarusService:
             focus_id: Focus contact ID
             linkedin_url: LinkedIn URL to enrich
         """
-        from app.services.LinkedInProfileScraperService import LinkedInProfileScraperService
+        from app.services.BrightDataProfileEnrichmentService import BrightDataProfileEnrichmentService
 
         # Update status to pending
         await LazarusRepository.update_focus_contact(
             db, focus_id, user_id, {"enrichment_status": "pending"}
         )
 
-        # Call LinkedIn Profile Scraper
-        scraper_service = LinkedInProfileScraperService()
-        enrichment_result = await scraper_service.enrich_profile(
+        # Call Bright Data LinkedIn Profile Enrichment Service
+        enrichment_service = BrightDataProfileEnrichmentService()
+        enrichment_result = await enrichment_service.enrich_profile(
             linkedin_url=linkedin_url,
             timeout_seconds=90
         )

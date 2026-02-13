@@ -82,6 +82,9 @@ class Settings(BaseSettings):
     APIFY_API_TOKEN_BACKUP: str = ""  # Backup token for failover
     APIFY_TIMEOUT_SECONDS: int = 60   # Timeout before switching to backup
 
+    # Bright Data Configuration
+    BRIGHTDATA_API_TOKEN: Optional[str] = None  # Bright Data API token for SDK
+
     # LinkedIn Scraping Configuration
     LINKEDIN_SESSION_COOKIE: Optional[str] = None  # li_at session cookie for authenticated scraping
 
