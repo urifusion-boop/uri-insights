@@ -141,13 +141,6 @@ class BrightDataProfileEnrichmentService:
                     timeout=timeout_seconds
                 )
 
-            # Log full raw result for debugging
-            logger.info(f"🔍 Bright Data result type: {type(result)}")
-            logger.info(f"🔍 Bright Data result attrs: {getattr(result, '__dict__', vars(result) if hasattr(result, '__dict__') else str(result))}")
-            logger.info(f"🔍 result.success: {getattr(result, 'success', 'MISSING')}")
-            logger.info(f"🔍 result.data type: {type(getattr(result, 'data', None))}")
-            logger.info(f"🔍 result.data value: {getattr(result, 'data', 'MISSING')}")
-
             # Check if request was successful
             if not result.success:
                 error_msg = getattr(result, 'error_message', 'Unknown error from Bright Data')
@@ -167,28 +160,20 @@ class BrightDataProfileEnrichmentService:
                     "profile": {}
                 }
 
-            # Log full result.data before parsing
-            print(f"🔍 RAW result.data type: {type(result.data)}")
-            print(f"🔍 RAW result.data: {str(result.data)[:3000]}")
-
-            # Get first profile - handle both list and dict formats
+            # result.data is a dict keyed by LinkedIn ID: {'theophilus-uchechukwu': {...profile dict...}}
+            # Get the actual profile dict (the value, not the key)
             if isinstance(result.data, dict):
                 raw_profile = list(result.data.values())[0]
-            else:
+            elif isinstance(result.data, list):
                 raw_profile = result.data[0]
+            else:
+                raw_profile = result.data
 
-            print(f"🔍 raw_profile type: {type(raw_profile)}")
-            print(f"🔍 raw_profile value: {str(raw_profile)[:3000]}")
+            if not isinstance(raw_profile, dict):
+                logger.error(f"Unexpected profile format from Bright Data: {type(raw_profile)}")
+                return {"success": False, "error_message": "Unexpected profile format from Bright Data", "profile": {}}
 
-            # If raw_profile is a string, try to parse as JSON
-            if isinstance(raw_profile, str):
-                import json as _json
-                try:
-                    raw_profile = _json.loads(raw_profile)
-                    print(f"🔍 Parsed JSON string successfully, keys: {list(raw_profile.keys())}")
-                except Exception:
-                    print(f"💥 raw_profile is a plain string, not JSON: {raw_profile[:500]}")
-                    return {"success": False, "error_message": f"Unexpected string from Bright Data: {raw_profile[:200]}", "profile": {}}
+            logger.info(f"✅ Bright Data returned profile with keys: {list(raw_profile.keys())}")
 
             # Parse and normalize profile data
             profile = self._parse_profile_data(raw_profile)
@@ -208,9 +193,6 @@ class BrightDataProfileEnrichmentService:
             import traceback
             traceback.print_exc()
             logger.error(f"Error scraping profile from Bright Data: {str(e)}")
-            print(f"💥 BRIGHT DATA ERROR: {str(e)}")
-            print(f"💥 BRIGHT DATA result type was: {type(result) if 'result' in locals() else 'result not set'}")
-            print(f"💥 BRIGHT DATA result.data was: {getattr(result, 'data', 'NO DATA') if 'result' in locals() else 'result not set'}")
             return {
                 "success": False,
                 "error_message": str(e),
@@ -294,20 +276,28 @@ class BrightDataProfileEnrichmentService:
             0
         )
 
-        # Extract current company and position
+        # Extract current company - Bright Data returns it as a dict: {'name': '...', 'link': '...'}
         current_company = ""
         current_position = ""
 
-        # Try to parse from headline (e.g., "CEO at TechCorp")
+        raw_current_company = raw_profile.get("current_company") or raw_profile.get("currentCompany")
+        if isinstance(raw_current_company, dict):
+            current_company = raw_current_company.get("name") or raw_current_company.get("company_name") or ""
+        elif isinstance(raw_current_company, str):
+            current_company = raw_current_company
+
+        # Try to parse position from headline (e.g., "CEO at TechCorp")
         if headline:
             if " at " in headline:
                 parts = headline.split(" at ")
                 current_position = parts[0].strip()
-                current_company = parts[1].strip() if len(parts) > 1 else ""
+                if not current_company:
+                    current_company = parts[1].strip() if len(parts) > 1 else ""
             elif " @ " in headline:
                 parts = headline.split(" @ ")
                 current_position = parts[0].strip()
-                current_company = parts[1].strip() if len(parts) > 1 else ""
+                if not current_company:
+                    current_company = parts[1].strip() if len(parts) > 1 else ""
 
         # Extract work experience
         experience = (
