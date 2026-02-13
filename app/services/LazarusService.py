@@ -192,6 +192,16 @@ class LazarusService:
                         # Remove None values
                         update_data = {k: v for k, v in update_data.items() if v is not None}
 
+                        # Debug: Log what we're about to save
+                        print(f"[LAZARUS] 📝 Saving enriched data to DB:")
+                        for key, value in update_data.items():
+                            if key == 'about':
+                                print(f"   {key}: {str(value)[:100]}...")
+                            elif isinstance(value, (list, dict)):
+                                print(f"   {key}: {type(value)} with {len(value)} items")
+                            else:
+                                print(f"   {key}: {value}")
+
                         await LazarusRepository.update_focus_contact(
                             db, contact_data["focus_id"], user_id, update_data
                         )
