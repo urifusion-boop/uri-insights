@@ -255,6 +255,9 @@ class ScanHistory(BaseModel):
     confidence: Optional[float] = None  # 0.0 to 1.0
     triggering_post_index: Optional[int] = None  # Which post triggered the alert
 
+    # Rejection reason (when signal_detected = False)
+    rejection_reason: Optional[str] = None  # Human-friendly explanation from AI why posts didn't qualify
+
     # Timestamps
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -544,6 +547,7 @@ class BuyingSignalAnalysis(BaseModel):
     evidence: Optional[str] = None
     reason: Optional[str] = None
     triggering_post_index: int = 0  # REQUIRED: Which post triggered the signal (0-indexed, e.g., "Twitter Post 1" = 0, "Twitter Post 2" = 1, "LinkedIn Post 1" = first LinkedIn index)
+    rejection_reason: Optional[str] = None  # REQUIRED when signal_detected=False: Human-friendly explanation of why posts didn't qualify
 
 
 class KeywordExtractionResult(BaseModel):

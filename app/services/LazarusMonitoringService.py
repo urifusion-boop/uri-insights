@@ -699,7 +699,7 @@ class LazarusMonitoringService:
                 db, contact, tweets, linkedin_posts, user_signal_preferences
             )
 
-            if signal_analysis:
+            if signal_analysis and signal_analysis.get('signal_detected'):
                 print(f"🎯 SIGNAL DETECTED!")
                 print(f"   Type: {signal_analysis.get('signal_type')}")
                 print(f"   Confidence: {signal_analysis.get('confidence')}")
@@ -884,6 +884,15 @@ class LazarusMonitoringService:
                     "status": LazarusAlertStatusEnum.NEW,
                     "source_lead_id": contact.source_lead_id,
                 }
+            elif signal_analysis and not signal_analysis.get('signal_detected'):
+                # Signal was analyzed but didn't qualify - return rejection info
+                print(f"❌ NO SIGNAL DETECTED")
+                print(f"   Rejection Reason: {signal_analysis.get('rejection_reason', 'No reason provided')}")
+                return {
+                    "signal_detected": False,
+                    "rejection_reason": signal_analysis.get('rejection_reason'),
+                    "confidence": signal_analysis.get('confidence', 0.0)
+                }
 
         return None
 
@@ -939,14 +948,35 @@ class LazarusMonitoringService:
 
             result = AIService.extract_ai_result(ai_response)
 
-            # Only return if signal detected with high confidence
+            # Return signal if detected with high confidence
             if result.signal_detected and result.confidence >= 0.7:
                 return {
+                    "signal_detected": True,
                     "signal_type": result.signal_type,
                     "confidence": result.confidence,
                     "evidence": result.evidence,
                     "reason": result.reason,
-                    "triggering_post_index": result.triggering_post_index
+                    "triggering_post_index": result.triggering_post_index,
+                    "rejection_reason": None
+                }
+            else:
+                # Return rejection reason when signal not detected or confidence too low
+                rejection_reason = result.rejection_reason
+                if not rejection_reason and result.signal_detected and result.confidence < 0.7:
+                    # Fallback if AI didn't provide rejection_reason for low confidence
+                    rejection_reason = f"Confidence score {result.confidence:.2f} below threshold (0.70). Weak {result.signal_type or 'signal'} detected but not strong enough."
+                elif not rejection_reason:
+                    # Fallback if AI didn't provide rejection_reason at all
+                    rejection_reason = "No buying signals detected in scanned posts."
+
+                return {
+                    "signal_detected": False,
+                    "signal_type": None,
+                    "confidence": result.confidence,
+                    "evidence": None,
+                    "reason": None,
+                    "triggering_post_index": None,
+                    "rejection_reason": rejection_reason
                 }
 
         except Exception as e:
@@ -1189,6 +1219,9 @@ class LazarusMonitoringService:
 
                 # Save scan history REGARDLESS of signal detection
                 try:
+                    # Determine if signal was detected
+                    signal_detected = analysis_result and analysis_result.get('signal_detected', bool(analysis_result.get('alert_id')))
+
                     scan_history = ScanHistory(
                         user_id=contact.user_id,
                         source_type=LazarusMonitorTypeEnum.FOCUS_CONTACT,
@@ -1198,11 +1231,12 @@ class LazarusMonitoringService:
                         platform="LinkedIn" if platform == "linkedin" else "Twitter",
                         posts_scanned_count=len(scanned_posts_data),
                         scanned_posts=scanned_posts_data,
-                        signal_detected=bool(analysis_result),
+                        signal_detected=signal_detected,
                         alert_id=analysis_result.get('alert_id') if analysis_result else None,
-                        signal_type=analysis_result.get('evidence', {}).get('signal_type') if analysis_result else None,
-                        confidence=analysis_result.get('evidence', {}).get('confidence') if analysis_result else None,
-                        triggering_post_index=analysis_result.get('evidence', {}).get('triggering_post_index') if analysis_result else None,
+                        signal_type=analysis_result.get('evidence', {}).get('signal_type') if analysis_result and analysis_result.get('evidence') else None,
+                        confidence=analysis_result.get('evidence', {}).get('confidence') if analysis_result and analysis_result.get('evidence') else (analysis_result.get('confidence') if analysis_result else None),
+                        triggering_post_index=analysis_result.get('evidence', {}).get('triggering_post_index') if analysis_result and analysis_result.get('evidence') else None,
+                        rejection_reason=analysis_result.get('rejection_reason') if analysis_result and not signal_detected else None,
                     )
 
                     result = await db["scan_history"].insert_one(scan_history.dict(by_alias=True))

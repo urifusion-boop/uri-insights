@@ -1380,3 +1380,92 @@ async def get_scanned_content(
             error_code=500,
             success=False
         )
+
+
+@router.get("/rejected-posts")
+async def get_rejected_posts(
+    user_id: str = Query(...),
+    skip: int = Query(0),
+    limit: int = Query(50),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Get posts that were scanned but didn't meet alert criteria
+
+    Returns scan history where signal_detected=False with AI rejection reasons
+    Shows users why certain posts didn't trigger alerts (e.g., promotional content,
+    no pain points, doesn't match keywords, confidence too low)
+
+    Returns:
+    - Rejected scans with human-friendly reasons from AI
+    - Grouped by contact for easy review
+    """
+    from datetime import datetime
+
+    try:
+        # Get scan history where NO signal was detected
+        rejected_scans = await db["scan_history"].find({
+            "user_id": user_id,
+            "signal_detected": False,
+            "rejection_reason": {"$exists": True, "$ne": None}
+        }).sort("scan_date", -1).to_list(None)
+
+        # Build rejected posts data
+        rejected_groups = []
+
+        for scan in rejected_scans:
+            # Build scanned posts for this scan
+            scanned_posts = []
+
+            for post in scan.get("scanned_posts", []):
+                scanned_posts.append({
+                    "post_id": f"{scan.get('_id')}_{post.get('post_index')}",
+                    "post_url": post.get("post_url"),
+                    "post_text": post.get("post_text"),
+                    "post_platform": post.get("post_platform"),
+                    "post_author": post.get("post_author"),
+                    "post_created_at": post.get("post_created_at"),
+                    "post_likes": post.get("post_likes", 0),
+                    "post_comments": post.get("post_comments", 0),
+                    "post_index": post.get("post_index"),
+                })
+
+            # Build rejected scan group
+            rejected_group = {
+                "scan_id": str(scan.get("_id")),
+                "source_type": scan.get("source_type"),
+                "source_id": scan.get("source_id"),
+                "source_name": scan.get("source_name"),
+                "scan_date": scan.get("scan_date"),
+                "platform": scan.get("platform"),
+                "posts_scanned_count": scan.get("posts_scanned_count", 0),
+                "scanned_posts": scanned_posts,
+                "rejection_reason": scan.get("rejection_reason"),
+                "confidence": scan.get("confidence", 0.0),
+            }
+
+            rejected_groups.append(rejected_group)
+
+        # Pagination
+        total_count = len(rejected_groups)
+        paginated_rejected_groups = rejected_groups[skip : skip + limit]
+
+        return UriResponse.success_response(
+            data={
+                "rejected_scans": paginated_rejected_groups,
+                "total_count": total_count,
+                "skip": skip,
+                "limit": limit,
+                "total_posts": sum(sg.get("posts_scanned_count", 0) for sg in paginated_rejected_groups),
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"❌ Error fetching rejected posts: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return UriResponse.custom_response(
+            message=f"Failed to fetch rejected posts: {str(e)}",
+            error_code=500,
+            success=False
+        )

@@ -941,7 +941,8 @@ Return a JSON object with:
     "confidence": 0.0 to 1.0,
     "evidence": "exact quote from post that triggered detection",
     "reason": "brief explanation of why this is a buying signal",
-    "triggering_post_index": index of the post that triggered this signal (0 for Twitter Post 1, 1 for Twitter Post 2, etc.). Use the post number from the input.
+    "triggering_post_index": index of the post that triggered this signal (0 for Twitter Post 1, 1 for Twitter Post 2, etc.). Use the post number from the input,
+    "rejection_reason": "REQUIRED when signal_detected=false: Human-friendly explanation of why posts didn't qualify (e.g., 'Posts are promotional content, not buying signals', 'No career changes or pain points detected', 'Posts don't relate to target keywords: CRM, sales automation')"
 }}
 
 CRITICAL: You MUST provide the "triggering_post_index" field. Look at which post contains the signal:
@@ -950,6 +951,18 @@ CRITICAL: You MUST provide the "triggering_post_index" field. Look at which post
 - LinkedIn Post 1 → index for first LinkedIn (count Twitter posts first)
 - LinkedIn Post 2 → next index after first LinkedIn
 Example: If you have 3 Twitter posts and 2 LinkedIn posts, and the signal is in "LinkedIn Post 2", the index should be 4 (0,1,2 for Twitter, 3 for LinkedIn Post 1, 4 for LinkedIn Post 2).
+
+REJECTION REASON EXAMPLES (when signal_detected=false):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ Good: "All posts are promotional/marketing content recommending products to others. No genuine buyer intent detected."
+✅ Good: "Posts contain general industry updates but no career changes, pain points, or switch signals."
+✅ Good: "Content doesn't match target keywords (CRM, sales automation). Posts discuss project management instead."
+✅ Good: "Confidence score 0.65 - below 0.70 threshold. Weak pain signal detected but not strong enough."
+✅ Good: "Posts are endorsements and testimonials (OUTBOUND). Person is promoting, not seeking solutions."
+
+❌ Bad: "No signal"
+❌ Bad: "Doesn't match"
+❌ Bad: "Low confidence"
 
 Only return TRUE if you have high confidence (>0.7) that this is a genuine buying signal.
 """
