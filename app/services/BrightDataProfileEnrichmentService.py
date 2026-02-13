@@ -160,20 +160,40 @@ class BrightDataProfileEnrichmentService:
                     "profile": {}
                 }
 
-            # result.data is a dict keyed by LinkedIn ID: {'theophilus-uchechukwu': {...profile dict...}}
-            # Get the actual profile dict (the value, not the key)
+            # Debug: Log full structure
+            print(f"🔍 result.data type: {type(result.data)}")
+            print(f"🔍 result.data: {repr(result.data)[:2000]}")
+
+            # result.data can be:
+            # - dict keyed by LinkedIn ID: {'theophilus-uchechukwu': {...profile...}}
+            # - list: [{...profile...}]
+            # - direct dict: {...profile...}
+            raw_profile = None
+
             if isinstance(result.data, dict):
-                raw_profile = list(result.data.values())[0]
-            elif isinstance(result.data, list):
+                # Check if this is a dict with LinkedIn ID as key
+                first_val = list(result.data.values())[0] if result.data else None
+                print(f"🔍 first dict value type: {type(first_val)}")
+
+                if isinstance(first_val, dict):
+                    # ID-keyed dict: {'theophilus-uchechukwu': {...profile...}}
+                    raw_profile = first_val
+                else:
+                    # Direct profile dict
+                    raw_profile = result.data
+            elif isinstance(result.data, list) and len(result.data) > 0:
                 raw_profile = result.data[0]
             else:
                 raw_profile = result.data
 
+            print(f"🔍 raw_profile type: {type(raw_profile)}")
+
             if not isinstance(raw_profile, dict):
+                print(f"💥 raw_profile is not dict, value: {repr(raw_profile)[:500]}")
                 logger.error(f"Unexpected profile format from Bright Data: {type(raw_profile)}")
                 return {"success": False, "error_message": "Unexpected profile format from Bright Data", "profile": {}}
 
-            logger.info(f"✅ Bright Data returned profile with keys: {list(raw_profile.keys())}")
+            print(f"✅ raw_profile keys: {list(raw_profile.keys())}")
 
             # Parse and normalize profile data
             profile = self._parse_profile_data(raw_profile)
