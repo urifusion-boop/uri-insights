@@ -214,25 +214,8 @@ class BrightDataLinkedInPostsService:
                     "posts": []
                 }
 
-            # Filter to only include posts authored by the target profile owner
-            # Extract the profile username from the URL (e.g., "oluwatobiloba-aromire-931401190" from the URL)
-            target_username = profile_url.rstrip('/').split('/')[-1]
-
-            filtered_posts = []
-            for raw_post in raw_posts:
-                # Check if the post author matches the target profile
-                author_url = raw_post.get("use_url") or raw_post.get("author_url") or ""
-                post_user_id = raw_post.get("user_id", "")
-
-                # Match if user_id matches the target username OR if author URL contains the target username
-                if post_user_id == target_username or target_username in author_url:
-                    filtered_posts.append(raw_post)
-
-            logger.info(f"📊 Filtered {len(filtered_posts)} posts authored by profile owner (from {len(raw_posts)} total)")
-            print(f"📊 Filtered {len(filtered_posts)} posts authored by profile owner (from {len(raw_posts)} total)")
-
-            # Parse and normalize posts
-            posts = [self._parse_post_data(raw_post, profile_url) for raw_post in filtered_posts[:limit]]
+            # Parse and normalize posts (includes reshares and feed posts)
+            posts = [self._parse_post_data(raw_post, profile_url) for raw_post in raw_posts[:limit]]
 
             logger.info(f"✅ Fetched {len(posts)} LinkedIn posts for {profile_url}")
 
