@@ -1,6 +1,6 @@
 """
 BrightDataLinkedInPostsService - Scrapes LinkedIn posts for Lazarus Protocol monitoring
-Uses Bright Data Python SDK Web Scraper API (client.search.linkedin.posts)
+Uses Bright Data REST API with async polling
 
 This service fetches LinkedIn posts from user profiles for:
 1. Real-time "Scan Now" functionality (manual trigger)
@@ -10,6 +10,7 @@ This service fetches LinkedIn posts from user profiles for:
 Replaces: ApifyLinkedInPostScraperService (Apify-based)
 """
 import asyncio
+import httpx
 from typing import Dict, Any, List, Optional
 import logging
 from datetime import datetime, timezone, timedelta
@@ -27,26 +28,16 @@ class BrightDataLinkedInPostsService:
 
     def __init__(self):
         """Initialize the service with Bright Data API token"""
-        try:
-            from brightdata import BrightDataClient
+        if not hasattr(settings, 'BRIGHTDATA_API_TOKEN') or not settings.BRIGHTDATA_API_TOKEN:
+            logger.warning("BRIGHTDATA_API_TOKEN not configured. LinkedIn posts scraping will not work.")
+            self.api_token = None
+        else:
+            self.api_token = settings.BRIGHTDATA_API_TOKEN
+            logger.info("✅ BrightData API token configured successfully for LinkedIn posts")
 
-            if not hasattr(settings, 'BRIGHTDATA_API_TOKEN') or not settings.BRIGHTDATA_API_TOKEN:
-                logger.warning("BRIGHTDATA_API_TOKEN not configured. LinkedIn posts scraping will not work.")
-                self.api_token = None
-                self.BrightDataClient = None
-            else:
-                # Store API token and client class for async context manager usage
-                self.api_token = settings.BRIGHTDATA_API_TOKEN
-                self.BrightDataClient = BrightDataClient
-                logger.info("✅ BrightData API token configured successfully for LinkedIn posts")
-        except ImportError:
-            logger.error("brightdata-sdk package not installed. Run: pip install brightdata-sdk")
-            self.api_token = None
-            self.BrightDataClient = None
-        except Exception as e:
-            logger.error(f"Failed to initialize BrightData: {str(e)}")
-            self.api_token = None
-            self.BrightDataClient = None
+        # Dataset ID for LinkedIn Posts - Discover by Profile URL
+        self.dataset_id = "gd_lyy3tktm25m4avu764"
+        self.base_url = "https://api.brightdata.com"
 
     async def fetch_linkedin_posts(
         self,
@@ -190,75 +181,65 @@ class BrightDataLinkedInPostsService:
         timeout_seconds: int
     ) -> Dict[str, Any]:
         """
-        Fetch posts for a single LinkedIn profile using Bright Data SDK
+        Fetch posts for a single LinkedIn profile using Bright Data REST API with polling
 
         Args:
             profile_url: LinkedIn profile URL
-            start_date: Start date for post filtering
-            end_date: End date for post filtering
+            start_date: Start date for post filtering (NOT USED - dates unreliable in LinkedIn data)
+            end_date: End date for post filtering (NOT USED - dates unreliable in LinkedIn data)
             limit: Maximum number of posts to fetch
-            timeout_seconds: Timeout for the request
+            timeout_seconds: Maximum time to wait for scraping job to complete
 
         Returns:
             Dictionary with success status and posts list
         """
         try:
-            logger.info(f"🔍 Fetching posts for profile: {profile_url}")
-
-            # Format dates as strings (YYYY-MM-DD)
-            start_date_str = start_date.strftime("%Y-%m-%d")
-            end_date_str = end_date.strftime("%Y-%m-%d")
-
-            # Use Bright Data client as async context manager
-            # NOTE: SDK uses async dataset mode which takes 30-60s to build
-            # We need a much longer timeout to allow dataset building + polling
-            logger.info(f"Calling Bright Data SDK with profile_url={profile_url}, timeout={max(timeout_seconds, 600)}")
-            async with self.BrightDataClient(token=self.api_token) as client:
-                # Pass profile URL as positional argument (SDK doesn't accept named params)
-                result = await client.search.linkedin.posts(
-                    profile_url,  # Positional argument
-                    timeout=max(timeout_seconds, 600)  # Minimum 10 minutes for dataset building
-                )
-
-            # Log result details
-            logger.info(f"SDK Result: success={result.success}, data_length={len(result.data) if result.data else 0}")
-            if hasattr(result, 'status'):
-                logger.info(f"Result status: {result.status}")
-            if hasattr(result, 'error'):
-                logger.info(f"Result error: {result.error}")
-
-            # Check if request was successful
-            if not result.success:
-                error_msg = getattr(result, 'error_message', 'Unknown error from Bright Data')
-                logger.error(f"Bright Data request failed for {profile_url}: {error_msg}")
-                # Debug: Log full result details
-                logger.error(f"Full result object: success={result.success}, hasattr error_message={hasattr(result, 'error_message')}")
-                logger.error(f"Result dir: {[attr for attr in dir(result) if not attr.startswith('_')]}")
-                if hasattr(result, 'errors'):
-                    logger.error(f"Result errors: {result.errors}")
-                if hasattr(result, 'error'):
-                    logger.error(f"Result error: {result.error}")
+            if not self.api_token:
                 return {
                     "success": False,
-                    "error_message": error_msg,
+                    "error_message": "BrightData API token not configured",
                     "posts": []
                 }
 
-            # Extract posts from result
-            if not result.data or len(result.data) == 0:
-                logger.info(f"No posts found for {profile_url} in date range {start_date_str} to {end_date_str}")
+            logger.info(f"🔍 Fetching LinkedIn posts for: {profile_url}")
+
+            # Step 1: Trigger scraping job (without date filters - they don't work reliably)
+            snapshot_id = await self._trigger_scrape(profile_url)
+            if not snapshot_id:
                 return {
-                    "success": True,
+                    "success": False,
+                    "error_message": "Failed to trigger scraping job",
                     "posts": []
                 }
 
-            # Limit posts to the specified number
-            raw_posts = result.data[:limit]
+            logger.info(f"📸 Snapshot ID: {snapshot_id}")
 
-            # Parse and normalize posts
-            posts = [self._parse_post_data(raw_post, profile_url) for raw_post in raw_posts]
+            # Step 2: Poll until job is complete (with timeout)
+            raw_posts = await self._poll_and_download(snapshot_id, timeout_seconds)
+            if raw_posts is None:
+                return {
+                    "success": False,
+                    "error_message": "Failed to retrieve posts - timeout or error",
+                    "posts": []
+                }
 
-            logger.info(f"✅ Fetched {len(posts)} posts for {profile_url}")
+            # Step 3: Parse and normalize posts
+            posts = [self._parse_post_data(raw_post, profile_url) for raw_post in raw_posts[:limit]]
+
+            logger.info(f"✅ Fetched {len(posts)} LinkedIn posts for {profile_url}")
+
+            # Log posts for visibility
+            print(f"\n📝 FETCHED {len(posts)} LINKEDIN POSTS:")
+            for i, post in enumerate(posts[:5], 1):  # Show first 5 posts
+                print(f"\n   Post {i}:")
+                print(f"   Author: {post.get('author', 'Unknown')}")
+                print(f"   Text: {post.get('text', 'No text')[:150]}...")
+                print(f"   Date: {post.get('created_at', 'No date')}")
+                print(f"   Engagement: {post.get('likes', 0)} likes, {post.get('comments', 0)} comments")
+                print(f"   URL: {post.get('url', 'No URL')}")
+            if len(posts) > 5:
+                print(f"\n   ... and {len(posts) - 5} more posts")
+            print("")
 
             return {
                 "success": True,
@@ -274,6 +255,100 @@ class BrightDataLinkedInPostsService:
                 "error_message": str(e),
                 "posts": []
             }
+
+    async def _trigger_scrape(self, profile_url: str) -> Optional[str]:
+        """Trigger LinkedIn posts scraping job and return snapshot_id"""
+        try:
+            url = f"{self.base_url}/datasets/v3/scrape"
+            params = {
+                "dataset_id": self.dataset_id,
+                "notify": "false",
+                "include_errors": "true",
+                "type": "discover_new",
+                "discover_by": "profile_url"
+            }
+            headers = {
+                "Authorization": f"Bearer {self.api_token}",
+                "Content-Type": "application/json"
+            }
+            body = {
+                "input": [{"url": profile_url}]  # NO start_date/end_date - they filter out posts without dates
+            }
+
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.post(url, params=params, headers=headers, json=body)
+
+            if response.status_code != 200:
+                logger.error(f"Trigger failed: HTTP {response.status_code}: {response.text}")
+                return None
+
+            data = response.json()
+            snapshot_id = data.get("snapshot_id")
+
+            if not snapshot_id:
+                logger.error(f"No snapshot_id in response: {data}")
+                return None
+
+            return snapshot_id
+
+        except Exception as e:
+            logger.error(f"Error triggering scrape: {str(e)}")
+            return None
+
+    async def _poll_and_download(self, snapshot_id: str, timeout_seconds: int) -> Optional[List[Dict[str, Any]]]:
+        """Poll snapshot status and download results when ready"""
+        try:
+            poll_url = f"{self.base_url}/datasets/v3/progress/{snapshot_id}"
+            download_url = f"{self.base_url}/datasets/v3/snapshot/{snapshot_id}"
+            headers = {"Authorization": f"Bearer {self.api_token}"}
+
+            start_time = datetime.now()
+            poll_interval = 5  # Start with 5 seconds
+            max_wait = timeout_seconds
+
+            async with httpx.AsyncClient(timeout=30) as client:
+                while (datetime.now() - start_time).total_seconds() < max_wait:
+                    # Check progress
+                    progress_response = await client.get(poll_url, headers=headers)
+
+                    if progress_response.status_code != 200:
+                        logger.error(f"Progress check failed: HTTP {progress_response.status_code}")
+                        await asyncio.sleep(poll_interval)
+                        continue
+
+                    progress_data = progress_response.json()
+                    status = progress_data.get("status")
+
+                    logger.info(f"📊 Snapshot status: {status}")
+
+                    if status == "ready":
+                        # Download results
+                        download_response = await client.get(download_url, headers=headers)
+
+                        if download_response.status_code != 200:
+                            logger.error(f"Download failed: HTTP {download_response.status_code}")
+                            return None
+
+                        posts = download_response.json()
+                        return posts if isinstance(posts, list) else []
+
+                    elif status in ["failed", "error"]:
+                        error_msg = progress_data.get("error", "Unknown error")
+                        logger.error(f"Scraping job failed: {error_msg}")
+                        return None
+
+                    # Still building - wait and retry
+                    await asyncio.sleep(poll_interval)
+                    poll_interval = min(poll_interval + 2, 15)  # Increase interval up to 15s
+
+                logger.error(f"Timeout waiting for snapshot {snapshot_id} after {max_wait}s")
+                return None
+
+        except Exception as e:
+            logger.error(f"Error polling/downloading: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
 
     def _parse_post_data(self, raw_post: Dict[str, Any], profile_url: str) -> Dict[str, Any]:
         """
