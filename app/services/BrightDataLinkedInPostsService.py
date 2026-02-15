@@ -275,11 +275,19 @@ class BrightDataLinkedInPostsService:
                 "input": [{"url": profile_url}]  # NO start_date/end_date - they filter out posts without dates
             }
 
+            logger.info(f"🔧 Triggering scrape: {url}")
+            logger.info(f"🔧 Params: {params}")
+            logger.info(f"🔧 Body: {body}")
+
             async with httpx.AsyncClient(timeout=30) as client:
                 response = await client.post(url, params=params, headers=headers, json=body)
 
+            logger.info(f"🔧 Response status: {response.status_code}")
+            logger.info(f"🔧 Response body: {response.text}")
+
             if response.status_code != 200:
                 logger.error(f"Trigger failed: HTTP {response.status_code}: {response.text}")
+                print(f"❌ Trigger failed: HTTP {response.status_code}: {response.text}")
                 return None
 
             data = response.json()
@@ -287,12 +295,17 @@ class BrightDataLinkedInPostsService:
 
             if not snapshot_id:
                 logger.error(f"No snapshot_id in response: {data}")
+                print(f"❌ No snapshot_id in response: {data}")
                 return None
 
+            logger.info(f"✅ Got snapshot_id: {snapshot_id}")
             return snapshot_id
 
         except Exception as e:
             logger.error(f"Error triggering scrape: {str(e)}")
+            print(f"❌ Exception triggering scrape: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return None
 
     async def _poll_and_download(self, snapshot_id: str, timeout_seconds: int) -> Optional[List[Dict[str, Any]]]:
