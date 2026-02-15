@@ -923,7 +923,8 @@ async def scan_single_focus_contact(
             user_id=user_id,
             action_type="LAZARUS_SCAN",
             payment_mode="CREDITS",
-            quantity=1
+            quantity=1,
+            reference=f"lazarus_focus_scan_{focus_id}"
         )
         print(f"💳 Deducted 10 credits for Lazarus scan (user: {user_id}, focus: {focus_id})")
     except Exception as credit_error:
@@ -1059,7 +1060,8 @@ async def trigger_auto_detection_scan(
             user_id=user_id,
             action_type="LAZARUS_SCAN",
             payment_mode="CREDITS",
-            quantity=1
+            quantity=1,
+            reference=f"lazarus_auto_scan_{user_id}"
         )
         print(f"💳 Deducted 10 credits for Lazarus auto-detection scan (user: {user_id})")
     except Exception as credit_error:
@@ -1450,7 +1452,10 @@ async def get_rejected_posts(
         total_count = len(rejected_groups)
         paginated_rejected_groups = rejected_groups[skip : skip + limit]
 
-        return UriResponse.success_response(
+        return UriResponse.custom_response(
+            message="Rejected posts retrieved successfully",
+            error_code=200,
+            success=True,
             data={
                 "rejected_scans": paginated_rejected_groups,
                 "total_count": total_count,

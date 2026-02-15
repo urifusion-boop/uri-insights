@@ -214,8 +214,25 @@ class BrightDataLinkedInPostsService:
                     "posts": []
                 }
 
+            # Filter to only include posts authored by the target profile owner
+            # Extract the profile username from the URL (e.g., "oluwatobiloba-aromire-931401190" from the URL)
+            target_username = profile_url.rstrip('/').split('/')[-1]
+
+            filtered_posts = []
+            for raw_post in raw_posts:
+                # Check if the post author matches the target profile
+                author_url = raw_post.get("use_url") or raw_post.get("author_url") or ""
+                post_user_id = raw_post.get("user_id", "")
+
+                # Match if user_id matches the target username OR if author URL contains the target username
+                if post_user_id == target_username or target_username in author_url:
+                    filtered_posts.append(raw_post)
+
+            logger.info(f"📊 Filtered {len(filtered_posts)} posts authored by profile owner (from {len(raw_posts)} total)")
+            print(f"📊 Filtered {len(filtered_posts)} posts authored by profile owner (from {len(raw_posts)} total)")
+
             # Parse and normalize posts
-            posts = [self._parse_post_data(raw_post, profile_url) for raw_post in raw_posts[:limit]]
+            posts = [self._parse_post_data(raw_post, profile_url) for raw_post in filtered_posts[:limit]]
 
             logger.info(f"✅ Fetched {len(posts)} LinkedIn posts for {profile_url}")
 
@@ -249,8 +266,8 @@ class BrightDataLinkedInPostsService:
 
     async def _trigger_and_fetch_posts(self, profile_url: str, timeout_seconds: int = 120) -> Optional[List[Dict[str, Any]]]:
         """
-        Trigger LinkedIn posts scraping job and return posts immediately.
-        Bright Data returns posts directly in JSONL format (not snapshot_id).
+        Trigger LinkedIn posts scraping job and return posts.
+        Handles both synchronous (HTTP 200 with JSONL) and asynchronous (HTTP 202 with snapshot_id) responses.
         """
         print(f"🚀 Fetching posts for: {profile_url}")
         logger.info(f"🚀 Fetching posts for: {profile_url}")
@@ -272,8 +289,6 @@ class BrightDataLinkedInPostsService:
             }
 
             logger.info(f"🔧 Calling Bright Data API: {url}")
-            logger.info(f"🔧 Params: {params}")
-            logger.info(f"🔧 Body: {body}")
 
             # Use extended timeout since scraping can take time
             async with httpx.AsyncClient(timeout=timeout_seconds) as client:
@@ -282,31 +297,50 @@ class BrightDataLinkedInPostsService:
             logger.info(f"🔧 Response status: {response.status_code}")
             print(f"🔧 Response status: {response.status_code}")
 
-            if response.status_code != 200:
+            # Handle HTTP 202 - Async mode with snapshot_id
+            if response.status_code == 202:
+                try:
+                    data = response.json()
+                    snapshot_id = data.get("snapshot_id")
+                    if snapshot_id:
+                        logger.info(f"📸 Got snapshot_id: {snapshot_id}, polling for results...")
+                        print(f"📸 Got snapshot_id: {snapshot_id}, polling for results...")
+                        return await self._poll_and_download(snapshot_id, timeout_seconds)
+                    else:
+                        logger.error(f"HTTP 202 but no snapshot_id in response: {data}")
+                        return None
+                except json.JSONDecodeError:
+                    logger.error(f"HTTP 202 but response is not JSON: {response.text}")
+                    return None
+
+            # Handle HTTP 200 - Synchronous mode with JSONL
+            elif response.status_code == 200:
+                # Parse JSONL response (one JSON object per line)
+                response_text = response.text.strip()
+                if not response_text:
+                    logger.warning("Empty response from Bright Data")
+                    return []
+
+                posts = []
+                for line in response_text.split('\n'):
+                    line = line.strip()
+                    if line:
+                        try:
+                            post = json.loads(line)
+                            posts.append(post)
+                        except json.JSONDecodeError as e:
+                            logger.warning(f"Failed to parse JSONL line: {e}")
+                            continue
+
+                logger.info(f"✅ Fetched {len(posts)} posts from Bright Data (synchronous)")
+                print(f"✅ Fetched {len(posts)} posts from Bright Data (synchronous)")
+                return posts
+
+            # Handle errors
+            else:
                 logger.error(f"Scraping failed: HTTP {response.status_code}: {response.text}")
                 print(f"❌ Scraping failed: HTTP {response.status_code}")
                 return None
-
-            # Parse JSONL response (one JSON object per line)
-            response_text = response.text.strip()
-            if not response_text:
-                logger.warning("Empty response from Bright Data")
-                return []
-
-            posts = []
-            for line in response_text.split('\n'):
-                line = line.strip()
-                if line:
-                    try:
-                        post = json.loads(line)
-                        posts.append(post)
-                    except json.JSONDecodeError as e:
-                        logger.warning(f"Failed to parse JSONL line: {e}")
-                        continue
-
-            logger.info(f"✅ Fetched {len(posts)} posts from Bright Data")
-            print(f"✅ Fetched {len(posts)} posts from Bright Data")
-            return posts
 
         except Exception as e:
             import traceback

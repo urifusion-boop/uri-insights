@@ -575,7 +575,7 @@ class LazarusRepository:
 
             alert_types_stats[alert_type]["total"] += 1
             status = alert.get("status")
-            if status in [LazarusAlertStatusEnum.CONTACTED, LazarusAlertStatusEnum.RESURRECTED]:
+            if status == LazarusAlertStatusEnum.ACTED:
                 alert_types_stats[alert_type]["acted_upon"] += 1
             elif status == LazarusAlertStatusEnum.DISMISSED:
                 alert_types_stats[alert_type]["dismissed"] += 1
