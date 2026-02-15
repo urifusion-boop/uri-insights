@@ -258,6 +258,8 @@ class BrightDataLinkedInPostsService:
 
     async def _trigger_scrape(self, profile_url: str) -> Optional[str]:
         """Trigger LinkedIn posts scraping job and return snapshot_id"""
+        print(f"🚀 ENTERING _trigger_scrape for: {profile_url}")
+        logger.info(f"🚀 ENTERING _trigger_scrape for: {profile_url}")
         try:
             url = f"{self.base_url}/datasets/v3/scrape"
             params = {
@@ -278,12 +280,17 @@ class BrightDataLinkedInPostsService:
             logger.info(f"🔧 Triggering scrape: {url}")
             logger.info(f"🔧 Params: {params}")
             logger.info(f"🔧 Body: {body}")
+            print(f"🔧 About to create httpx.AsyncClient...")
 
             async with httpx.AsyncClient(timeout=30) as client:
+                print(f"🔧 httpx client created, sending POST request...")
                 response = await client.post(url, params=params, headers=headers, json=body)
+                print(f"🔧 POST request completed")
 
             logger.info(f"🔧 Response status: {response.status_code}")
             logger.info(f"🔧 Response body: {response.text}")
+            print(f"🔧 Response status: {response.status_code}")
+            print(f"🔧 Response body: {response.text}")
 
             if response.status_code != 200:
                 logger.error(f"Trigger failed: HTTP {response.status_code}: {response.text}")
@@ -302,10 +309,15 @@ class BrightDataLinkedInPostsService:
             return snapshot_id
 
         except Exception as e:
-            logger.error(f"Error triggering scrape: {str(e)}")
-            print(f"❌ Exception triggering scrape: {str(e)}")
             import traceback
-            traceback.print_exc()
+            error_type = type(e).__name__
+            error_msg = str(e) if str(e) else repr(e)
+            full_traceback = traceback.format_exc()
+
+            logger.error(f"Error triggering scrape [{error_type}]: {error_msg}")
+            logger.error(f"Full traceback:\n{full_traceback}")
+            print(f"❌ Exception triggering scrape [{error_type}]: {error_msg}")
+            print(f"❌ Full traceback:\n{full_traceback}")
             return None
 
     async def _poll_and_download(self, snapshot_id: str, timeout_seconds: int) -> Optional[List[Dict[str, Any]]]:
