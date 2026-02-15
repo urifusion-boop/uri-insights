@@ -21,8 +21,9 @@ from app.services.AIService import AIService
 from app.services.OpenAIApifyTwitterService import OpenAIApifyTwitterService
 from app.services.ApifyGoogleSearchService import ApifyGoogleSearchService
 from app.services.ApifyLinkedInJobsService import ApifyLinkedInJobsService
-from app.services.BrightDataLinkedInPostsService import BrightDataLinkedInPostsService
+from app.services.ApifyLinkedInPostScraperService import ApifyLinkedInPostScraperService
 from app.services.XUsersLookupService import XUsersLookupService
+# Note: BrightDataLinkedInPostsService is kept for profile/company enrichment only
 from app.domain.requests.twitter_requests import CurrentUserLookupParams
 from app.domain.schemas.lazarus_schema import (
     FocusContact,
@@ -364,15 +365,16 @@ class LazarusMonitoringService:
             logger.info(f"🔍 Fetching LinkedIn posts for {len(linkedin_urls)} contacts")
             print(f"🔍 LinkedIn URLs to fetch: {linkedin_urls}")
 
-            # Use Bright Data LinkedIn Posts Service to fetch posts
-            linkedin_service = BrightDataLinkedInPostsService()
-            print(f"🔧 Calling fetch_posts_batch...")
-            result = await linkedin_service.fetch_posts_batch(
+            # Use Apify LinkedIn Posts Service to fetch posts (more accurate than Bright Data)
+            # Bright Data is reserved for profile/company enrichment only
+            linkedin_service = ApifyLinkedInPostScraperService()
+            print(f"🔧 Calling Apify to fetch LinkedIn posts...")
+            result = await linkedin_service.fetch_linkedin_posts(
                 linkedin_urls=linkedin_urls,
                 limit_per_source=10,  # 10 posts per contact (2-4 weeks of activity)
-                days_back=7  # Weekly scans = last 7 days
+                deep_scrape=True  # Enable detailed scraping
             )
-            print(f"🔧 fetch_posts_batch returned: success={result.get('success')}, total_posts={result.get('total_posts', 0)}")
+            print(f"🔧 Apify fetch returned: success={result.get('success')}, total_posts={result.get('total_posts', 0)}")
 
             if not result.get("success"):
                 error_msg = result.get('error_message', 'Unknown error')
