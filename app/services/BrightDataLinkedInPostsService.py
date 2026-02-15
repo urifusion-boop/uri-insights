@@ -11,6 +11,7 @@ Replaces: ApifyLinkedInPostScraperService (Apify-based)
 """
 import asyncio
 import httpx
+import json
 from typing import Dict, Any, List, Optional
 import logging
 from datetime import datetime, timezone, timedelta
@@ -181,7 +182,8 @@ class BrightDataLinkedInPostsService:
         timeout_seconds: int
     ) -> Dict[str, Any]:
         """
-        Fetch posts for a single LinkedIn profile using Bright Data REST API with polling
+        Fetch posts for a single LinkedIn profile using Bright Data REST API.
+        Returns posts immediately in JSONL format (no polling needed).
 
         Args:
             profile_url: LinkedIn profile URL
@@ -203,27 +205,16 @@ class BrightDataLinkedInPostsService:
 
             logger.info(f"🔍 Fetching LinkedIn posts for: {profile_url}")
 
-            # Step 1: Trigger scraping job (without date filters - they don't work reliably)
-            snapshot_id = await self._trigger_scrape(profile_url)
-            if not snapshot_id:
-                return {
-                    "success": False,
-                    "error_message": "Failed to trigger scraping job",
-                    "posts": []
-                }
-
-            logger.info(f"📸 Snapshot ID: {snapshot_id}")
-
-            # Step 2: Poll until job is complete (with timeout)
-            raw_posts = await self._poll_and_download(snapshot_id, timeout_seconds)
+            # Fetch posts directly (API returns JSONL immediately)
+            raw_posts = await self._trigger_and_fetch_posts(profile_url, timeout_seconds)
             if raw_posts is None:
                 return {
                     "success": False,
-                    "error_message": "Failed to retrieve posts - timeout or error",
+                    "error_message": "Failed to fetch posts from Bright Data",
                     "posts": []
                 }
 
-            # Step 3: Parse and normalize posts
+            # Parse and normalize posts
             posts = [self._parse_post_data(raw_post, profile_url) for raw_post in raw_posts[:limit]]
 
             logger.info(f"✅ Fetched {len(posts)} LinkedIn posts for {profile_url}")
@@ -256,10 +247,13 @@ class BrightDataLinkedInPostsService:
                 "posts": []
             }
 
-    async def _trigger_scrape(self, profile_url: str) -> Optional[str]:
-        """Trigger LinkedIn posts scraping job and return snapshot_id"""
-        print(f"🚀 ENTERING _trigger_scrape for: {profile_url}")
-        logger.info(f"🚀 ENTERING _trigger_scrape for: {profile_url}")
+    async def _trigger_and_fetch_posts(self, profile_url: str, timeout_seconds: int = 120) -> Optional[List[Dict[str, Any]]]:
+        """
+        Trigger LinkedIn posts scraping job and return posts immediately.
+        Bright Data returns posts directly in JSONL format (not snapshot_id).
+        """
+        print(f"🚀 Fetching posts for: {profile_url}")
+        logger.info(f"🚀 Fetching posts for: {profile_url}")
         try:
             url = f"{self.base_url}/datasets/v3/scrape"
             params = {
@@ -277,36 +271,42 @@ class BrightDataLinkedInPostsService:
                 "input": [{"url": profile_url}]  # NO start_date/end_date - they filter out posts without dates
             }
 
-            logger.info(f"🔧 Triggering scrape: {url}")
+            logger.info(f"🔧 Calling Bright Data API: {url}")
             logger.info(f"🔧 Params: {params}")
             logger.info(f"🔧 Body: {body}")
-            print(f"🔧 About to create httpx.AsyncClient...")
 
-            async with httpx.AsyncClient(timeout=30) as client:
-                print(f"🔧 httpx client created, sending POST request...")
+            # Use extended timeout since scraping can take time
+            async with httpx.AsyncClient(timeout=timeout_seconds) as client:
                 response = await client.post(url, params=params, headers=headers, json=body)
-                print(f"🔧 POST request completed")
 
             logger.info(f"🔧 Response status: {response.status_code}")
-            logger.info(f"🔧 Response body: {response.text}")
             print(f"🔧 Response status: {response.status_code}")
-            print(f"🔧 Response body: {response.text}")
 
             if response.status_code != 200:
-                logger.error(f"Trigger failed: HTTP {response.status_code}: {response.text}")
-                print(f"❌ Trigger failed: HTTP {response.status_code}: {response.text}")
+                logger.error(f"Scraping failed: HTTP {response.status_code}: {response.text}")
+                print(f"❌ Scraping failed: HTTP {response.status_code}")
                 return None
 
-            data = response.json()
-            snapshot_id = data.get("snapshot_id")
+            # Parse JSONL response (one JSON object per line)
+            response_text = response.text.strip()
+            if not response_text:
+                logger.warning("Empty response from Bright Data")
+                return []
 
-            if not snapshot_id:
-                logger.error(f"No snapshot_id in response: {data}")
-                print(f"❌ No snapshot_id in response: {data}")
-                return None
+            posts = []
+            for line in response_text.split('\n'):
+                line = line.strip()
+                if line:
+                    try:
+                        post = json.loads(line)
+                        posts.append(post)
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"Failed to parse JSONL line: {e}")
+                        continue
 
-            logger.info(f"✅ Got snapshot_id: {snapshot_id}")
-            return snapshot_id
+            logger.info(f"✅ Fetched {len(posts)} posts from Bright Data")
+            print(f"✅ Fetched {len(posts)} posts from Bright Data")
+            return posts
 
         except Exception as e:
             import traceback
@@ -314,10 +314,9 @@ class BrightDataLinkedInPostsService:
             error_msg = str(e) if str(e) else repr(e)
             full_traceback = traceback.format_exc()
 
-            logger.error(f"Error triggering scrape [{error_type}]: {error_msg}")
+            logger.error(f"Error fetching posts [{error_type}]: {error_msg}")
             logger.error(f"Full traceback:\n{full_traceback}")
-            print(f"❌ Exception triggering scrape [{error_type}]: {error_msg}")
-            print(f"❌ Full traceback:\n{full_traceback}")
+            print(f"❌ Exception fetching posts [{error_type}]: {error_msg}")
             return None
 
     async def _poll_and_download(self, snapshot_id: str, timeout_seconds: int) -> Optional[List[Dict[str, Any]]]:
@@ -354,8 +353,25 @@ class BrightDataLinkedInPostsService:
                             logger.error(f"Download failed: HTTP {download_response.status_code}")
                             return None
 
-                        posts = download_response.json()
-                        return posts if isinstance(posts, list) else []
+                        # Bright Data returns JSONL (JSON Lines) - one JSON object per line
+                        response_text = download_response.text.strip()
+                        if not response_text:
+                            logger.warning("Empty response from Bright Data")
+                            return []
+
+                        posts = []
+                        for line in response_text.split('\n'):
+                            line = line.strip()
+                            if line:
+                                try:
+                                    post = json.loads(line)
+                                    posts.append(post)
+                                except json.JSONDecodeError as e:
+                                    logger.warning(f"Failed to parse JSONL line: {e}")
+                                    continue
+
+                        logger.info(f"📥 Downloaded {len(posts)} posts from snapshot")
+                        return posts
 
                     elif status in ["failed", "error"]:
                         error_msg = progress_data.get("error", "Unknown error")
@@ -387,8 +403,10 @@ class BrightDataLinkedInPostsService:
         Returns:
             Normalized post dictionary
         """
-        # Extract text content
+        # Extract text content - Bright Data uses post_text or original_post_text
         text = (
+            raw_post.get("post_text") or
+            raw_post.get("original_post_text") or
             raw_post.get("text") or
             raw_post.get("content") or
             raw_post.get("postText") or
@@ -405,35 +423,39 @@ class BrightDataLinkedInPostsService:
             ""
         )
 
-        # Extract creation date/time
+        # Extract creation date/time - Bright Data uses date_posted
         created_at = (
+            raw_post.get("date_posted") or
             raw_post.get("created_at") or
             raw_post.get("createdAt") or
             raw_post.get("postedDate") or
             raw_post.get("publishedAt") or
             raw_post.get("date") or
+            raw_post.get("timestamp") or
             datetime.now(timezone.utc).isoformat()
         )
 
         # Normalize date to ISO format
         created_at = self._normalize_date(created_at)
 
-        # Extract author information
+        # Extract author information - Bright Data uses user_id
         author = (
             raw_post.get("author") or
             raw_post.get("authorName") or
+            raw_post.get("user_id") or
             raw_post.get("creator") or
             raw_post.get("name") or
             "Unknown"
         )
 
-        author_url = (
-            raw_post.get("author_url") or
-            raw_post.get("authorUrl") or
-            raw_post.get("authorProfileUrl") or
-            raw_post.get("profileUrl") or
-            profile_url  # Fallback to input profile URL
-        )
+        # Build author URL from user_id if available
+        author_url = raw_post.get("author_url") or raw_post.get("authorUrl") or raw_post.get("authorProfileUrl") or raw_post.get("profileUrl")
+
+        if not author_url and raw_post.get("user_id"):
+            # Construct LinkedIn profile URL from user_id
+            author_url = f"https://www.linkedin.com/in/{raw_post['user_id']}"
+        elif not author_url:
+            author_url = profile_url  # Fallback to input profile URL
 
         # Extract engagement metrics
         likes = (
