@@ -80,11 +80,11 @@ class BrightDataLinkedInPostsService:
             }
         """
         try:
-            # Check if client is initialized
-            if not self.BrightDataClient or not self.api_token:
+            # Check if API token is configured
+            if not self.api_token:
                 return {
                     "success": False,
-                    "error_message": "BrightData client not initialized. Please configure BRIGHTDATA_API_TOKEN and install brightdata-sdk.",
+                    "error_message": "BrightData API token not configured. Please set BRIGHTDATA_API_TOKEN.",
                     "posts_by_url": {},
                     "all_posts": []
                 }
