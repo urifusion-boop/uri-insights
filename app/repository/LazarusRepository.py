@@ -595,9 +595,7 @@ class LazarusRepository:
             week_alerts = [a for a in all_alerts
                           if week_start <= a.get("created_at", datetime.utcnow()) < week_end]
             week_total = len(week_alerts)
-            week_acted = len([a for a in week_alerts if a.get("status") in [
-                LazarusAlertStatusEnum.CONTACTED, LazarusAlertStatusEnum.RESURRECTED
-            ]])
+            week_acted = len([a for a in week_alerts if a.get("status") == LazarusAlertStatusEnum.ACTED])
 
             week_rate = (week_acted / week_total * 100) if week_total > 0 else 0.0
 
