@@ -212,12 +212,20 @@ class BrightDataLinkedInPostsService:
             # Use Bright Data client as async context manager
             # NOTE: SDK uses async dataset mode which takes 30-60s to build
             # We need a much longer timeout to allow dataset building + polling
+            logger.info(f"Calling Bright Data SDK with profile_url={profile_url}, timeout={max(timeout_seconds, 600)}")
             async with self.BrightDataClient(token=self.api_token) as client:
                 # Pass profile URL as positional argument (SDK doesn't accept named params)
                 result = await client.search.linkedin.posts(
                     profile_url,  # Positional argument
                     timeout=max(timeout_seconds, 600)  # Minimum 10 minutes for dataset building
                 )
+
+            # Log result details
+            logger.info(f"SDK Result: success={result.success}, data_length={len(result.data) if result.data else 0}")
+            if hasattr(result, 'status'):
+                logger.info(f"Result status: {result.status}")
+            if hasattr(result, 'error'):
+                logger.info(f"Result error: {result.error}")
 
             # Check if request was successful
             if not result.success:
