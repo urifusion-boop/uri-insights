@@ -362,17 +362,22 @@ class LazarusMonitoringService:
                 return {}
 
             logger.info(f"🔍 Fetching LinkedIn posts for {len(linkedin_urls)} contacts")
+            print(f"🔍 LinkedIn URLs to fetch: {linkedin_urls}")
 
             # Use Bright Data LinkedIn Posts Service to fetch posts
             linkedin_service = BrightDataLinkedInPostsService()
+            print(f"🔧 Calling fetch_posts_batch...")
             result = await linkedin_service.fetch_posts_batch(
                 linkedin_urls=linkedin_urls,
                 limit_per_source=10,  # 10 posts per contact (2-4 weeks of activity)
                 days_back=7  # Weekly scans = last 7 days
             )
+            print(f"🔧 fetch_posts_batch returned: success={result.get('success')}, total_posts={result.get('total_posts', 0)}")
 
             if not result.get("success"):
-                logger.warning(f"LinkedIn post fetch failed: {result.get('error_message', 'Unknown error')}")
+                error_msg = result.get('error_message', 'Unknown error')
+                logger.warning(f"LinkedIn post fetch failed: {error_msg}")
+                print(f"❌ LinkedIn post fetch failed: {error_msg}")
                 return {}
 
             posts_by_url = result.get("posts_by_url", {})
