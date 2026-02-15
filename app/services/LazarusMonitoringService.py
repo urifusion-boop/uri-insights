@@ -1198,19 +1198,37 @@ class LazarusMonitoringService:
             if posts:
                 # Deduplicate posts - remove posts we've already scanned
                 # Get previously scanned post URLs from scan_history
+                print(f"🔍 DEBUG: Checking for duplicate posts...")
                 previously_scanned = await db["scan_history"].find(
                     {
                         "user_id": contact.user_id,
                         "source_id": contact.focus_id,
                         "source_type": LazarusMonitorTypeEnum.FOCUS_CONTACT
                     },
-                    {"scanned_posts.post_url": 1}
+                    {"scanned_posts.post_url": 1, "scan_date": 1}
                 ).sort("scan_date", -1).limit(10).to_list(10)  # Check last 10 scans
+
+                print(f"🔍 DEBUG: Found {len(previously_scanned)} previous scans for this contact")
 
                 scanned_urls = set()
                 for scan in previously_scanned:
-                    for post in scan.get("scanned_posts", []):
-                        scanned_urls.add(post.get("post_url"))
+                    scan_date = scan.get("scan_date", "Unknown")
+                    posts_in_scan = scan.get("scanned_posts", [])
+                    print(f"🔍 DEBUG: Scan from {scan_date} had {len(posts_in_scan)} posts")
+                    for post in posts_in_scan:
+                        url = post.get("post_url")
+                        if url:
+                            scanned_urls.add(url)
+                            print(f"🔍 DEBUG:   - Scanned URL: {url[:80]}...")
+
+                print(f"🔍 DEBUG: Total unique previously scanned URLs: {len(scanned_urls)}")
+
+                # Debug current posts
+                print(f"🔍 DEBUG: Current posts before deduplication: {len(posts)}")
+                for i, p in enumerate(posts[:3]):  # Show first 3
+                    current_url = p.get("url") or p.get("postUrl") or p.get("tweet_url") or p.get("link")
+                    print(f"🔍 DEBUG:   Post {i+1} URL: {current_url[:80] if current_url else 'NO URL'}")
+                    print(f"🔍 DEBUG:   Post {i+1} keys: {list(p.keys())}")
 
                 # Filter out duplicate posts
                 original_count = len(posts)
@@ -1283,6 +1301,12 @@ class LazarusMonitoringService:
                     result = await db["scan_history"].insert_one(scan_history.dict(by_alias=True))
                     scan_history_id = str(result.inserted_id)
                     print(f"📋 Saved scan history with {len(scanned_posts_data)} posts (scan_id: {scan_history_id})")
+
+                    # Debug: Show first few URLs being saved
+                    if scanned_posts_data:
+                        print(f"🔍 DEBUG: Saving post URLs to scan_history:")
+                        for i, sp in enumerate(scanned_posts_data[:3]):
+                            print(f"🔍 DEBUG:   Post {i+1}: {sp.get('post_url', 'NO URL')[:80]}...")
 
                 except Exception as e:
                     logger.error(f"Failed to save scan history: {str(e)}")
