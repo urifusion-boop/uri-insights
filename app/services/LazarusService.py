@@ -84,6 +84,20 @@ class LazarusService:
             linkedin_url = SocialURLHelper.clean_linkedin_url(linkedin_url)
             print(f"[LAZARUS] Cleaned LinkedIn URL: {linkedin_url}")
 
+        # Check for duplicates - prevent adding the same contact twice
+        if linkedin_url or twitter_url:
+            existing_contact = await LazarusRepository.find_duplicate_focus_contact(
+                db, user_id, linkedin_url, twitter_url
+            )
+            if existing_contact:
+                platform = "LinkedIn" if linkedin_url else "Twitter"
+                return {
+                    "success": False,
+                    "message": f"This contact is already being monitored. Duplicate {platform} profile detected.",
+                    "duplicate_focus_id": existing_contact.focus_id,
+                    "duplicate_name": existing_contact.name,
+                }
+
         # Build focus contact data
         contact_data = {
             "focus_id": str(uuid.uuid4()),

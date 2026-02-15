@@ -84,6 +84,48 @@ class LazarusRepository:
             return None
 
     @staticmethod
+    async def find_duplicate_focus_contact(
+        db: AsyncIOMotorDatabase,
+        user_id: str,
+        linkedin_url: Optional[str],
+        twitter_url: Optional[str]
+    ) -> Optional[FocusContact]:
+        """
+        Find existing focus contact with the same LinkedIn or Twitter URL
+
+        Args:
+            db: Database connection
+            user_id: User ID to check within
+            linkedin_url: LinkedIn profile URL to check
+            twitter_url: Twitter profile URL to check
+
+        Returns:
+            Existing FocusContact if duplicate found, None otherwise
+        """
+        query = {
+            "user_id": user_id,
+            "monitoring_status": {"$ne": LazarusMonitoringStatusEnum.DELETED},
+            "$or": []
+        }
+
+        # Check LinkedIn URL
+        if linkedin_url:
+            query["$or"].append({"linkedin_url": linkedin_url})
+
+        # Check Twitter URL
+        if twitter_url:
+            query["$or"].append({"twitter_url": twitter_url})
+
+        # If no URLs provided, can't check for duplicates
+        if not query["$or"]:
+            return None
+
+        contact = await db["focus_contacts"].find_one(query)
+        if contact:
+            return FocusContact(**contact)
+        return None
+
+    @staticmethod
     async def get_focus_contact_by_id(
         db: AsyncIOMotorDatabase, focus_id: str, user_id: str
     ) -> Optional[FocusContact]:
