@@ -935,10 +935,18 @@ class LazarusMonitoringService:
         combined_content = "\n\n".join(content_pieces)
 
         # Build AI prompt with user's signal preferences
+        # Handle industry_keywords safely (could be None or empty list)
+        keywords_str = ", ".join(contact.industry_keywords) if contact.industry_keywords else "None specified"
+
+        # Debug logging for keywords
+        print(f"🔑 Industry Keywords for {contact.name}: {keywords_str}")
+        if not contact.industry_keywords:
+            print(f"⚠️  WARNING: No industry keywords set for {contact.name}. Keyword-based alerts will be limited!")
+
         prompt = LazarusPrompt.ANALYZE_BUYING_SIGNALS.value.format(
             contact_name=contact.name,
             current_company=contact.current_company or "Unknown",
-            keywords=", ".join(contact.industry_keywords),
+            keywords=keywords_str,
             signal_types=", ".join(user_signal_preferences),
             tweets=combined_content  # Now includes both Twitter and LinkedIn
         )
@@ -1188,10 +1196,36 @@ class LazarusMonitoringService:
             from app.domain.schemas.lazarus_schema import ScannedPost, ScanHistory
 
             if posts:
+                # Deduplicate posts - remove posts we've already scanned
+                # Get previously scanned post URLs from scan_history
+                previously_scanned = await db["scan_history"].find(
+                    {
+                        "user_id": contact.user_id,
+                        "source_id": contact.focus_id,
+                        "source_type": LazarusMonitorTypeEnum.FOCUS_CONTACT
+                    },
+                    {"scanned_posts.post_url": 1}
+                ).sort("scan_date", -1).limit(10).to_list(10)  # Check last 10 scans
+
+                scanned_urls = set()
+                for scan in previously_scanned:
+                    for post in scan.get("scanned_posts", []):
+                        scanned_urls.add(post.get("post_url"))
+
+                # Filter out duplicate posts
+                original_count = len(posts)
+                posts = [p for p in posts if (p.get("url") or p.get("postUrl") or p.get("tweet_url") or p.get("link")) not in scanned_urls]
+
+                if original_count > len(posts):
+                    print(f"🔄 Filtered out {original_count - len(posts)} duplicate posts (already scanned)")
+
+                if not posts:
+                    print(f"📭 No new posts to analyze (all {original_count} posts were already scanned)")
+
+            if posts:
                 print(f"🤖 Analyzing {len(posts)} posts with AI...")
 
                 # Build scanned_posts array for saving (regardless of signal detection)
-                from app.domain.schemas.lazarus_schema import ScannedPost, ScanHistory
                 scanned_posts_data = []
 
                 for i, post in enumerate(posts[:10]):  # Save up to 10 posts
