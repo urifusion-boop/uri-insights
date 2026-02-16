@@ -55,14 +55,16 @@ class LazarusService:
         lead_phone = None
         if source_lead_id:
             print(f"[LAZARUS] 📋 Fetching lead data from source_lead_id: {source_lead_id}")
-            lead = await LeadRepository.get_lead_by_id(db, source_lead_id, user_id)
-            if lead:
+            lead_response = await LeadRepository.get_lead_by_id(db, source_lead_id)
+            lead_data = lead_response.get("lead") if lead_response else None
+            if lead_data:
                 # Copy already-revealed email and phone from lead (they already paid for these)
-                if lead.email and lead.email not in ["PROCESSING", "UNAVAILABLE", ""]:
-                    lead_email = lead.email
+                lead_email_value = lead_data.get("lead_email") or lead_data.get("email")
+                if lead_email_value and lead_email_value not in ["PROCESSING", "UNAVAILABLE", ""]:
+                    lead_email = lead_email_value
                     print(f"[LAZARUS] 📧 Copying email from lead: {lead_email}")
-                if lead.phone and lead.phone not in ["PROCESSING", "UNAVAILABLE", ""]:
-                    lead_phone = lead.phone
+                if lead_data.get("phone") and lead_data.get("phone") not in ["PROCESSING", "UNAVAILABLE", ""]:
+                    lead_phone = lead_data.get("phone")
                     print(f"[LAZARUS] 📱 Copying phone from lead: {lead_phone}")
 
         # Create MD5 hash of bio if provided
@@ -1037,34 +1039,35 @@ class LazarusService:
             marked_dead_date=datetime.utcnow(),
             marked_dead_reason=reason,
         )
-        updated_lead = await LeadRepository.update_lead(
+        updated_lead_response = await LeadRepository.update_lead(
             db,
             lead_id,
             update_data,
         )
 
-        if not updated_lead:
+        updated_lead_data = updated_lead_response.get("lead") if updated_lead_response else None
+        if not updated_lead_data:
             return {"success": False, "message": "Lead not found"}
 
         # If auto_monitor is enabled, add to Lazarus
         if auto_monitor:
             # Determine type based on lead data
-            if updated_lead.social_handle or updated_lead.username:
+            if updated_lead_data.get("social_handle") or updated_lead_data.get("username"):
                 # Add as focus contact
                 contact_create = FocusContactCreate(
-                    name=updated_lead.name or updated_lead.username or "Unknown",
-                    social_handle=updated_lead.social_handle or updated_lead.username,
-                    last_bio_text=updated_lead.bio,
+                    name=updated_lead_data.get("first_name") or updated_lead_data.get("username") or "Unknown",
+                    social_handle=updated_lead_data.get("social_handle") or updated_lead_data.get("username"),
+                    last_bio_text=updated_lead_data.get("bio"),
                     industry_keywords=[],
                 )
                 monitor_result = await LazarusService.add_focus_contact(
                     db, user_id, contact_create, source_lead_id=lead_id
                 )
-            elif updated_lead.company_name and updated_lead.company_url:
+            elif updated_lead_data.get("company_name") and updated_lead_data.get("company_url"):
                 # Add as company monitor
                 monitor_create = CompanyMonitorCreate(
-                    company_name=updated_lead.company_name,
-                    website_url=updated_lead.company_url,
+                    company_name=updated_lead_data.get("company_name"),
+                    website_url=updated_lead_data.get("company_url"),
                     last_homepage_content=None,
                     last_job_count=0,
                 )
@@ -1097,9 +1100,14 @@ class LazarusService:
         Resurrect a DEAD lead (change status to RESURRECTED)
         PRD Section 5.2: Resurrection
         """
-        lead = await LeadRepository.get_lead(db, lead_id, user_id)
-        if not lead:
+        lead_response = await LeadRepository.get_lead_by_id(db, lead_id)
+        lead_data = lead_response.get("lead") if lead_response else None
+        if not lead_data:
             return {"success": False, "message": "Lead not found"}
+
+        # Convert to Lead object for easier access
+        from app.domain.schemas.lead_schema import Lead
+        lead = Lead(**lead_data)
 
         # Update lead to RESURRECTED
         update_data = LeadUpdate(
