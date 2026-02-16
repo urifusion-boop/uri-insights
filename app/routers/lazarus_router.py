@@ -238,6 +238,15 @@ async def enrich_focus_contact(
     # Extract enriched data
     profile_data = enrichment_result.get("profile_data", {})
 
+    # Transform skills, languages, etc. from [{"title": "X"}] to ["X"] format
+    skills = profile_data.get("skills", [])
+    if skills and isinstance(skills, list) and len(skills) > 0 and isinstance(skills[0], dict):
+        skills = [skill.get("title", skill) for skill in skills if skill]
+
+    languages = profile_data.get("languages", [])
+    if languages and isinstance(languages, list) and len(languages) > 0 and isinstance(languages[0], dict):
+        languages = [lang.get("title", lang) for lang in languages if lang]
+
     # Update contact with enriched data
     enrichment_update = {
         "email": enrichment_result.get("email"),
@@ -250,8 +259,8 @@ async def enrich_focus_contact(
         "about": profile_data.get("about"),
         "work_experience": profile_data.get("work_experience"),
         "education": profile_data.get("education"),
-        "skills": profile_data.get("skills"),
-        "languages": profile_data.get("languages"),
+        "skills": skills if skills else None,
+        "languages": languages if languages else None,
         "certifications": profile_data.get("certifications"),
         "enriched_at": datetime.utcnow(),
         "enrichment_status": "completed"
@@ -260,6 +269,9 @@ async def enrich_focus_contact(
     # Update current_company if we got it from enrichment
     if profile_data.get("current_company"):
         enrichment_update["current_company"] = profile_data.get("current_company")
+
+    # Remove None values (like auto-enrichment does)
+    enrichment_update = {k: v for k, v in enrichment_update.items() if v is not None}
 
     updated = await LazarusRepository.update_focus_contact(
         db, focus_id, user_id, enrichment_update
