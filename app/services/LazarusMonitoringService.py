@@ -14,6 +14,7 @@ import httpx
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
 from app.repository.LazarusRepository import LazarusRepository
 from app.services.LazarusService import LazarusService
@@ -42,6 +43,53 @@ logger = logging.getLogger(__name__)
 
 class LazarusMonitoringService:
     """Background service for weekly Lazarus scans using Origami Method"""
+
+    # ============ URL NORMALIZATION ============
+    @staticmethod
+    def _normalize_post_url(url: str) -> str:
+        """
+        Normalize post URL by removing tracking parameters that change between requests.
+
+        LinkedIn tracking parameters to remove:
+        - utm_source, utm_medium, utm_campaign (Google Analytics)
+        - rcm (LinkedIn tracking parameter - changes per request)
+        - trk (LinkedIn tracking)
+
+        This ensures the same post is recognized even if fetched multiple times.
+        """
+        if not url:
+            return url
+
+        try:
+            parsed = urlparse(url)
+
+            # Get query parameters
+            query_params = parse_qs(parsed.query)
+
+            # Remove tracking parameters
+            tracking_params = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term',
+                             'rcm', 'trk', 'trackingId', 'refId', 'ref']
+            for param in tracking_params:
+                query_params.pop(param, None)
+
+            # Rebuild query string
+            new_query = urlencode(query_params, doseq=True)
+
+            # Rebuild URL
+            normalized = urlunparse((
+                parsed.scheme,
+                parsed.netloc,
+                parsed.path,
+                parsed.params,
+                new_query,
+                parsed.fragment
+            ))
+
+            return normalized
+
+        except Exception:
+            # If normalization fails, return original URL
+            return url
 
     # ============ AI PRIORITY SCORING ============
     @staticmethod
@@ -1218,10 +1266,12 @@ class LazarusMonitoringService:
                     for post in posts_in_scan:
                         url = post.get("post_url")
                         if url:
-                            scanned_urls.add(url)
+                            # Normalize URL to remove tracking parameters before adding to set
+                            normalized_url = LazarusMonitoringService._normalize_post_url(url)
+                            scanned_urls.add(normalized_url)
                             # Show first 2 URLs in full to compare
                             if len(scanned_urls) <= 2:
-                                print(f"🔍 DEBUG:   - Scanned URL (len={len(url)}): {url}")
+                                print(f"🔍 DEBUG:   - Scanned URL (normalized, len={len(normalized_url)}): {normalized_url}")
 
                 print(f"🔍 DEBUG: Total unique previously scanned URLs: {len(scanned_urls)}")
 
@@ -1229,13 +1279,19 @@ class LazarusMonitoringService:
                 print(f"🔍 DEBUG: Current posts before deduplication: {len(posts)}")
                 for i, p in enumerate(posts[:3]):  # Show first 3
                     current_url = p.get("url") or p.get("postUrl") or p.get("tweet_url") or p.get("link")
-                    is_duplicate = current_url in scanned_urls
-                    print(f"🔍 DEBUG:   Post {i+1} URL (len={len(current_url) if current_url else 0}): {current_url}")
+                    normalized_current = LazarusMonitoringService._normalize_post_url(current_url) if current_url else None
+                    is_duplicate = normalized_current in scanned_urls if normalized_current else False
+                    print(f"🔍 DEBUG:   Post {i+1} URL (normalized, len={len(normalized_current) if normalized_current else 0}): {normalized_current}")
                     print(f"🔍 DEBUG:   Post {i+1} is_duplicate: {is_duplicate}")
 
-                # Filter out duplicate posts
+                # Filter out duplicate posts - normalize URLs before comparison
                 original_count = len(posts)
-                posts = [p for p in posts if (p.get("url") or p.get("postUrl") or p.get("tweet_url") or p.get("link")) not in scanned_urls]
+                posts = [
+                    p for p in posts
+                    if LazarusMonitoringService._normalize_post_url(
+                        p.get("url") or p.get("postUrl") or p.get("tweet_url") or p.get("link")
+                    ) not in scanned_urls
+                ]
 
                 if original_count > len(posts):
                     print(f"🔄 Filtered out {original_count - len(posts)} duplicate posts (already scanned)")

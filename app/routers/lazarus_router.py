@@ -1412,6 +1412,8 @@ async def get_rejected_posts(
             "rejection_reason": {"$exists": True, "$ne": None}
         }).sort("scan_date", -1).to_list(None)
 
+        print(f"🔍 DEBUG Rejected Posts: Found {len(rejected_scans)} rejected scans for user {user_id}")
+
         # Build rejected posts data
         rejected_groups = []
 
