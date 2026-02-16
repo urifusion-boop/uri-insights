@@ -286,6 +286,104 @@ async def enrich_focus_contact(
     )
 
 
+@router.post("/company-monitors/{monitor_id}/enrich")
+async def enrich_company_monitor(
+    monitor_id: str,
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Manually trigger LinkedIn company enrichment for a company monitor
+    Extracts company details, employees, followers, funding, etc.
+    """
+    from app.repository.LazarusRepository import LazarusRepository
+    from app.services.BrightDataCompanyEnrichmentService import BrightDataCompanyEnrichmentService
+    from datetime import datetime
+
+    # Get company monitor
+    monitor = await LazarusRepository.get_company_monitor_by_id(db, monitor_id, user_id)
+    if not monitor:
+        return UriResponse.custom_response("Company monitor not found", 404)
+
+    # Check if LinkedIn URL exists
+    if not monitor.linkedin_url:
+        return UriResponse.custom_response(
+            "No LinkedIn URL found for this company. Please add a LinkedIn company URL first.",
+            error_code=400,
+            success=False
+        )
+
+    logger.info(f"🔧 Enriching company monitor: {monitor.company_name} (LinkedIn: {monitor.linkedin_url})")
+
+    # Update status to pending
+    await LazarusRepository.update_company_monitor(
+        db, monitor_id, user_id, {"enrichment_status": "pending"}
+    )
+
+    # Call Bright Data Company Enrichment Service
+    enrichment_service = BrightDataCompanyEnrichmentService()
+    enrichment_result = await enrichment_service.enrich_company(
+        linkedin_url=monitor.linkedin_url,
+        timeout_seconds=90
+    )
+
+    if not enrichment_result.get("success"):
+        # Mark as failed
+        await LazarusRepository.update_company_monitor(
+            db, monitor_id, user_id, {
+                "enrichment_status": "failed",
+                "enriched_at": datetime.utcnow()
+            }
+        )
+        return UriResponse.custom_response(
+            message=f"Enrichment failed: {enrichment_result.get('error_message', 'Unknown error')}",
+            error_code=500,
+            success=False
+        )
+
+    # Update company monitor with enriched data
+    enrichment_update = {
+        "about": enrichment_result.get("about"),
+        "slogan": enrichment_result.get("slogan"),
+        "description": enrichment_result.get("description"),
+        "specialties": enrichment_result.get("specialties", []),
+        "organization_type": enrichment_result.get("organization_type"),
+        "company_size": enrichment_result.get("company_size"),
+        "industries": enrichment_result.get("industries", []),
+        "founded": enrichment_result.get("founded"),
+        "country_code": enrichment_result.get("country_code"),
+        "headquarters": enrichment_result.get("headquarters"),
+        "followers": enrichment_result.get("followers"),
+        "employees": enrichment_result.get("employees"),
+        "logo": enrichment_result.get("logo"),
+        "company_image": enrichment_result.get("company_image"),
+        "enriched_at": datetime.utcnow(),
+        "enrichment_status": "completed"
+    }
+
+    updated = await LazarusRepository.update_company_monitor(
+        db, monitor_id, user_id, enrichment_update
+    )
+
+    if not updated:
+        return UriResponse.custom_response("Failed to save enrichment data", 500)
+
+    logger.info(f"✅ Successfully enriched company: {monitor.company_name}")
+
+    return UriResponse.custom_response(
+        message="Company enriched successfully",
+        error_code=200,
+        success=True,
+        data={
+            "company_name": enrichment_result.get("name"),
+            "about": enrichment_result.get("about"),
+            "employees": enrichment_result.get("employees"),
+            "followers": enrichment_result.get("followers"),
+            "headquarters": enrichment_result.get("headquarters")
+        }
+    )
+
+
 @router.get("/focus-contacts/{focus_id}/detail")
 async def get_focus_contact_detail(
     focus_id: str,
