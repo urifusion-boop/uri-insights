@@ -225,10 +225,9 @@ class LazarusService:
 
                     if has_profile_data:
                         # Update contact with enriched data from Bright Data
+                        # IMPORTANT: Don't overwrite email/phone if they were copied from lead (user already paid)
                         update_data = {
                             "profile_photo": profile_data.get("profile_photo"),
-                            "email": profile_data.get("email"),
-                            "phone": profile_data.get("phone"),
                             "headline": profile_data.get("headline"),
                             "location": profile_data.get("location"),
                             "connections_count": profile_data.get("connections_count"),
@@ -243,6 +242,12 @@ class LazarusService:
                             "enrichment_status": "completed",
                             "enriched_at": datetime.utcnow()
                         }
+
+                        # Only add email/phone from Bright Data if NOT already copied from lead
+                        if not lead_email:
+                            update_data["email"] = profile_data.get("email")
+                        if not lead_phone:
+                            update_data["phone"] = profile_data.get("phone")
 
                         # Remove None values
                         update_data = {k: v for k, v in update_data.items() if v is not None}
