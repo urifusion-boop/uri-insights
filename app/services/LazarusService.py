@@ -149,11 +149,16 @@ class LazarusService:
 
         # Auto-trigger enrichment if LinkedIn URL is provided
         # This ensures profile photo, email, and other data are immediately available
+        print(f"[LAZARUS] 🔍 Checking if enrichment needed...")
+        print(f"[LAZARUS] 🔍 LinkedIn URL exists: {bool(linkedin_url)}")
+        print(f"[LAZARUS] 🔍 LinkedIn URL value: {linkedin_url}")
+
         if linkedin_url:
             from app.services.LinkedInProfileScraperService import LinkedInProfileScraperService
 
-            print(f"[LAZARUS] Auto-enriching new contact: {contact_create.name}")
-            print(f"[LAZARUS] LinkedIn URL: {linkedin_url}")
+            print(f"[LAZARUS] 🚀 AUTO-ENRICHMENT STARTING...")
+            print(f"[LAZARUS] 👤 Contact: {contact_create.name}")
+            print(f"[LAZARUS] 🔗 LinkedIn URL: {linkedin_url}")
 
             try:
                 # Update status to pending
