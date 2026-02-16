@@ -1219,7 +1219,9 @@ class LazarusMonitoringService:
                         url = post.get("post_url")
                         if url:
                             scanned_urls.add(url)
-                            print(f"🔍 DEBUG:   - Scanned URL: {url[:80]}...")
+                            # Show first 2 URLs in full to compare
+                            if len(scanned_urls) <= 2:
+                                print(f"🔍 DEBUG:   - Scanned URL (len={len(url)}): {url}")
 
                 print(f"🔍 DEBUG: Total unique previously scanned URLs: {len(scanned_urls)}")
 
@@ -1227,8 +1229,9 @@ class LazarusMonitoringService:
                 print(f"🔍 DEBUG: Current posts before deduplication: {len(posts)}")
                 for i, p in enumerate(posts[:3]):  # Show first 3
                     current_url = p.get("url") or p.get("postUrl") or p.get("tweet_url") or p.get("link")
-                    print(f"🔍 DEBUG:   Post {i+1} URL: {current_url[:80] if current_url else 'NO URL'}")
-                    print(f"🔍 DEBUG:   Post {i+1} keys: {list(p.keys())}")
+                    is_duplicate = current_url in scanned_urls
+                    print(f"🔍 DEBUG:   Post {i+1} URL (len={len(current_url) if current_url else 0}): {current_url}")
+                    print(f"🔍 DEBUG:   Post {i+1} is_duplicate: {is_duplicate}")
 
                 # Filter out duplicate posts
                 original_count = len(posts)
@@ -1305,8 +1308,9 @@ class LazarusMonitoringService:
                     # Debug: Show first few URLs being saved
                     if scanned_posts_data:
                         print(f"🔍 DEBUG: Saving post URLs to scan_history:")
-                        for i, sp in enumerate(scanned_posts_data[:3]):
-                            print(f"🔍 DEBUG:   Post {i+1}: {sp.get('post_url', 'NO URL')[:80]}...")
+                        for i, sp in enumerate(scanned_posts_data[:2]):
+                            url = sp.get('post_url', 'NO URL')
+                            print(f"🔍 DEBUG:   Post {i+1} (len={len(url) if url != 'NO URL' else 0}): {url}")
 
                 except Exception as e:
                     logger.error(f"Failed to save scan history: {str(e)}")
