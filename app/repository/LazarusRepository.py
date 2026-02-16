@@ -104,7 +104,7 @@ class LazarusRepository:
         """
         query = {
             "user_id": user_id,
-            "monitoring_status": {"$ne": LazarusMonitoringStatusEnum.DELETED},
+            "monitoring_status": {"$ne": LazarusMonitoringStatusEnum.DEAD},
             "$or": []
         }
 
