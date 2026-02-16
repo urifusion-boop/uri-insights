@@ -20,6 +20,30 @@ from app.domain.schemas.lazarus_schema import (
 class LazarusRepository:
     """Repository for Lazarus Protocol database operations"""
 
+    # ============ HELPER METHODS ============
+    @staticmethod
+    def _clean_focus_contact_data(doc: Dict[str, Any]) -> Dict[str, Any]:
+        """Clean focus contact data before Pydantic validation
+
+        Transforms skills/languages from [{"title": "X"}] to ["X"] format
+        This handles legacy data from Bright Data enrichment
+        """
+        if doc.get("skills") and isinstance(doc["skills"], list):
+            if len(doc["skills"]) > 0 and isinstance(doc["skills"][0], dict):
+                doc["skills"] = [
+                    skill.get("title", skill) if isinstance(skill, dict) else skill
+                    for skill in doc["skills"]
+                ]
+
+        if doc.get("languages") and isinstance(doc["languages"], list):
+            if len(doc["languages"]) > 0 and isinstance(doc["languages"][0], dict):
+                doc["languages"] = [
+                    lang.get("title", lang) if isinstance(lang, dict) else lang
+                    for lang in doc["languages"]
+                ]
+
+        return doc
+
     # ============ INDEXES ============
     @staticmethod
     async def setup_indexes(db: AsyncIOMotorDatabase):
@@ -76,7 +100,7 @@ class LazarusRepository:
         try:
             result = await db["focus_contacts"].insert_one(contact_data)
             contact_data["_id"] = str(result.inserted_id)
-            return FocusContact(**contact_data)
+            return FocusContact(**LazarusRepository._clean_focus_contact_data(contact_data))
         except pymongo.errors.DuplicateKeyError:
             return None
         except Exception as e:
@@ -122,7 +146,7 @@ class LazarusRepository:
 
         contact = await db["focus_contacts"].find_one(query)
         if contact:
-            return FocusContact(**contact)
+            return FocusContact(**LazarusRepository._clean_focus_contact_data(contact))
         return None
 
     @staticmethod
@@ -146,7 +170,7 @@ class LazarusRepository:
                         fixed_languages.append(lang)
                 contact["languages"] = fixed_languages
 
-            return FocusContact(**contact)
+            return FocusContact(**LazarusRepository._clean_focus_contact_data(contact))
         return None
 
     @staticmethod
@@ -172,19 +196,7 @@ class LazarusRepository:
 
         contacts = []
         async for doc in cursor:
-            # Fix legacy data: convert dict languages to strings
-            if "languages" in doc and isinstance(doc["languages"], list):
-                fixed_languages = []
-                for lang in doc["languages"]:
-                    if isinstance(lang, dict):
-                        lang_name = lang.get("title") or lang.get("name") or lang.get("language")
-                        if lang_name:
-                            fixed_languages.append(lang_name)
-                    elif isinstance(lang, str):
-                        fixed_languages.append(lang)
-                doc["languages"] = fixed_languages
-
-            contacts.append(FocusContact(**doc))
+            contacts.append(FocusContact(**LazarusRepository._clean_focus_contact_data(doc)))
         return contacts
 
     @staticmethod
@@ -206,7 +218,7 @@ class LazarusRepository:
 
         contacts = []
         async for doc in cursor:
-            contacts.append(FocusContact(**doc))
+            contacts.append(FocusContact(**LazarusRepository._clean_focus_contact_data(doc)))
         return contacts
 
     @staticmethod
@@ -220,7 +232,11 @@ class LazarusRepository:
             {"$set": update_data},
             return_document=pymongo.ReturnDocument.AFTER,
         )
-        return FocusContact(**result) if result else None
+
+        if not result:
+            return None
+
+        return FocusContact(**LazarusRepository._clean_focus_contact_data(result))
 
     @staticmethod
     async def delete_focus_contact(
