@@ -23,6 +23,7 @@ from app.domain.schemas.lazarus_schema import (
     LazarusMetrics,
 )
 from app.domain.enums.lead_enum import LeadStatusEnum, LeadSourceEnum
+from app.domain.schemas.lead_schema import LeadUpdate
 
 
 class LazarusService:
@@ -48,6 +49,21 @@ class LazarusService:
                 "message": f"Slot limit reached. You have {slots.max_slots} slots on the {slots.plan_type} plan.",
                 "slots_available": 0,
             }
+
+        # If this contact is being created from an individual lead, fetch the lead to copy already-revealed email/phone
+        lead_email = None
+        lead_phone = None
+        if source_lead_id:
+            print(f"[LAZARUS] 📋 Fetching lead data from source_lead_id: {source_lead_id}")
+            lead = await LeadRepository.get_lead_by_id(db, source_lead_id, user_id)
+            if lead:
+                # Copy already-revealed email and phone from lead (they already paid for these)
+                if lead.email and lead.email not in ["PROCESSING", "UNAVAILABLE", ""]:
+                    lead_email = lead.email
+                    print(f"[LAZARUS] 📧 Copying email from lead: {lead_email}")
+                if lead.phone and lead.phone not in ["PROCESSING", "UNAVAILABLE", ""]:
+                    lead_phone = lead.phone
+                    print(f"[LAZARUS] 📱 Copying phone from lead: {lead_phone}")
 
         # Create MD5 hash of bio if provided
         last_bio_hash = None
@@ -121,6 +137,12 @@ class LazarusService:
             "last_updated": datetime.utcnow(),
         }
 
+        # Add already-revealed email/phone from lead if available (they already paid for this)
+        if lead_email:
+            contact_data["email"] = lead_email
+        if lead_phone:
+            contact_data["phone"] = lead_phone
+
         # Create in database
         contact = await LazarusRepository.create_focus_contact(db, contact_data)
         if not contact:
@@ -136,15 +158,15 @@ class LazarusService:
 
         # If linked to a lead, mark the lead as monitored
         if source_lead_id:
+            update_data = LeadUpdate(
+                is_lazarus_monitored=True,
+                lazarus_focus_id=contact_data["focus_id"],
+                lead_status=LeadStatusEnum.MONITORING,
+            )
             await LeadRepository.update_lead(
                 db,
                 source_lead_id,
-                user_id,
-                {
-                    "is_lazarus_monitored": True,
-                    "lazarus_focus_id": contact_data["focus_id"],
-                    "status": LeadStatusEnum.MONITORING,
-                },
+                update_data,
             )
 
         # Auto-trigger enrichment if LinkedIn URL is provided
@@ -357,14 +379,14 @@ class LazarusService:
 
         # Unlink from lead if exists
         if contact.source_lead_id:
+            update_data = LeadUpdate(
+                is_lazarus_monitored=False,
+                lazarus_focus_id=None,
+            )
             await LeadRepository.update_lead(
                 db,
                 contact.source_lead_id,
-                user_id,
-                {
-                    "is_lazarus_monitored": False,
-                    "lazarus_focus_id": None,
-                },
+                update_data,
             )
 
         return {"success": True, "message": "Focus contact removed successfully"}
@@ -476,15 +498,15 @@ class LazarusService:
 
         # If linked to a lead, mark it as monitored
         if source_lead_id:
+            update_data = LeadUpdate(
+                is_lazarus_monitored=True,
+                lazarus_company_monitor_id=monitor_data["monitor_id"],
+                lead_status=LeadStatusEnum.MONITORING,
+            )
             await LeadRepository.update_lead(
                 db,
                 source_lead_id,
-                user_id,
-                {
-                    "is_lazarus_monitored": True,
-                    "lazarus_company_monitor_id": monitor_data["monitor_id"],
-                    "status": LeadStatusEnum.MONITORING,
-                },
+                update_data,
             )
 
         # Auto-trigger enrichment if LinkedIn URL is provided
@@ -585,14 +607,14 @@ class LazarusService:
 
         # Unlink from lead if exists
         if monitor.source_lead_id:
+            update_data = LeadUpdate(
+                is_lazarus_monitored=False,
+                lazarus_company_monitor_id=None,
+            )
             await LeadRepository.update_lead(
                 db,
                 monitor.source_lead_id,
-                user_id,
-                {
-                    "is_lazarus_monitored": False,
-                    "lazarus_company_monitor_id": None,
-                },
+                update_data,
             )
 
         return {"success": True, "message": "Company monitor removed successfully"}
@@ -921,14 +943,13 @@ class LazarusService:
 
         # If alert has linked lead, update the lead
         if updated.resurrected_lead_id:
+            update_data = LeadUpdate(
+                lead_status=LeadStatusEnum.CONTACTED,
+            )
             await LeadRepository.update_lead(
                 db,
                 updated.resurrected_lead_id,
-                user_id,
-                {
-                    "status": LeadStatusEnum.CONTACTED,
-                    "last_updated": datetime.utcnow(),
-                },
+                update_data,
             )
 
         return {"success": True, "message": "Alert marked as contacted"}
@@ -1006,15 +1027,15 @@ class LazarusService:
         Optionally auto-add to Lazarus monitoring
         """
         # Update lead status to DEAD
+        update_data = LeadUpdate(
+            lead_status=LeadStatusEnum.DEAD,
+            marked_dead_date=datetime.utcnow(),
+            marked_dead_reason=reason,
+        )
         updated_lead = await LeadRepository.update_lead(
             db,
             lead_id,
-            user_id,
-            {
-                "status": LeadStatusEnum.DEAD,
-                "marked_dead_date": datetime.utcnow(),
-                "marked_dead_reason": reason,
-            },
+            update_data,
         )
 
         if not updated_lead:
@@ -1076,17 +1097,17 @@ class LazarusService:
             return {"success": False, "message": "Lead not found"}
 
         # Update lead to RESURRECTED
+        update_data = LeadUpdate(
+            lead_status=LeadStatusEnum.RESURRECTED,
+            resurrection_count=(lead.resurrection_count or 0) + 1,
+            last_resurrection_date=datetime.utcnow(),
+            last_resurrection_type=alert_type,
+            lead_source=LeadSourceEnum.LAZARUS,
+        )
         updated_lead = await LeadRepository.update_lead(
             db,
             lead_id,
-            user_id,
-            {
-                "status": LeadStatusEnum.RESURRECTED,
-                "resurrection_count": (lead.resurrection_count or 0) + 1,
-                "last_resurrection_date": datetime.utcnow(),
-                "last_resurrection_type": alert_type,
-                "source": LeadSourceEnum.LAZARUS,
-            },
+            update_data,
         )
 
         if not updated_lead:

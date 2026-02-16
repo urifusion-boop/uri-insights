@@ -238,6 +238,16 @@ class LeadUpdate(BaseModel):
     # AI Next Steps (for updates)
     ai_next_steps: Optional[AINextSteps] = None
 
+    # Lazarus Protocol - Resurrection tracking fields (for updates)
+    is_lazarus_monitored: Optional[bool] = None
+    lazarus_focus_id: Optional[str] = None
+    lazarus_company_monitor_id: Optional[str] = None
+    resurrection_count: Optional[int] = None
+    last_resurrection_date: Optional[datetime] = None
+    last_resurrection_type: Optional[str] = None
+    marked_dead_date: Optional[datetime] = None
+    marked_dead_reason: Optional[str] = None
+
     last_updated: datetime = Field(default_factory=datetime.utcnow)
 
     class Config:
