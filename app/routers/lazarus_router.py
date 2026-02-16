@@ -1503,6 +1503,15 @@ async def get_rejected_posts(
     from datetime import datetime
 
     try:
+        # Debug: Check what's in scan_history
+        all_scans = await db["scan_history"].find({
+            "user_id": user_id
+        }).sort("scan_date", -1).limit(5).to_list(5)
+
+        print(f"🔍 DEBUG: Total scans for user: {len(all_scans)}")
+        for scan in all_scans:
+            print(f"🔍 DEBUG:   Scan {scan.get('_id')}: signal_detected={scan.get('signal_detected')}, has_rejection_reason={bool(scan.get('rejection_reason'))}, rejection_reason={scan.get('rejection_reason')[:50] if scan.get('rejection_reason') else 'None'}...")
+
         # Get scan history where NO signal was detected
         rejected_scans = await db["scan_history"].find({
             "user_id": user_id,

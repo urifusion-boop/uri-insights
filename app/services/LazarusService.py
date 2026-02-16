@@ -172,6 +172,20 @@ class LazarusService:
                 if enrichment_result.get("success"):
                     profile_data = enrichment_result.get("profile", {})
 
+                    # Log what Bright Data returned
+                    print(f"[LAZARUS] ✅ Enrichment successful!")
+                    print(f"[LAZARUS] 📧 Email: {profile_data.get('email') or 'Not found'}")
+                    print(f"[LAZARUS] 📱 Phone: {profile_data.get('phone') or 'Not found'}")
+                    print(f"[LAZARUS] 📸 Profile Photo: {'✅ Found' if profile_data.get('profile_photo') else '❌ Not found'}")
+                    print(f"[LAZARUS] 💼 Headline: {profile_data.get('headline')[:50] if profile_data.get('headline') else 'Not found'}...")
+                    print(f"[LAZARUS] 🏢 Current Company: {profile_data.get('current_company') or 'Not found'}")
+                    print(f"[LAZARUS] 📍 Location: {profile_data.get('location') or 'Not found'}")
+                    print(f"[LAZARUS] 🔗 Connections: {profile_data.get('connections_count') or 'Not found'}")
+                    print(f"[LAZARUS] 📋 About: {'✅ Found' if profile_data.get('about') else '❌ Not found'}")
+                    print(f"[LAZARUS] 💪 Skills: {len(profile_data.get('skills', [])) if profile_data.get('skills') else 0} skills")
+                    print(f"[LAZARUS] 🎓 Education: {len(profile_data.get('education', [])) if profile_data.get('education') else 0} entries")
+                    print(f"[LAZARUS] 💼 Work Experience: {len(profile_data.get('work_experience', [])) if profile_data.get('work_experience') else 0} entries")
+
                     # Check if any actual profile data was retrieved
                     has_profile_data = any([
                         profile_data.get("profile_photo"),
