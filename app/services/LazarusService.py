@@ -166,7 +166,7 @@ class LazarusService:
                     db, contact_data["focus_id"], user_id, {"enrichment_status": "pending"}
                 )
 
-                # Call Bright Data LinkedIn Profile Enrichment Service
+                # Call Bright Data LinkedIn Profile Enrichment Service (FREE - no credits)
                 from app.services.BrightDataProfileEnrichmentService import BrightDataProfileEnrichmentService
                 enrichment_service = BrightDataProfileEnrichmentService()
                 enrichment_result = await enrichment_service.enrich_profile(

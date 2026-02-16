@@ -384,6 +384,201 @@ async def enrich_company_monitor(
     )
 
 
+@router.post("/focus-contacts/{focus_id}/reveal-email")
+async def reveal_focus_contact_email(
+    focus_id: str,
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Reveal email for focus contact using Apollo (charges 1 credit)
+    Similar to individual leads reveal functionality
+    """
+    from app.repository.LazarusRepository import LazarusRepository
+    from app.services.ApolloService import ApolloService
+    from app.services.uri_microservices.UriTaskManagerService import UriTaskManagerService
+    from datetime import datetime
+
+    # Get contact
+    contact = await LazarusRepository.get_focus_contact_by_id(db, focus_id, user_id)
+    if not contact:
+        return UriResponse.custom_response("Contact not found", 404)
+
+    # Check if email already revealed
+    if contact.email and contact.email != "PROCESSING" and contact.email != "UNAVAILABLE":
+        return UriResponse.custom_response(
+            message="Email already revealed",
+            error_code=200,
+            success=True,
+            data={"email": contact.email}
+        )
+
+    # Check if LinkedIn URL exists
+    if not contact.linkedin_url:
+        return UriResponse.custom_response(
+            "No LinkedIn URL found for this contact",
+            error_code=400,
+            success=False
+        )
+
+    # Check credits (1 credit for email)
+    try:
+        credit_check = await UriTaskManagerService.check_payment_balance(
+            user_id=user_id,
+            action_type="ENRICHMENT_EMAIL",
+            payment_mode="CREDITS",
+            quantity=1
+        )
+        if not credit_check.get("responseData", {}).get("hasSufficientBalance"):
+            return UriResponse.custom_response(
+                "Insufficient credits for email reveal",
+                error_code=402,
+                success=False
+            )
+    except Exception as e:
+        logger.error(f"Credit check failed: {str(e)}")
+        return UriResponse.custom_response(f"Credit check failed: {str(e)}", 500, success=False)
+
+    # Call Apollo to reveal email
+    try:
+        temp_lead = {"linkedin_url": contact.linkedin_url, "username": contact.name}
+        apollo_result = await ApolloService.enrich_person(temp_lead, reveal_email=True)
+
+        person_data = apollo_result.get("person", {})
+        email = person_data.get("email")
+
+        if not email:
+            email = "UNAVAILABLE"
+
+        # Update contact with email
+        await LazarusRepository.update_focus_contact(
+            db, focus_id, user_id, {"email": email}
+        )
+
+        # Deduct credits
+        await UriTaskManagerService.deduct_payment(
+            user_id=user_id,
+            action_type="ENRICHMENT_EMAIL",
+            payment_mode="CREDITS",
+            quantity=1,
+            reference=f"lazarus_email_reveal_{focus_id}"
+        )
+
+        logger.info(f"✅ Email revealed for {contact.name}: {email}")
+
+        return UriResponse.custom_response(
+            message="Email revealed successfully",
+            error_code=200,
+            success=True,
+            data={"email": email}
+        )
+
+    except Exception as e:
+        logger.error(f"Apollo email reveal failed: {str(e)}")
+        return UriResponse.custom_response(
+            f"Failed to reveal email: {str(e)}",
+            error_code=500,
+            success=False
+        )
+
+
+@router.post("/focus-contacts/{focus_id}/reveal-phone")
+async def reveal_focus_contact_phone(
+    focus_id: str,
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Reveal phone for focus contact using Apollo (charges 7 credits)
+    Similar to individual leads reveal functionality
+    """
+    from app.repository.LazarusRepository import LazarusRepository
+    from app.services.ApolloService import ApolloService
+    from app.services.uri_microservices.UriTaskManagerService import UriTaskManagerService
+    from app.core.config import settings
+    from datetime import datetime
+
+    # Get contact
+    contact = await LazarusRepository.get_focus_contact_by_id(db, focus_id, user_id)
+    if not contact:
+        return UriResponse.custom_response("Contact not found", 404)
+
+    # Check if phone already revealed
+    if contact.phone and contact.phone != "PROCESSING" and contact.phone != "UNAVAILABLE":
+        return UriResponse.custom_response(
+            message="Phone already revealed",
+            error_code=200,
+            success=True,
+            data={"phone": contact.phone}
+        )
+
+    # Check if LinkedIn URL exists
+    if not contact.linkedin_url:
+        return UriResponse.custom_response(
+            "No LinkedIn URL found for this contact",
+            error_code=400,
+            success=False
+        )
+
+    # Check credits (7 credits for phone)
+    try:
+        credit_check = await UriTaskManagerService.check_payment_balance(
+            user_id=user_id,
+            action_type="ENRICHMENT_PHONE",
+            payment_mode="CREDITS",
+            quantity=1
+        )
+        if not credit_check.get("responseData", {}).get("hasSufficientBalance"):
+            return UriResponse.custom_response(
+                "Insufficient credits for phone reveal (7 credits required)",
+                error_code=402,
+                success=False
+            )
+    except Exception as e:
+        logger.error(f"Credit check failed: {str(e)}")
+        return UriResponse.custom_response(f"Credit check failed: {str(e)}", 500, success=False)
+
+    # Set phone to PROCESSING
+    await LazarusRepository.update_focus_contact(
+        db, focus_id, user_id, {"phone": "PROCESSING"}
+    )
+
+    # Call Apollo to reveal phone (async via webhook)
+    try:
+        webhook_url = f"{settings.URI_GATEWAY_BASE_API_URL}/uri-insights/webhooks/apollo-webhook"
+        temp_lead = {"linkedin_url": contact.linkedin_url, "username": contact.name, "focus_id": focus_id}
+        apollo_result = await ApolloService.enrich_person(temp_lead, reveal_phone=True, webhook_url=webhook_url)
+
+        # Deduct credits
+        await UriTaskManagerService.deduct_payment(
+            user_id=user_id,
+            action_type="ENRICHMENT_PHONE",
+            payment_mode="CREDITS",
+            quantity=1,
+            reference=f"lazarus_phone_reveal_{focus_id}"
+        )
+
+        logger.info(f"✅ Phone reveal request sent for {contact.name} (awaiting webhook)")
+
+        return UriResponse.custom_response(
+            message="Phone reveal in progress (will be available shortly)",
+            error_code=200,
+            success=True,
+            data={"phone": "PROCESSING"}
+        )
+
+    except Exception as e:
+        logger.error(f"Apollo phone reveal failed: {str(e)}")
+        await LazarusRepository.update_focus_contact(
+            db, focus_id, user_id, {"phone": None}
+        )
+        return UriResponse.custom_response(
+            f"Failed to reveal phone: {str(e)}",
+            error_code=500,
+            success=False
+        )
+
+
 @router.get("/focus-contacts/{focus_id}/detail")
 async def get_focus_contact_detail(
     focus_id: str,
