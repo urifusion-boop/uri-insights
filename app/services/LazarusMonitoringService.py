@@ -492,45 +492,50 @@ class LazarusMonitoringService:
                 # Remove @ if present
                 handle = handle.lstrip('@')
 
-                # Build query to get ALL recent posts from this user
-                query = f"from:{handle}"
-                print(f"   Fetching tweets with query: {query}")
+                # Use Bright Data Twitter enrichment service to fetch tweets
+                print(f"   Fetching tweets for @{handle} using Bright Data...")
 
                 try:
-                    twitter_service = OpenAIApifyTwitterService()
-                    result = await twitter_service.fetch_tweets_with_analysis(
-                        keyword=query,
-                        max_tweets=50,  # Get last 50 tweets
-                        analyze_sentiment=False
+                    from app.services.TwitterEnrichmentService import TwitterEnrichmentService
+                    twitter_service = TwitterEnrichmentService()
+
+                    # Fetch profile with posts (20 posts for scanning)
+                    profile_data = await twitter_service.enrich_profile(
+                        twitter_url_or_handle=handle,
+                        max_posts=20  # Get last 20 tweets for scanning
                     )
 
-                    if result.get("success"):
-                        tweets = result.get("tweets", [])
-                        if tweets:
-                            # Format tweets
-                            formatted_tweets = []
-                            for tweet in tweets:
-                                author = tweet.get("author", {})
-                                formatted_tweets.append({
-                                    "handle": handle,
-                                    "text": tweet.get("text", ""),
-                                    "url": tweet.get("url", ""),
-                                    "created_at": tweet.get("created_at", ""),
-                                    "author": author,
-                                    "likes": tweet.get("likes", 0),
-                                    "retweets": tweet.get("retweets", 0),
-                                    "replies": tweet.get("replies", 0)
-                                })
+                    if profile_data and profile_data.get("posts"):
+                        tweets = profile_data.get("posts", [])
 
-                            posts_by_focus_id[contact.focus_id] = formatted_tweets
-                            print(f"✅ Found {len(formatted_tweets)} tweets for {contact.name}")
-                        else:
-                            print(f"ℹ️  No tweets found for {contact.name}")
+                        # Format tweets to match expected structure
+                        formatted_tweets = []
+                        for tweet in tweets:
+                            formatted_tweets.append({
+                                "handle": handle,
+                                "text": tweet.get("description", ""),
+                                "url": tweet.get("post_url", ""),
+                                "tweet_url": tweet.get("post_url", ""),
+                                "created_at": tweet.get("date_posted", ""),
+                                "author": {
+                                    "username": handle,
+                                    "name": profile_data.get("profile_name", handle)
+                                },
+                                "likes": tweet.get("likes", 0),
+                                "retweets": tweet.get("reposts", 0),
+                                "replies": tweet.get("replies", 0),
+                                "views": tweet.get("views", 0)
+                            })
+
+                        posts_by_focus_id[contact.focus_id] = formatted_tweets
+                        print(f"✅ Found {len(formatted_tweets)} tweets for {contact.name} via Bright Data")
                     else:
-                        print(f"❌ Twitter fetch failed for {contact.name}: {result.get('error_message')}")
+                        print(f"ℹ️  No tweets found for {contact.name}")
 
                 except Exception as e:
                     logger.error(f"Error fetching tweets for {contact.name}: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
                     continue
 
             return posts_by_focus_id

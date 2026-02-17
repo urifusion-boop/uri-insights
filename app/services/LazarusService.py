@@ -321,24 +321,42 @@ class LazarusService:
                     print(f"[LAZARUS] 👥 Followers: {profile_data.get('followers', 0):,}")
                     print(f"[LAZARUS] ✓ Verified: {profile_data.get('is_verified')}")
 
-                    # Transform to FocusContact format
-                    enrichment_data = twitter_service.transform_to_focus_contact_data(profile_data)
+                    try:
+                        # Transform to FocusContact format
+                        enrichment_data = twitter_service.transform_to_focus_contact_data(profile_data)
+                        print(f"[LAZARUS] 🔧 Transform completed, type: {type(enrichment_data)}")
 
-                    # Remove None values
-                    enrichment_data = {k: v for k, v in enrichment_data.items() if v is not None}
+                        # Remove None values - but keep nested dicts like twitter_data
+                        enrichment_data = {
+                            k: v for k, v in enrichment_data.items()
+                            if v is not None and v != ""
+                        }
+                        print(f"[LAZARUS] 🔧 After filtering None values, keys: {list(enrichment_data.keys())}")
 
-                    print(f"[LAZARUS] 📝 Saving Twitter enriched data to DB:")
-                    print(f"   Profile Photo: {'✅ Found' if enrichment_data.get('profile_photo') else '❌ Not found'}")
-                    print(f"   Twitter Handle: @{enrichment_data.get('twitter_handle')}")
-                    print(f"   Twitter ID: {enrichment_data.get('twitter_id')}")
-                    print(f"   Followers: {enrichment_data.get('twitter_data', {}).get('followers', 0):,}")
+                        print(f"[LAZARUS] 📝 Saving Twitter enriched data to DB:")
+                        print(f"   Profile Photo: {'✅ Found' if enrichment_data.get('profile_photo') else '❌ Not found'}")
+                        print(f"   Twitter Handle: @{enrichment_data.get('twitter_handle')}")
+                        print(f"   Twitter ID: {enrichment_data.get('twitter_id')}")
 
-                    # Save enriched data to database
-                    await LazarusRepository.update_focus_contact(
-                        db, contact_data["focus_id"], user_id, enrichment_data
-                    )
+                        # Safely access nested twitter_data
+                        twitter_data = enrichment_data.get('twitter_data')
+                        if twitter_data and isinstance(twitter_data, dict):
+                            print(f"   Followers: {twitter_data.get('followers', 0):,}")
+                        else:
+                            print(f"   Followers: twitter_data not available")
 
-                    print(f"[LAZARUS] ✅ Twitter auto-enrichment completed for: {contact_create.name}")
+                        # Save enriched data to database
+                        await LazarusRepository.update_focus_contact(
+                            db, contact_data["focus_id"], user_id, enrichment_data
+                        )
+
+                        print(f"[LAZARUS] ✅ Twitter auto-enrichment completed for: {contact_create.name}")
+
+                    except Exception as transform_error:
+                        print(f"[LAZARUS] ❌ Transform error: {str(transform_error)}")
+                        import traceback
+                        traceback.print_exc()
+                        raise
                 else:
                     print(f"[LAZARUS] ⚠️  Twitter enrichment failed - no profile data returned")
                     await LazarusRepository.update_focus_contact(
