@@ -296,10 +296,11 @@ class LazarusService:
 
         # Auto-trigger enrichment if Twitter URL is provided
         if twitter_url:
-            from app.services.BrightDataTwitterService import BrightDataTwitterService
+            from app.services.TwitterEnrichmentService import TwitterEnrichmentService
 
-            print(f"[LAZARUS] Auto-enriching Twitter contact: {contact_create.name}")
-            print(f"[LAZARUS] Twitter URL: {twitter_url}")
+            print(f"[LAZARUS] 🐦 AUTO-ENRICHMENT STARTING (Twitter)...")
+            print(f"[LAZARUS] 👤 Contact: {contact_create.name}")
+            print(f"[LAZARUS] 🔗 Twitter URL: {twitter_url}")
 
             try:
                 # Update status to pending
@@ -307,47 +308,44 @@ class LazarusService:
                     db, contact_data["focus_id"], user_id, {"enrichment_status": "pending"}
                 )
 
-                # Call Twitter enrichment service
-                twitter_service = BrightDataTwitterService()
-                enrichment_result = await twitter_service.enrich_profile(
-                    twitter_url=twitter_url,
-                    include_posts=False,
-                    timeout_seconds=90
+                # Call Twitter enrichment service (Bright Data)
+                twitter_service = TwitterEnrichmentService()
+                profile_data = await twitter_service.enrich_profile(
+                    twitter_url_or_handle=twitter_url,
+                    max_posts=5  # Get 5 posts for enrichment snapshot
                 )
 
-                print(f"[LAZARUS] Twitter enrichment result success: {enrichment_result.get('success')}")
+                if profile_data:
+                    print(f"[LAZARUS] ✅ Twitter enrichment successful!")
+                    print(f"[LAZARUS] 📸 Profile: {profile_data.get('profile_name')}")
+                    print(f"[LAZARUS] 👥 Followers: {profile_data.get('followers', 0):,}")
+                    print(f"[LAZARUS] ✓ Verified: {profile_data.get('is_verified')}")
 
-                if enrichment_result.get("success") and enrichment_result.get("profile"):
-                    twitter_profile = enrichment_result["profile"]
-
-                    print(f"[LAZARUS] Twitter profile data received: {list(twitter_profile.keys())}")
-
-                    # Map Twitter profile data to FocusContact fields
-                    update_data = {
-                        "profile_photo": twitter_profile.get("profile_image_link"),
-                        "headline": twitter_profile.get("biography"),  # Twitter bio → headline
-                        "location": twitter_profile.get("location"),
-                        "about": twitter_profile.get("biography"),  # Also store in about field
-                        "enriched_at": datetime.utcnow(),
-                        "enrichment_status": "completed"
-                    }
+                    # Transform to FocusContact format
+                    enrichment_data = twitter_service.transform_to_focus_contact_data(profile_data)
 
                     # Remove None values
-                    update_data = {k: v for k, v in update_data.items() if v is not None}
+                    enrichment_data = {k: v for k, v in enrichment_data.items() if v is not None}
 
-                    print(f"[LAZARUS] Updating Twitter contact with enriched data: {update_data}")
+                    print(f"[LAZARUS] 📝 Saving Twitter enriched data to DB:")
+                    print(f"   Profile Photo: {'✅ Found' if enrichment_data.get('profile_photo') else '❌ Not found'}")
+                    print(f"   Twitter Handle: @{enrichment_data.get('twitter_handle')}")
+                    print(f"   Twitter ID: {enrichment_data.get('twitter_id')}")
+                    print(f"   Followers: {enrichment_data.get('twitter_data', {}).get('followers', 0):,}")
 
                     # Save enriched data to database
                     await LazarusRepository.update_focus_contact(
-                        db, contact_data["focus_id"], user_id, update_data
+                        db, contact_data["focus_id"], user_id, enrichment_data
                     )
 
                     print(f"[LAZARUS] ✅ Twitter auto-enrichment completed for: {contact_create.name}")
                 else:
-                    error_msg = enrichment_result.get("error_message", "Unknown error")
-                    print(f"[LAZARUS] ⚠️  Twitter enrichment failed: {error_msg}")
+                    print(f"[LAZARUS] ⚠️  Twitter enrichment failed - no profile data returned")
                     await LazarusRepository.update_focus_contact(
-                        db, contact_data["focus_id"], user_id, {"enrichment_status": "failed"}
+                        db, contact_data["focus_id"], user_id, {
+                            "enrichment_status": "failed",
+                            "enriched_at": datetime.utcnow()
+                        }
                     )
 
             except Exception as e:

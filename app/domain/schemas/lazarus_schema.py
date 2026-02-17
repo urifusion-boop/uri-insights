@@ -101,6 +101,10 @@ class FocusContact(BaseModel):
     twitter_url: Optional[str] = None
     current_company: Optional[str] = None
 
+    # Twitter-specific fields
+    twitter_handle: Optional[str] = None  # "@elonmusk"
+    twitter_id: Optional[str] = None  # Stable Twitter ID for monitoring
+
     # Bio tracking for job changes
     last_bio_text: Optional[str] = None
     last_bio_hash: Optional[str] = None  # MD5 hash for comparison
@@ -124,6 +128,25 @@ class FocusContact(BaseModel):
     certifications: Optional[List[Dict[str, Any]]] = None  # Certifications
     enriched_at: Optional[datetime] = None  # When enrichment was performed
     enrichment_status: Optional[str] = None  # "pending", "completed", "failed"
+
+    # Twitter enrichment data
+    twitter_data: Optional[Dict[str, Any]] = None  # {
+    #     "followers": 0,
+    #     "following": 0,
+    #     "verified": False,
+    #     "posts_count": 0,
+    #     "joined_date": None,
+    #     "banner_image": None,
+    #     "website": None,
+    #     "enrichment_snapshot": {
+    #         "last_post_id": None,  # Track last known post
+    #         "posts": [],  # 5 recent posts for display
+    #         "enriched_at": None
+    #     },
+    #     "last_scanned": None,
+    #     "last_activity_detected": None,
+    #     "new_posts_since_last_scan": 0
+    # }
 
     # Monitoring state
     monitoring_status: LazarusMonitoringStatusEnum = LazarusMonitoringStatusEnum.ACTIVE

@@ -1256,22 +1256,31 @@ class ApolloService:
         if not apollo_id:
             raise ValueError("Apollo ID is required")
 
+        # Get processing leads AND focus contacts
         leads = await ApolloService._get_processing_leads(db, apollo_id)
-        if not leads:
-            raise ValueError("Leads not found for phone number enrichment")
+        focus_contacts = await ApolloService._get_processing_focus_contacts(db, apollo_id)
+
+        if not leads and not focus_contacts:
+            raise ValueError("No leads or focus contacts found for phone number enrichment")
 
         phone = await ApolloService._extract_phone_number(data)
 
         if phone:
             print(
-                "Phone number found, updating leads, apollo records and feature limits."
+                f"Phone number found: {phone}, updating {len(leads)} leads and {len(focus_contacts)} focus contacts."
             )
             await ApolloService._update_apollo_record(db, apollo_id, phone)
-            await ApolloService._update_leads_with_phone(db, leads, phone)
+            if leads:
+                await ApolloService._update_leads_with_phone(db, leads, phone)
+            if focus_contacts:
+                await ApolloService._update_focus_contacts_with_phone(db, focus_contacts, phone)
         else:
-            print("Phone number not found, updating leads with 'UNAVAILABLE'.")
-            await ApolloService._mark_leads_unavailable(db, leads)
+            print("Phone number not found, updating with 'UNAVAILABLE'.")
             await ApolloService._update_apollo_record(db, apollo_id, "UNAVAILABLE")
+            if leads:
+                await ApolloService._mark_leads_unavailable(db, leads)
+            if focus_contacts:
+                await ApolloService._mark_focus_contacts_unavailable(db, focus_contacts)
 
     @staticmethod
     async def _get_processing_leads(db: AsyncIOMotorDatabase, apollo_id: str) -> list:
@@ -1357,3 +1366,47 @@ class ApolloService:
                 for lead in leads
             ]
             await asyncio.gather(*update_tasks)
+
+    # ============ FOCUS CONTACT WEBHOOK METHODS ============
+    @staticmethod
+    async def _get_processing_focus_contacts(db: AsyncIOMotorDatabase, apollo_id: str) -> list:
+        """Get all focus contacts with phone=PROCESSING and matching apollo_id"""
+        cursor = db["focus_contacts"].find({"apollo_id": apollo_id, "phone": "PROCESSING"})
+        contacts = []
+        async for doc in cursor:
+            contacts.append(doc)
+        return contacts
+
+    @staticmethod
+    async def _update_focus_contacts_with_phone(db: AsyncIOMotorDatabase, focus_contacts: list, phone: str):
+        """Update focus contacts with revealed phone number"""
+        from app.repository.LazarusRepository import LazarusRepository
+
+        update_tasks = [
+            LazarusRepository.update_focus_contact(
+                db,
+                contact.get("focus_id"),
+                contact.get("user_id"),
+                {"phone": phone}
+            )
+            for contact in focus_contacts
+        ]
+        await asyncio.gather(*update_tasks)
+        print(f"✅ Updated {len(focus_contacts)} focus contacts with phone: {phone}")
+
+    @staticmethod
+    async def _mark_focus_contacts_unavailable(db: AsyncIOMotorDatabase, focus_contacts: list):
+        """Mark focus contacts phone as UNAVAILABLE"""
+        from app.repository.LazarusRepository import LazarusRepository
+
+        update_tasks = [
+            LazarusRepository.update_focus_contact(
+                db,
+                contact.get("focus_id"),
+                contact.get("user_id"),
+                {"phone": "UNAVAILABLE"}
+            )
+            for contact in focus_contacts
+        ]
+        await asyncio.gather(*update_tasks)
+        print(f"✅ Marked {len(focus_contacts)} focus contacts phone as UNAVAILABLE")

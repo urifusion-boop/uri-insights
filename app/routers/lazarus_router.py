@@ -298,6 +298,87 @@ async def enrich_focus_contact(
     )
 
 
+@router.post("/focus-contacts/{focus_id}/enrich-twitter")
+async def enrich_twitter_profile(
+    focus_id: str,
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Manually trigger Twitter profile enrichment for a focus contact
+    Gets profile data + 5 recent posts for enrichment snapshot
+    """
+    from app.services.TwitterEnrichmentService import TwitterEnrichmentService
+    from datetime import datetime
+
+    # Get focus contact
+    contact = await LazarusRepository.get_focus_contact_by_id(db, focus_id, user_id)
+    if not contact:
+        return UriResponse.custom_response("Focus contact not found", 404)
+
+    # Check if Twitter URL or handle exists
+    twitter_identifier = contact.twitter_url or contact.twitter_handle
+    if not twitter_identifier:
+        return UriResponse.custom_response(
+            message="No Twitter URL or handle found for this contact",
+            error_code=400,
+            success=False
+        )
+
+    logger.info(f"🐦 Enriching Twitter profile: {contact.name} ({twitter_identifier})")
+
+    # Update status to pending
+    await LazarusRepository.update_focus_contact(
+        db, focus_id, user_id, {"enrichment_status": "pending"}
+    )
+
+    # Call Twitter Enrichment Service
+    twitter_service = TwitterEnrichmentService()
+    profile_data = await twitter_service.enrich_profile(
+        twitter_url_or_handle=twitter_identifier,
+        max_posts=5  # Just 5 posts for enrichment
+    )
+
+    if not profile_data:
+        # Mark as failed
+        await LazarusRepository.update_focus_contact(
+            db, focus_id, user_id, {
+                "enrichment_status": "failed",
+                "enriched_at": datetime.utcnow()
+            }
+        )
+        return UriResponse.custom_response(
+            message="Twitter enrichment failed. Please check the Twitter handle/URL.",
+            error_code=500,
+            success=False
+        )
+
+    # Transform to FocusContact format
+    enrichment_data = twitter_service.transform_to_focus_contact_data(profile_data)
+
+    # Update contact with enriched data
+    updated = await LazarusRepository.update_focus_contact(
+        db, focus_id, user_id, enrichment_data
+    )
+
+    if not updated:
+        return UriResponse.custom_response("Failed to save Twitter enrichment data", 500)
+
+    logger.info(f"✅ Successfully enriched Twitter profile: {contact.name}")
+    logger.info(f"   👤 Handle: @{enrichment_data.get('twitter_handle')}")
+    logger.info(f"   👥 Followers: {enrichment_data.get('twitter_data', {}).get('followers', 0):,}")
+
+    return UriResponse.custom_response(
+        message="Twitter profile enriched successfully",
+        error_code=200,
+        success=True,
+        data={
+            "twitter_handle": enrichment_data.get("twitter_handle"),
+            "twitter_data": enrichment_data.get("twitter_data")
+        }
+    )
+
+
 @router.post("/company-monitors/{monitor_id}/enrich")
 async def enrich_company_monitor(
     monitor_id: str,
@@ -560,6 +641,14 @@ async def reveal_focus_contact_phone(
         webhook_url = f"{settings.URI_GATEWAY_BASE_API_URL}/uri-insights/webhooks/apollo-webhook"
         temp_lead = {"linkedin_url": contact.linkedin_url, "username": contact.name, "focus_id": focus_id}
         apollo_result = await ApolloService.enrich_person(temp_lead, reveal_phone=True, webhook_url=webhook_url)
+
+        # Extract apollo_id from result and save it to focus contact for webhook lookup
+        apollo_id = apollo_result.get("person", {}).get("id")
+        if apollo_id:
+            await LazarusRepository.update_focus_contact(
+                db, focus_id, user_id, {"apollo_id": apollo_id}
+            )
+            logger.info(f"✅ Saved apollo_id {apollo_id} to focus contact for webhook")
 
         # Deduct credits
         await UriTaskManagerService.deduct_payment(
@@ -1240,6 +1329,105 @@ async def scan_single_focus_contact(
         error_code=200,
         success=True,
         data=result,
+    )
+
+
+@router.post("/scan/twitter-activity")
+async def scan_twitter_activity(
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Scan all Twitter focus contacts for new activity
+    Detects new posts since last scan and triggers resurrection alerts
+    """
+    from app.services.TwitterEnrichmentService import TwitterEnrichmentService
+    from datetime import datetime
+
+    # Get all focus contacts with Twitter data
+    contacts = await db["focus_contacts"].find({
+        "user_id": user_id,
+        "twitter_id": {"$exists": True, "$ne": None},
+        "monitoring_status": "ACTIVE"
+    }).to_list(length=None)
+
+    if not contacts:
+        return UriResponse.custom_response(
+            message="No Twitter contacts found to scan",
+            error_code=200,
+            success=True,
+            data={"scanned": 0, "active": 0}
+        )
+
+    logger.info(f"🔍 Scanning {len(contacts)} Twitter contacts for activity...")
+
+    # Build batch request for all contacts
+    twitter_urls = [contact.get("twitter_url") or f"https://x.com/{contact.get('twitter_handle')}" for contact in contacts]
+
+    # Call Twitter Enrichment Service (batch)
+    twitter_service = TwitterEnrichmentService()
+    profiles = await twitter_service.enrich_multiple_profiles(
+        twitter_urls=twitter_urls,
+        max_posts=20  # More posts for activity detection
+    )
+
+    # Process each profile and detect new activity
+    active_contacts = []
+
+    for profile, contact in zip(profiles, contacts):
+        if not profile:
+            continue
+
+        # Get last known post ID from enrichment snapshot
+        last_known_post_id = (
+            contact.get("twitter_data", {})
+            .get("enrichment_snapshot", {})
+            .get("last_post_id")
+        )
+
+        # Detect new activity
+        activity = twitter_service.detect_new_activity(profile, last_known_post_id)
+
+        if activity["has_new_activity"]:
+            # CONTACT IS ACTIVE! New posts detected
+            active_contacts.append({
+                "contact_id": contact["focus_id"],
+                "contact_name": contact["name"],
+                "twitter_handle": contact.get("twitter_handle"),
+                "new_posts_count": activity["new_posts_count"],
+                "latest_post": activity["latest_post"],
+                "activity_detected_at": datetime.utcnow()
+            })
+
+            # Update contact with new activity
+            posts = profile.get("posts", [])
+            await db["focus_contacts"].update_one(
+                {"focus_id": contact["focus_id"]},
+                {
+                    "$set": {
+                        "twitter_data.enrichment_snapshot.last_post_id": posts[0]["post_id"] if posts else None,
+                        "twitter_data.enrichment_snapshot.posts": posts[:5],
+                        "twitter_data.last_scanned": datetime.utcnow(),
+                        "twitter_data.last_activity_detected": datetime.utcnow(),
+                        "twitter_data.new_posts_since_last_scan": activity["new_posts_count"],
+                        "last_scan_date": datetime.utcnow()
+                    }
+                }
+            )
+
+            logger.info(f"🔥 ACTIVITY DETECTED: {contact['name']} (@{contact.get('twitter_handle')}) - {activity['new_posts_count']} new posts")
+
+    logger.info(f"✅ Twitter scan completed: {len(contacts)} scanned, {len(active_contacts)} active")
+
+    return UriResponse.custom_response(
+        message=f"Twitter activity scan completed",
+        error_code=200,
+        success=True,
+        data={
+            "scanned": len(contacts),
+            "active": len(active_contacts),
+            "active_contacts": active_contacts
+        }
     )
 
 
