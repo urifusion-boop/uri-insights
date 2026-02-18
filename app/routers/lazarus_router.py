@@ -66,6 +66,7 @@ async def add_focus_contact(
             "focus_id": result.get("focus_id"),
             "slots_used": result.get("slots_used"),
             "slots_available": result.get("slots_available"),
+            "contact": jsonable_encoder(result.get("contact")) if result.get("contact") else None,
         },
     )
 
@@ -84,6 +85,14 @@ async def get_focus_contacts(
     contacts = await LazarusRepository.get_focus_contacts_by_user(
         db, user_id, status, skip, limit
     )
+
+    # Debug: Check if twitter_data is present
+    for c in contacts:
+        if c.twitter_handle:
+            logger.info(f"[GET CONTACTS] {c.name} - twitter_handle: {c.twitter_handle}, twitter_data present: {c.twitter_data is not None}")
+            if c.twitter_data:
+                logger.info(f"[GET CONTACTS] twitter_data keys: {list(c.twitter_data.keys())}")
+                logger.info(f"[GET CONTACTS] followers: {c.twitter_data.get('followers')}")
 
     return UriResponse.custom_response(
         message="Focus contacts retrieved successfully",

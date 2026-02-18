@@ -178,7 +178,7 @@ class TwitterEnrichmentService:
         Returns:
             Transformed data ready for FocusContact creation
         """
-        posts = profile.get("posts", [])
+        posts = profile.get("posts") or []  # Handle None or missing posts
 
         return {
             "name": profile.get("profile_name", ""),
@@ -201,7 +201,7 @@ class TwitterEnrichmentService:
 
                 # Enrichment snapshot
                 "enrichment_snapshot": {
-                    "last_post_id": posts[0]["post_id"] if posts else None,
+                    "last_post_id": posts[0]["post_id"] if posts and len(posts) > 0 else None,
                     "posts": posts[:5],  # Store first 5 posts
                     "enriched_at": datetime.utcnow().isoformat()
                 },

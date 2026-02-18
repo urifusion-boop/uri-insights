@@ -372,12 +372,18 @@ class LazarusService:
                 import traceback
                 traceback.print_exc()
 
+        # Fetch the final enriched contact to return to frontend
+        enriched_contact = await LazarusRepository.get_focus_contact_by_id(
+            db, contact_data["focus_id"], user_id
+        )
+
         return {
             "success": True,
             "message": "Focus contact added successfully" + (" and enrichment started" if (linkedin_url or twitter_url) else ""),
             "focus_id": contact_data["focus_id"],
             "slots_used": slots.used_slots + 1,
             "slots_available": slots.max_slots - (slots.used_slots + 1),
+            "contact": enriched_contact,  # Return full enriched contact data
         }
 
     @staticmethod
