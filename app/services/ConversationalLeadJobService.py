@@ -2324,7 +2324,8 @@ class ConversationalLeadJobService:
             print(f"💼 Fetching job board signals with query: '{search_query}'")
 
             # Import services and helpers
-            from app.services.ApifyLinkedInJobsService import ApifyLinkedInJobsService
+            # OLD: from app.services.ApifyLinkedInJobsService import ApifyLinkedInJobsService  # DEPRECATED - kept for reference
+            from app.services.BrightDataLinkedInJobsService import BrightDataLinkedInJobsService  # NEW: Using Bright Data
             from app.services.ApifyJobbermanService import ApifyJobbermanService
             from app.services.ApifyIndeedService import ApifyIndeedService
             from app.services.JobSignalAnalysisService import JobSignalAnalysisService
@@ -2333,7 +2334,7 @@ class ConversationalLeadJobService:
                 map_post_age_filter
             )
 
-            # Convert location list to Apify-compatible format
+            # Convert location list to job board compatible format
             location_str, location_scope = convert_location_for_job_boards(location)
 
             # Provide contextual feedback based on scope
@@ -2354,18 +2355,18 @@ class ConversationalLeadJobService:
 
             print(f"   📅 Time filter: {post_age_filter} (LinkedIn: {published_at_linkedin}, Jobberman: {posted_date_jobberman})")
 
-            # Initialize services
-            linkedin_service = ApifyLinkedInJobsService()
+            # Initialize services - NOW USING BRIGHT DATA FOR LINKEDIN
+            linkedin_service = BrightDataLinkedInJobsService()  # NEW: Bright Data (replaces Apify)
             jobberman_service = ApifyJobbermanService()
             indeed_service = ApifyIndeedService()
 
-            # PRD: Fetch from LinkedIn Jobs, Jobberman, and Indeed CONCURRENTLY (parallel)
+            # PRD: Fetch from LinkedIn Jobs (Bright Data), Jobberman, and Indeed CONCURRENTLY (parallel)
             # Distribute max_jobs: 50% LinkedIn, 25% Jobberman, 25% Indeed
             linkedin_max = max(1, int(max_jobs * 0.50))   # 50%
             jobberman_max = max(1, int(max_jobs * 0.25))  # 25%
             indeed_max = max(1, int(max_jobs * 0.25))     # 25%
 
-            print(f"   💼 Distributing {max_jobs} jobs: LinkedIn {linkedin_max}, Jobberman {jobberman_max}, Indeed {indeed_max}")
+            print(f"   💼 Distributing {max_jobs} jobs: LinkedIn {linkedin_max} (Bright Data), Jobberman {jobberman_max}, Indeed {indeed_max}")
             print(f"   ⚡ Fetching from all 3 job boards in parallel...")
 
             # Jobberman ALWAYS uses Lagos (hardcoded default)
@@ -2376,7 +2377,7 @@ class ConversationalLeadJobService:
                 linkedin_service.fetch_job_postings(
                     search_query,
                     max_jobs=linkedin_max,
-                    location=location_str,  # None if worldwide
+                    location=location_str or "Worldwide",  # Bright Data uses "Worldwide" instead of None
                     published_at=published_at_linkedin,
                     solution_context=solution_context
                 ),
