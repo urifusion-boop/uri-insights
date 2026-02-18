@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 import json
 from http import HTTPStatus
 import time
+from urllib import response
 from fastapi.responses import JSONResponse
 import requests
 from app.core.helpers.account_tracking_helper import AccountTrackingHelper
@@ -198,10 +199,21 @@ class InstagramService:
         after: Optional[str] = None,
         limit: int = 24,
     ):
+        """
+        Fetch Instagram Business Discovery data using a *user* access token by calling:
+        GET /me/accounts?fields=...instagram_business_account{...media{...}}...
+
+        Fixes:
+        - Avoids `business_account` being referenced before assignment.
+        - Removes duplicated business_account lookup blocks.
+        - Ensures paging `next_url` is a string URL (not `{}`).
+        - Returns proper error responses when Graph returns non-200.
+        """
+
         # Base URL for Instagram business account details with media records
         url = InstagramService._set_auth_business_discovery_params(
-            access_token, before, after, limit
-        )
+        access_token, before, after, limit
+    )
 
         # Generate a cache key based on the URL
         cache_key = CacheHelper.generate_cache_key(url)
@@ -214,86 +226,93 @@ class InstagramService:
 
         # Make the initial request to the API
         response = requests.get(url)
-
         response_data = response.json()
 
+        # If Graph returned an error, bubble it up properly
         if response.status_code != HTTPStatus.OK:
-            print("API Error:", response_data)  # Log error details
-            return UriResponse.get_single_data_response(
-                "business", None, response_data.get("message", "")
-            )
+            print("API Error:", response_data)
+            return UriResponse.custom_response(
+            message="Facebook Graph error while fetching /me/accounts",
+            error_code=response.status_code,
+            success=False,
+            data=response_data,
+        )
 
-        # Extract the Instagram business account information
+        # Extract pages data
         data_response = response_data.get("data", [])
+        if not data_response:
+            return UriResponse.error_response(
+            "No Facebook Pages/Instagram business accounts found for this access token."
+        )
 
-        if data_response:
-            business_account = next(
-                (
-                    item
-                    for item in data_response
-                    if item.get("instagram_business_account", {}).get("username", None)
-                    == username
-                ),
-                None,
+        # Find the page whose instagram_business_account.username matches the requested username
+        page_match = next(
+        (
+            item
+            for item in data_response
+            if (item.get("instagram_business_account") or {}).get("username") == username
+        ),
+        None,
+    )
+
+        # Pull out the instagram business account object
+        business_account = (page_match or {}).get("instagram_business_account") or {}
+        if not business_account:
+            return UriResponse.error_response(
+            "This IG account is not linked to any Page accessible by this token (or it’s not a professional account)."
             )
 
-            business_account = (business_account or {}).get(
-                "instagram_business_account", {}
-            )
+        # Media + paging
+        media_obj = business_account.get("media") or {}
+        media_data = media_obj.get("data") or []
 
-            if not business_account:
-                return UriResponse.error_response(
-                    "This account is not a professional account"
-                )
-        media_data = (business_account or {}).get("media", {}).get("data", [])
+        paging_info = media_obj.get("paging") or {}
+        after_cursor = (paging_info.get("cursors") or {}).get("after")
+        next_url = paging_info.get("next")  # should be a URL string if present
 
-        # Check if there is more data (pagination)
-        paging_info = (business_account or {}).get("media", {}).get("paging", {})
-        after_cursor = paging_info.get("cursors", {}).get("after")
-        next_url = paging_info.get("next", {})
-
-        # If there is an after cursor, make a second request to fetch the next batch
+        # If there is an after cursor and next URL, fetch the next batch
         if after_cursor and next_url:
             next_response = requests.get(next_url)
             next_response_data = next_response.json()
-            # print(next_response_data)
 
-            if len(next_response_data["data"]) > 1:
-                # Append the next set of media records
-                next_media_data = next_response_data["data"]
+        if next_response.status_code == HTTPStatus.OK:
+            next_media_data = next_response_data.get("data") or []
+            if next_media_data:
                 media_data.extend(next_media_data)
 
-                # Replace the paging
-                (business_account or {})["media"]["paging"] = next_response_data[
-                    "paging"
-                ]
+            # Replace paging with the newest paging
+            if "media" not in business_account:
+                business_account["media"] = {}
+            business_account["media"]["paging"] = next_response_data.get("paging")
+        else:
+            print("Next page API Error:", next_response_data)
 
+        # Fetch influencer record (optional) and trigger embedding
         influencer_data = (
-            (
-                await InfluencerRepository.get_influencers_by_filter(
-                    db=db, social_username=username, access_token=access_token
-                )
+        (
+            await InfluencerRepository.get_influencers_by_filter(
+                db=db, social_username=username, access_token=access_token
             )
-            .get("responseData", {})
-            .get("data", [])
         )
+        .get("responseData", {})
+        .get("data", [])
+    )
 
         if influencer_data:
             await AccountTrackingHelper.trigger_account_tracking_post_embedding_process(
-                db, influencer_data[0], media_data, PostPlatformEnum.INSTAGRAM
-            )
-        # Return the merged media records and the business account details
-        (business_account or {})["media"][
-            "data"
-        ] = media_data  # Updated media data with pagination
-        (business_account or {})["cache_key"] = cache_key
+            db, influencer_data[0], media_data, PostPlatformEnum.INSTAGRAM
+        )
 
-        # Cache the fresh response with the provided TTL
-        if business_account:
-            await CacheRepository.set_cache(
-                db, cache_key, business_account, ttl=timedelta(hours=2)
-            )
-        # print("Business Account : ", business_account)
+        # Return merged media + cache key
+        if "media" not in business_account:
+            business_account["media"] = {}
+
+        business_account["media"]["data"] = media_data
+        business_account["cache_key"] = cache_key
+
+        # Cache the fresh response
+        await CacheRepository.set_cache(db, cache_key, business_account, ttl=timedelta(hours=2))
+
         return UriResponse.get_single_data_response("business", business_account)
 
     @staticmethod
@@ -385,6 +404,10 @@ class InstagramService:
         username: str,
         access_token: Optional[str] = None,
     ):
+        import os
+        if os.getenv("LOCAL_DEV_MODE", "").lower() in ["true", "1", "yes"]:
+            print(f"🔧 LOCAL DEV: Bypassing subscription validation for Instagram business discovery")
+            # Continue with normal flow - no subscription check needed
         try:
             if access_token and username:
                 # TO DO: Add comment sentiments before returning data

@@ -22,6 +22,12 @@ class InfluencerBase(BaseModel):
     location: Optional[str] = None
     followers: Optional[int] = None
     token: Optional[str | dict] = None
+    meta_access_token: Optional[str] = None
+    instagram_access_token: Optional[str] = None
+    facebook_access_token: Optional[str] = None
+    linkedin_access_token: Optional[str] = None
+    twitter_access_token: Optional[str] = None
+    tiktok_access_token: Optional[str] = None 
     connected: Optional[bool] = None
     createdAt: Optional[datetime] = datetime.now()
     updatedAt: Optional[datetime] = datetime.now()
