@@ -505,6 +505,12 @@ class LazarusMonitoringService:
                         max_posts=20  # Get last 20 tweets for scanning
                     )
 
+                    print(f"[DEBUG] Profile data received: {profile_data is not None}")
+                    if profile_data:
+                        print(f"[DEBUG] Profile data keys: {list(profile_data.keys())}")
+                        print(f"[DEBUG] Posts field: {profile_data.get('posts')}")
+                        print(f"[DEBUG] Posts type: {type(profile_data.get('posts'))}")
+
                     if profile_data and profile_data.get("posts"):
                         tweets = profile_data.get("posts", [])
 
