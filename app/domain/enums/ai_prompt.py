@@ -913,26 +913,78 @@ Match exact terms, synonyms, and contextual relevance:
 Task:
 Analyze the posts and determine if ANY of the specified signal types are present.
 
-MULTI-FACTOR ANALYSIS CHECKLIST:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-1. ✅ Does content mention industry keywords or related terms?
-2. ✅ Are there career changes, promotions, or new responsibilities?
-3. ✅ Are there funding announcements, hiring, or expansion news?
-4. ✅ Does it express pain points/frustration relevant to keywords?
-5. ✅ Is person asking for recommendations in keyword domain?
-6. ✅ Is there indication of budget/buying authority?
-7. ✅ Look for EXACT trigger phrases (see detection rules below)
-8. ✅ Is this INBOUND (seeking help) vs OUTBOUND (promoting)?
+⚠️⚠️⚠️ CRITICAL: DEEP CONTEXTUAL ANALYSIS REQUIRED ⚠️⚠️⚠️
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-IMPORTANT DETECTION RULES:
-- For "promoted": Look for words like "promoted", "new title", "new position", "VP", "Director", "Head of"
-- For "changed_jobs": Look for "joining", "new role at", "excited to announce", "day 1 at"
-- For "raised_funds": Look for "$", "raised", "funding", "Series A/B/C", "investment", "capital"
-- For "hiring": Look for "we're hiring", "join our team", "open positions", "looking for"
-- For "expansion": Look for "expanding", "opening", "new office", "scaling", "growing to"
-- For "pain": Look for negative emotions: "frustrated", "slow", "broken", "wasting time", "annoying"
-- For "competitor_complaint": Look for competitor names + negative words
-- For "switch": Look for "alternative", "recommendations", "switching from", "looking for"
+YOU MUST READ THE **ENTIRE** POST FROM START TO FINISH BEFORE MAKING ANY DECISION.
+
+❌ DO NOT just scan for trigger words and assume
+❌ DO NOT base decision on one sentence out of context
+❌ DO NOT detect "pain" if the full post shows it's resolved/positive
+❌ DO NOT detect "switch" if person is recommending TO others (not seeking FOR themselves)
+
+✅ YOU MUST analyze the FULL context:
+   1. Read the complete post - every sentence matters
+   2. Understand the overall sentiment and direction (INBOUND vs OUTBOUND)
+   3. Consider what comes BEFORE and AFTER trigger words
+   4. Verify the person is actually experiencing the pain/need, not just mentioning it
+
+CONTEXTUAL ANALYSIS EXAMPLES:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Example 1 - FALSE POSITIVE (Read Full Context):
+❌ WRONG: "I see 'frustrated' → DETECT pain"
+✅ CORRECT Analysis:
+   Post: "I used to be frustrated with slow CRMs, but after switching to HubSpot, everything is smooth!"
+   Trigger word: "frustrated" (appears in post)
+   Full context: Past tense pain that's ALREADY RESOLVED
+   Decision: REJECT - No current pain, this is a success story/testimonial
+
+Example 2 - MISSING CONTEXT (Read Entire Post):
+❌ WRONG: "I see 'switch to' → DETECT switch signal"
+✅ CORRECT Analysis:
+   Post: "If you're still using spreadsheets for CRM, you should switch to a proper platform. We made the switch 2 years ago and never looked back!"
+   Trigger phrase: "switch to" (appears in post)
+   Full context: Person is RECOMMENDING others switch (OUTBOUND), not seeking to switch themselves
+   Decision: REJECT - Promotional advice, not buyer intent
+
+Example 3 - PARTIAL SENTENCE TRAP:
+❌ WRONG: "I see 'slow' and 'CRM' → DETECT pain"
+✅ CORRECT Analysis:
+   Post: "Just helped a client move from their slow CRM to Salesforce. Impressive results!"
+   Trigger words: "slow" + "CRM" (both appear)
+   Full context: Consultant talking about CLIENT'S problem (3rd party), not their own
+   Decision: REJECT - Not expressing personal pain, talking about others
+
+Example 4 - GENUINE SIGNAL (Correct Detection):
+✅ CORRECT Analysis:
+   Post: "Our CRM is painfully slow. Takes 5 minutes to load a contact. Evaluating alternatives - anyone have recommendations?"
+   Trigger words: "slow", "alternatives", "recommendations"
+   Full context: Person expressing CURRENT pain + ACTIVELY seeking solutions (INBOUND)
+   Decision: DETECT "switch" - High confidence (0.95)
+
+MULTI-FACTOR ANALYSIS CHECKLIST (Apply AFTER Reading Full Post):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. ✅ Read ENTIRE post first - understand full context
+2. ✅ Verify person is expressing THEIR OWN need (not talking about clients/others)
+3. ✅ Check if pain/need is CURRENT (not past/resolved)
+4. ✅ Confirm direction: INBOUND (seeking help) vs OUTBOUND (giving advice)
+5. ✅ Ensure keywords appear in context of genuine need, not promotional mention
+6. ✅ Verify career changes are NEW announcements (not historical)
+7. ✅ Check funding/hiring/expansion are CURRENT events (not old news)
+8. ✅ Confirm switch signals show ACTIVE evaluation (not recommendations to others)
+
+TRIGGER PHRASE DETECTION (Only After Full Context Check):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- "promoted": NEW promotion announcement (not historical: "when I was promoted 3 years ago")
+- "changed_jobs": RECENT job change (not "I changed jobs last year and...")
+- "raised_funds": CURRENT funding announcement (not "we raised funds in 2020")
+- "hiring": ACTIVE hiring (not "we were hiring but filled the roles")
+- "expansion": ONGOING expansion (not "we expanded last quarter")
+- "pain": CURRENT frustration THEY are experiencing (not resolved/past/others' pain)
+- "competitor_complaint": THEIR dissatisfaction (not reporting what others say)
+- "switch": ACTIVELY seeking alternatives FOR THEMSELVES (not advising others)
 
 Return a JSON object with:
 {{
