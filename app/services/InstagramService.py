@@ -96,6 +96,31 @@ class InstagramService:
 
         pages_data = response.json().get("data", [])
         if not pages_data:
+            # No Facebook Pages found — fall back to saving the user's personal Facebook profile
+            me_url = f"https://graph.facebook.com/{settings.INSTAGRAM_API_VERSION}/me?fields=id,name,picture&access_token={access_token}"
+            try:
+                me_response = requests.get(me_url)
+                if me_response.status_code == HTTPStatus.OK:
+                    me_data = me_response.json()
+                    personal_influencer = influencer_schema.InfluencerCreate(
+                        user_id=user_id,
+                        social_name=me_data.get("name", ""),
+                        profile_pic=me_data.get("picture", {}).get("data", {}).get("url", ""),
+                        account_type=AccountTypeEnum.PROFESSIONAL,
+                        social_user_id=me_data.get("id", ""),
+                        social_username=me_data.get("name", ""),
+                        social_platform="FACEBOOK",
+                        connected=True,
+                        token=access_token,
+                    )
+                    save_result = await InfluencerRepository.create_or_update_influencer(db, personal_influencer)
+                    if save_result.get("success"):
+                        await FeatureLimitService.sync_specific_feature_limit_for_user(
+                            db, user_id, EndpointsEnum.SAVE_FACEBOOK_ACCOUNTS.value, "FACEBOOK"
+                        )
+                    return await InfluencerRepository.get_influencers_by_filter(db, user_id)
+            except Exception as e:
+                print(f"Error saving personal Facebook account: {e}")
             return UriResponse.get_single_data_response("instagram account", None)
 
         # Save Facebook user pages
