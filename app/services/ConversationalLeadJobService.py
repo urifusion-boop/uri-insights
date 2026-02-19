@@ -2325,9 +2325,9 @@ class ConversationalLeadJobService:
 
             # Import services and helpers
             # OLD: from app.services.ApifyLinkedInJobsService import ApifyLinkedInJobsService  # DEPRECATED - kept for reference
-            from app.services.BrightDataLinkedInJobsService import BrightDataLinkedInJobsService  # NEW: Using Bright Data
-            from app.services.ApifyJobbermanService import ApifyJobbermanService
-            from app.services.ApifyIndeedService import ApifyIndeedService
+            # OLD: from app.services.ApifyJobbermanService import ApifyJobbermanService  # DISABLED - Apify broken
+            # OLD: from app.services.ApifyIndeedService import ApifyIndeedService  # DISABLED - Apify broken
+            from app.services.BrightDataLinkedInJobsService import BrightDataLinkedInJobsService  # NEW: Using ONLY LinkedIn via Bright Data
             from app.services.JobSignalAnalysisService import JobSignalAnalysisService
             from app.services.JobBoardParameterHelper import (
                 convert_location_for_job_boards,
@@ -2355,74 +2355,34 @@ class ConversationalLeadJobService:
 
             print(f"   📅 Time filter: {post_age_filter} (LinkedIn: {published_at_linkedin}, Jobberman: {posted_date_jobberman})")
 
-            # Initialize services - NOW USING BRIGHT DATA FOR LINKEDIN
-            linkedin_service = BrightDataLinkedInJobsService()  # NEW: Bright Data (replaces Apify)
-            jobberman_service = ApifyJobbermanService()
-            indeed_service = ApifyIndeedService()
+            # Initialize services - ONLY USING BRIGHT DATA FOR LINKEDIN (Jobberman/Indeed disabled - Apify broken)
+            linkedin_service = BrightDataLinkedInJobsService()
 
-            # PRD: Fetch from LinkedIn Jobs (Bright Data), Jobberman, and Indeed CONCURRENTLY (parallel)
-            # Distribute max_jobs: 50% LinkedIn, 25% Jobberman, 25% Indeed
-            linkedin_max = max(1, int(max_jobs * 0.50))   # 50%
-            jobberman_max = max(1, int(max_jobs * 0.25))  # 25%
-            indeed_max = max(1, int(max_jobs * 0.25))     # 25%
+            print(f"   💼 Fetching {max_jobs} jobs from LinkedIn (Bright Data)")
+            print(f"   ℹ️ Jobberman and Indeed disabled (Apify broken)")
 
-            print(f"   💼 Distributing {max_jobs} jobs: LinkedIn {linkedin_max} (Bright Data), Jobberman {jobberman_max}, Indeed {indeed_max}")
-            print(f"   ⚡ Fetching from all 3 job boards in parallel...")
-
-            # Jobberman ALWAYS uses Lagos (hardcoded default)
-            jobberman_location = "Lagos"  # Always use Lagos regardless of user's location input
-
-            # Fetch from all 3 services concurrently (3x speedup!)
-            results = await asyncio.gather(
-                linkedin_service.fetch_job_postings(
-                    search_query,
-                    max_jobs=linkedin_max,
-                    location=location_str or "Worldwide",  # Bright Data uses "Worldwide" instead of None
-                    published_at=published_at_linkedin,
-                    solution_context=solution_context
-                ),
-                jobberman_service.fetch_job_postings(
-                    search_query,
-                    max_jobs=jobberman_max,
-                    location=jobberman_location,  # Always "Lagos"
-                    posted_date=posted_date_jobberman
-                ),
-                indeed_service.fetch_job_postings(
-                    search_query,
-                    max_jobs=indeed_max
-                ),
-                return_exceptions=True  # Don't fail all if one fails
+            # Fetch ONLY from LinkedIn via Bright Data
+            linkedin_result = await linkedin_service.fetch_job_postings(
+                search_query,
+                max_jobs=max_jobs,  # Use full allocation for LinkedIn only
+                location=location_str or "Worldwide",  # Bright Data uses "Worldwide" instead of None
+                published_at=published_at_linkedin,
+                solution_context=solution_context
             )
 
-            # Unpack results
-            linkedin_result = results[0] if not isinstance(results[0], Exception) else {"success": False, "jobs": [], "error": str(results[0])}
-            jobberman_result = results[1] if not isinstance(results[1], Exception) else {"success": False, "jobs": [], "error": str(results[1])}
-            indeed_result = results[2] if not isinstance(results[2], Exception) else {"success": False, "jobs": [], "error": str(results[2])}
+            # Handle errors
+            if isinstance(linkedin_result, Exception):
+                print(f"   ⚠️ LinkedIn error: {str(linkedin_result)}")
+                linkedin_result = {"success": False, "jobs": [], "error": str(linkedin_result)}
 
-            # Log errors if any
-            if isinstance(results[0], Exception):
-                print(f"   ⚠️ LinkedIn error: {str(results[0])}")
-            if isinstance(results[1], Exception):
-                print(f"   ⚠️ Jobberman error: {str(results[1])}")
-            if isinstance(results[2], Exception):
-                print(f"   ⚠️ Indeed error: {str(results[2])}")
-
-            # Collect all jobs with source attribution
+            # Collect jobs with source attribution
             all_jobs = []
             if linkedin_result.get("success"):
                 for job in linkedin_result.get("jobs", []):
                     job["source"] = "LinkedIn Jobs"
                     all_jobs.append(job)
-            if jobberman_result.get("success"):
-                for job in jobberman_result.get("jobs", []):
-                    job["source"] = "Jobberman"
-                    all_jobs.append(job)
-            if indeed_result.get("success"):
-                for job in indeed_result.get("jobs", []):
-                    job["source"] = "Indeed"
-                    all_jobs.append(job)
 
-            print(f"   ✅ Found {len(all_jobs)} total job postings (LinkedIn: {len(linkedin_result.get('jobs', []))}, Jobberman: {len(jobberman_result.get('jobs', []))}, Indeed: {len(indeed_result.get('jobs', []))})")
+            print(f"   ✅ Found {len(all_jobs)} total job postings (LinkedIn: {len(linkedin_result.get('jobs', []))})")
 
             if not all_jobs:
                 print(f"   ⚠️ No jobs found for query '{search_query}'")
