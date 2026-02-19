@@ -1682,7 +1682,9 @@ class ConversationalLeadJobService:
                         user_id=user_id,
                         action_type="SALES_SIGNAL_SCAN",
                         payment_mode="CREDITS",
-                        quantity=1
+                        quantity=1,
+                        reference=job_id,  # Use job_id as transaction reference
+                        narration=f"Sales Signal scan for form {lead_form.get('form_title', 'Untitled')}"
                     )
                     print(f"💳 Deducted 7 credits for Sales Signal scan (user: {user_id})")
                 except Exception as credit_error:
@@ -1698,7 +1700,9 @@ class ConversationalLeadJobService:
                             user_id=user_id,
                             action_type="SALES_SIGNAL_VERIFIED",
                             payment_mode="CREDITS",
-                            quantity=qualified_leads_count
+                            quantity=qualified_leads_count,
+                            reference=f"{job_id}_leads",  # Use job_id with suffix for lead deductions
+                            narration=f"{qualified_leads_count} qualified leads from {lead_form.get('form_title', 'Untitled')}"
                         )
                         print(f"💳 Deducted {qualified_leads_count} credits for {qualified_leads_count} qualified sales signals (user: {user_id})")
                     except Exception as credit_error:
@@ -2418,7 +2422,10 @@ class ConversationalLeadJobService:
             print(f"   After deduplication: {len(deduplicated_jobs)} unique jobs")
 
             # FEATURE #2: Client-side keyword pre-filter (before AI analysis)
+            # For job boards: Use search_query as the primary keyword + any additional keywords
             all_filter_keywords = []
+            if search_query:  # Always have the search query as a keyword for job boards
+                all_filter_keywords.append(search_query)
             if keywords:
                 all_filter_keywords.extend(keywords)
             if implied_keywords:
@@ -2427,7 +2434,7 @@ class ConversationalLeadJobService:
             keyword_rejected_jobs = []  # NEW: Track jobs filtered by keyword matching
 
             if all_filter_keywords:
-                print(f"   🔍 Pre-filtering with {len(all_filter_keywords)} keywords before AI analysis")
+                print(f"   🔍 Pre-filtering with {len(all_filter_keywords)} keywords (including search query: '{search_query}') before AI analysis")
                 keyword_filtered_jobs = ConversationalLeadJobService._filter_jobs_by_keyword_relevance(
                     deduplicated_jobs, all_filter_keywords
                 )
@@ -2440,6 +2447,7 @@ class ConversationalLeadJobService:
                 print(f"   ✅ {len(keyword_filtered_jobs)} jobs passed keyword filter → sending to AI")
                 jobs_to_analyze = keyword_filtered_jobs
             else:
+                # This should never happen for job boards since search_query is always provided
                 print(f"   ⚠️ No keywords provided - analyzing all jobs without pre-filtering")
                 jobs_to_analyze = deduplicated_jobs
 

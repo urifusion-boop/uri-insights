@@ -180,7 +180,8 @@ class InstagramService:
                 else:
                     platform = influencer.social_platform
                     if platform:
-                        endpoint = platform_to_endpoint.get(platform.value, "")
+                        platform_key = platform.value if hasattr(platform, 'value') else platform
+                        endpoint = platform_to_endpoint.get(platform_key, "")
                         await FeatureLimitService.sync_specific_feature_limit_for_user(
                             db,
                             user_id,
