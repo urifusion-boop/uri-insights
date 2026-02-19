@@ -288,22 +288,32 @@ class LeadFilter:
     @staticmethod
     def filter_by_location(leads: List, target_locations: Optional[List[str]]) -> List:
         """
-        Filter leads by location - strict matching.
+        Filter leads by location - flexible token-based matching.
 
         Args:
             leads: List of LeadCreate objects
-            target_locations: List of location strings to match (e.g., ["Lagos", "Nigeria"])
+            target_locations: List of location strings to match (e.g., ["Lagos, Nigeria"])
 
         Returns:
             Filtered list of leads that match any of the target locations
+
+        Example:
+            - Target: ["Lagos, Nigeria"]
+            - Lead location: "Lagos, Lagos State, Nigeria"
+            - Tokens: ["lagos", "nigeria"] -> ALL found in lead -> MATCH ✅
         """
         if not target_locations or len(target_locations) == 0:
             return leads  # No location filter
 
         filtered_leads = []
 
-        # Normalize target locations for comparison
-        normalized_targets = [loc.lower().strip() for loc in target_locations]
+        # Tokenize target locations: split "Lagos, Nigeria" -> ["lagos", "nigeria"]
+        # This handles cases where lead has "Lagos, Lagos State, Nigeria"
+        target_tokens = set()
+        for loc in target_locations:
+            # Split by comma and normalize
+            tokens = [t.lower().strip() for t in loc.split(',') if t.strip()]
+            target_tokens.update(tokens)
 
         for lead in leads:
             # Check multiple potential location fields
@@ -319,8 +329,8 @@ class LeadFilter:
 
             lead_location_lower = lead_location_text.lower()
 
-            # Check if any target location is mentioned in the lead content
-            if any(target in lead_location_lower for target in normalized_targets):
+            # Check if ALL target tokens are present (handles "Lagos, Lagos State, Nigeria" matching "Lagos, Nigeria")
+            if all(token in lead_location_lower for token in target_tokens):
                 filtered_leads.append(lead)
 
         return filtered_leads
@@ -1183,14 +1193,17 @@ class ConversationalLeadJobService:
 
                     print(f"   ✅ {len(leads_after_location_filter)} leads passed filters (from {len(keyword_leads)} raw)")
 
-                    # Analyze filtered leads (NEW: Use spam-aware method)
-                    if leads_after_location_filter:
+                    # Separate social media vs job board leads for DIFFERENT analysis paths
+                    social_leads_filtered = [l for l in leads_after_location_filter if l.lead_source != LeadSourceEnum.JOB_BOARDS]
+                    job_board_leads_filtered = [l for l in leads_after_location_filter if l.lead_source == LeadSourceEnum.JOB_BOARDS]
+
+                    # Analyze ONLY social media leads with intent analysis (job boards already analyzed)
+                    if social_leads_filtered:
                         keyword_qualified, keyword_intent_filtered = await ConversationalLeadJobService._analyze_and_filter_leads_with_spam(
-                            leads_after_location_filter, category_config, intent_min, relevance_min, final_min
+                            social_leads_filtered, category_config, intent_min, relevance_min, final_min
                         )
                         qualified_leads.extend(keyword_qualified)
-                        print(f"   ✅ {len(keyword_qualified)} qualified from this keyword ({len(keyword_intent_filtered)} filtered by intent)")
-                        print(f"   📈 TOTAL QUALIFIED SO FAR: {len(qualified_leads)}")
+                        print(f"   ✅ {len(keyword_qualified)} qualified social media leads from this keyword ({len(keyword_intent_filtered)} filtered by intent)")
 
                         # === NEW: Save intent-filtered social posts to spam ===
                         if keyword_intent_filtered:
@@ -1210,7 +1223,15 @@ class ConversationalLeadJobService:
                                 )
                             except Exception as spam_error:
                                 print(f"   ⚠️ Error saving intent-filtered posts to spam: {str(spam_error)}")
-                    else:
+
+                    # Job board leads: Already analyzed by Bright Data - add directly to qualified (skip social intent analysis)
+                    if job_board_leads_filtered:
+                        qualified_leads.extend(job_board_leads_filtered)
+                        print(f"   ✅ {len(job_board_leads_filtered)} qualified job board leads (already analyzed by job board AI)")
+
+                    print(f"   📈 TOTAL QUALIFIED SO FAR: {len(qualified_leads)}")
+
+                    if not social_leads_filtered and not job_board_leads_filtered:
                         print(f"   ⚠️ No leads passed filters for this keyword")
 
                 # === NEW: Accumulate filtered job board leads for spam (apply filters first) ===
