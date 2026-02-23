@@ -133,13 +133,13 @@ class InstagramService:
         influencers: List[influencer_schema.InfluencerCreate] = []
 
         count = 0
-        while count < total_accounts_limit and count < len(pages_data):
+        while count < len(pages_data):
             page = pages_data[count]
             # Handle Instagram business accounts
             instagram_business_account = page.get("instagram_business_account")
 
             if instagram_business_account and (
-                instagram_count < min(total_accounts_limit, instagram_limit)
+                instagram_count < instagram_limit
             ):
                 influencers.append(
                     influencer_schema.InfluencerCreate(
@@ -154,6 +154,7 @@ class InstagramService:
                         social_platform="INSTAGRAM",
                         connected=True,
                         token=access_token,
+                        meta_access_token=access_token,
                     )
                 )
                 instagram_count += 1
@@ -162,7 +163,6 @@ class InstagramService:
             if (
                 page.get("id")
                 and (facebook_count < facebook_limit)
-                and ((instagram_count + facebook_count) < total_accounts_limit)
             ):
                 influencers.append(
                     influencer_schema.InfluencerCreate(
@@ -182,10 +182,8 @@ class InstagramService:
                 )
                 facebook_count += 1
 
-            if (
-                (facebook_count >= facebook_limit)
-                and (instagram_count >= instagram_limit)
-            ) or (instagram_count + facebook_count) >= total_accounts_limit:
+            # Stop if we've reached the total limit or both individual limits
+            if (instagram_count + facebook_count) >= total_accounts_limit:
                 break
 
             count += 1
