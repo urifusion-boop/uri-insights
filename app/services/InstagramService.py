@@ -76,7 +76,7 @@ class InstagramService:
         db: AsyncIOMotorDatabase,
         account_limits: dict,
     ):
-        url = f"https://graph.facebook.com/{settings.INSTAGRAM_API_VERSION}/me/accounts?fields=id,access_token,name,picture,username,instagram_business_account%7Bid,username,biography,profile_picture_url%7D&access_token={access_token}"
+        url = f"https://graph.facebook.com/{settings.INSTAGRAM_API_VERSION}/me/accounts?fields=id,access_token,name,picture,username,followers_count,fan_count,instagram_business_account%7Bid,username,biography,profile_picture_url,followers_count%7D&access_token={access_token}"
 
         instagram_limit = account_limits.get("instagram_limit", 0)
         facebook_limit = account_limits.get("facebook_limit", 0)
@@ -155,6 +155,7 @@ class InstagramService:
                         connected=True,
                         token=access_token,
                         meta_access_token=access_token,
+                        followers=instagram_business_account.get("followers_count"),
                     )
                 )
                 instagram_count += 1
@@ -178,6 +179,7 @@ class InstagramService:
                         social_platform="FACEBOOK",
                         connected=True,
                         token=page.get("access_token", ""),
+                        followers=page.get("followers_count") or page.get("fan_count"),
                     )
                 )
                 facebook_count += 1
@@ -766,15 +768,17 @@ class InstagramService:
 
         # Handle non-OK responses
         if response.status_code != HTTPStatus.OK:
+            # Return empty array for 404 (insufficient data) instead of error
+            print(f"ℹ️  [Instagram Demographics] Insufficient engagement data for account {ig_user_id} (requires 100+ engagements)")
             return UriResponse.get_single_data_response(
-                "demography insight", None, code=response.status_code
+                "demography insight", []
             )
 
         # Return the resulting data
         result = response.json()
 
         return UriResponse.get_single_data_response(
-            "demography insight", result["data"]
+            "demography insight", result.get("data", [])
         )
 
     @staticmethod
@@ -789,9 +793,26 @@ class InstagramService:
         response = requests.get(url)
 
         if response.status_code != HTTPStatus.OK:
-            return UriResponse.get_single_data_response(
-                "media", None, code=response.status_code
-            )
+            # Return empty data for 404 (no tags/mentions) instead of error
+            print(f"ℹ️  [Instagram Tags] No tags/mentions found for account {ig_user_id}")
+            return {
+                "status": True,
+                "responseCode": 200,
+                "responseMessage": "No tags/mentions found for this account",
+                "responseData": {
+                    "posts": [],
+                    "overall_sentiment": {
+                        "total_feedback": 0,
+                        "positive_score": 0,
+                        "neutral_score": 0,
+                        "negative_score": 0,
+                        "sentiment_distribution": {"positive": 0, "neutral": 0, "negative": 0},
+                        "top_positive": None,
+                        "top_negative": None,
+                    },
+                    "paging": {},
+                },
+            }
 
         result = response.json()
 
@@ -943,13 +964,17 @@ class InstagramService:
         print("Stories Response : ", response.json())
 
         if response.status_code != HTTPStatus.OK:
-            return UriResponse.get_single_data_response(
-                "stories", None, code=response.status_code
-            )
+            # Return empty array for 404 (no stories) instead of error
+            print(f"ℹ️  [Instagram Stories] No stories available for account {ig_user_id}")
+            return UriResponse.get_single_data_response("stories", [])
 
         result = response.json()
+        stories_data = result.get("data", [])
 
-        return UriResponse.get_single_data_response("stories", result["data"])
+        if not stories_data:
+            print(f"ℹ️  [Instagram Stories] Account {ig_user_id} has no active stories")
+
+        return UriResponse.get_single_data_response("stories", stories_data)
 
     @staticmethod
     async def fetch_business_media(

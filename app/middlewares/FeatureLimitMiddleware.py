@@ -186,7 +186,20 @@ class FeatureLimitMiddleware:
         url_path: str,
     ):
         if not result:
-            raise HTTPException(status_code=500, detail="Feature limit check failed")
+            print(f"⚠️  [FeatureLimit] Feature limit check failed for user {user_id}, endpoint {url_path}")
+            print(f"ℹ️  [FeatureLimit] Attempting to create missing feature limit for user...")
+            # Try to handle missing feature limit instead of immediately failing
+            await FeatureLimitMiddleware.handle_missing_feature_limit_for_user(db, user_id)
+
+            # Retry once after creating the feature limit
+            result = await FeatureLimitMiddleware.verify_feature_limit(user_id=user_id, url_path=url_path)
+
+            if not result:
+                print(f"❌ [FeatureLimit] Failed to create/verify feature limit even after retry")
+                raise HTTPException(
+                    status_code=500,
+                    detail="Feature limit configuration error. Please contact support or try refreshing the page."
+                )
 
         limit_check_status = result.get("status")
         limit_check_data = result.get("data", {})
