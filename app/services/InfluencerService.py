@@ -74,4 +74,12 @@ class InfluencerService:
             await FeatureLimitService.sync_specific_feature_limit_for_user(
                 db, user_id, endpoint, social_platform
             )
+
+            # Remove app token for this platform to allow reconnecting with a different account
+            try:
+                await UriBackendService.remove_app_token_by_provider(user_id, social_platform)
+                print(f"✅ Removed {social_platform} app token for user {user_id}")
+            except Exception as e:
+                print(f"⚠️ Failed to remove app token for {social_platform}: {e}")
+
         return deleted_response
