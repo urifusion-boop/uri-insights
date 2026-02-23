@@ -417,6 +417,10 @@ class LazarusSlots(BaseModel):
     focus_contacts_count: int = 0
     company_monitors_count: int = 0
 
+    # Email Notifications (Phase 2: Notification System)
+    email_notifications_enabled: bool = True  # Default: enabled
+    notification_email: Optional[str] = None  # If different from user email, otherwise use user.email
+
     # Tracking
     last_updated: datetime = Field(default_factory=datetime.utcnow)
 

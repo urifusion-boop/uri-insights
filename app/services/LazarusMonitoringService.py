@@ -91,6 +91,71 @@ class LazarusMonitoringService:
             # If normalization fails, return original URL
             return url
 
+    # ============ EMAIL NOTIFICATIONS ============
+    @staticmethod
+    async def _send_alert_notification(
+        db: AsyncIOMotorDatabase,
+        user_id: str,
+        alert_id: str,
+        lead_name: str,
+        company: str,
+        signal_type: str,
+        topic: str
+    ):
+        """
+        Send email notification for new Lazarus alert
+        Phase 2: Notification System
+        """
+        try:
+            # Get user's notification preferences
+            from app.repository.LazarusRepository import LazarusRepository
+            slots = await LazarusRepository.get_or_create_user_slots(db, user_id)
+
+            if not slots.email_notifications_enabled:
+                print(f"📧 Email notifications disabled for user {user_id}")
+                return
+
+            # Get user email
+            from app.services.uri_microservices.UriBackendService import UriBackendService
+            user_details = await UriBackendService.get_user_details(user_id)
+            if not user_details:
+                print(f"⚠️ Could not fetch user details for user {user_id}")
+                return
+
+            # Use notification email if set, otherwise use user's primary email
+            recipient_email = slots.notification_email or user_details.get("email")
+            if not recipient_email:
+                print(f"⚠️ No email found for user {user_id}")
+                return
+
+            # Call uri-backend EmailService via gateway
+            from app.core.config import settings
+            from app.services.uri_microservices.UriGatewayService import UriGatewayService
+
+            email_url = f"{settings.URI_GATEWAY_BASE_API_URL}/uri-backend/email/lazarus-alert"
+            payload = {
+                "userEmail": recipient_email,
+                "leadName": lead_name,
+                "company": company,
+                "signalType": signal_type,
+                "topic": topic,
+                "alertId": alert_id,
+                "userId": user_id
+            }
+
+            print(f"📧 Sending email notification to {recipient_email} for alert {alert_id}")
+            result = await UriGatewayService.post(email_url, payload)
+
+            if result and result.get("status"):
+                print(f"✅ Email notification sent successfully to {recipient_email}")
+            else:
+                print(f"⚠️ Failed to send email notification: {result}")
+
+        except Exception as e:
+            # Don't fail the scan if email sending fails
+            print(f"⚠️ Error sending email notification: {str(e)}")
+            logger.error(f"Error sending email notification: {str(e)}")
+
     # ============ AI PRIORITY SCORING ============
     @staticmethod
     def calculate_priority_score(alert: Dict[str, Any]) -> tuple[int, str]:
@@ -1439,6 +1504,17 @@ class LazarusMonitoringService:
                             print(f"   Alert Type: {analysis_result.get('alert_type')}")
                             print(f"   Alert Message: {analysis_result.get('alert_message')}")
                             print(f"   Suggested Pitch: {analysis_result.get('suggested_pitch', 'N/A')[:100]}...")
+
+                            # Send email notification if enabled
+                            await LazarusMonitoringService._send_alert_notification(
+                                db=db,
+                                user_id=user_id,
+                                alert_id=analysis_result.get('alert_id'),
+                                lead_name=contact.name,
+                                company=contact.current_company or "Unknown Company",
+                                signal_type=analysis_result.get('evidence', {}).get('signal_type', 'Unknown'),
+                                topic=analysis_result.get('alert_message', '')
+                            )
 
                             # Auto-enrich contact if alert created and not already enriched
                             if contact.linkedin_url and not contact.enriched_at:

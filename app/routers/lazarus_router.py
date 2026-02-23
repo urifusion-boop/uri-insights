@@ -1154,6 +1154,67 @@ async def get_user_slots(
     )
 
 
+@router.get("/notification-preferences")
+async def get_notification_preferences(
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Get user's email notification preferences for Lazarus alerts
+    Phase 2: Notification System
+    """
+    from app.repository.LazarusRepository import LazarusRepository
+
+    slots = await LazarusRepository.get_or_create_user_slots(db, user_id)
+
+    return UriResponse.custom_response(
+        message="Notification preferences retrieved successfully",
+        error_code=200,
+        success=True,
+        data={
+            "email_notifications_enabled": slots.email_notifications_enabled,
+            "notification_email": slots.notification_email
+        }
+    )
+
+
+@router.put("/notification-preferences")
+async def update_notification_preferences(
+    user_id: str = Query(...),
+    email_notifications_enabled: bool = Query(...),
+    notification_email: Optional[str] = Query(None),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Update user's email notification preferences for Lazarus alerts
+    Phase 2: Notification System
+    """
+    from app.repository.LazarusRepository import LazarusRepository
+
+    # Update slots with new preferences
+    update_data = {"email_notifications_enabled": email_notifications_enabled}
+    if notification_email is not None:
+        update_data["notification_email"] = notification_email
+
+    await db["lazarus_slots"].update_one(
+        {"user_id": user_id},
+        {"$set": update_data},
+        upsert=True
+    )
+
+    logger.info(f"📧 Notification preferences updated for user {user_id}: enabled={email_notifications_enabled}, email={notification_email}")
+
+    return UriResponse.custom_response(
+        message="Notification preferences updated successfully",
+        error_code=200,
+        success=True,
+        data={
+            "email_notifications_enabled": email_notifications_enabled,
+            "notification_email": notification_email
+        }
+    )
+
+
 @router.get("/metrics")
 async def get_user_metrics(
     user_id: str = Query(...),
