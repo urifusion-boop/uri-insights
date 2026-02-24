@@ -1165,7 +1165,7 @@ async def get_notification_preferences(
     """
     from app.repository.LazarusRepository import LazarusRepository
 
-    slots = await LazarusRepository.get_or_create_user_slots(db, user_id)
+    slots = await LazarusRepository.get_or_create_slots(db, user_id)
 
     return UriResponse.custom_response(
         message="Notification preferences retrieved successfully",

@@ -109,7 +109,7 @@ class LazarusMonitoringService:
         try:
             # Get user's notification preferences
             from app.repository.LazarusRepository import LazarusRepository
-            slots = await LazarusRepository.get_or_create_user_slots(db, user_id)
+            slots = await LazarusRepository.get_or_create_slots(db, user_id)
 
             if not slots.email_notifications_enabled:
                 print(f"📧 Email notifications disabled for user {user_id}")
