@@ -91,6 +91,7 @@ from app.services.IntentAnalysisService import (
 )
 from app.domain.enums.lead_enum import IntentCategoryEnum, SentimentTypeEnum
 from app.services.ConversationalLeadJobService import LeadFilter
+from app.services.GoogleMapsService import GoogleMapsService
 
 class LeadService:
     PLATFORM_SCRAPERS: dict[str, LeadDataScraper] = {
@@ -1242,20 +1243,204 @@ class LeadService:
             )
             print("No new leads created, duplicates found.")
             return
-        print(f"Leads created: {leads_count}")
+        print(f"✅ Leads created: {leads_count}")
 
         # Update user feature limit
-        await UriTaskManagerService.update_user_feature_limit_specific_limit(
+        print(f"🔄 [LeadService] Updating feature limit - User: {lead_form.get('user_id', '')}, Previous count: {current_count}, New leads: {leads_count}, Total to set: {leads_count + current_count}")
+        update_result = await UriTaskManagerService.update_user_feature_limit_specific_limit(
             user_id=lead_form.get("user_id", ""),
             url_path=EndpointsEnum.LEAD_GEN.value,
             count=leads_count + current_count,
         )
+        if update_result and update_result.get("status"):
+            print(f"✅ [LeadService] Feature limit updated successfully: {update_result}")
+        else:
+            print(f"❌ [LeadService] Feature limit update FAILED: {update_result}")
 
         # Handle notifications
         await LeadService.send_successful_apollo_leads_gen_notification(
             lead_form, leads_count
         )
         return response
+
+    @staticmethod
+    @LeadHelper.enforce_feature_limit(
+        lambda lead_form: lead_form.get("user_id", ""), EndpointsEnum.LEAD_GEN.value
+    )
+    async def generate_google_maps_leads(lead_form: dict, db: AsyncIOMotorDatabase):
+        """
+        Generate leads from Google Maps/Places API
+
+        Supports both Text Search (natural language) and Nearby Search (precise location)
+
+        Args:
+            lead_form: Lead form configuration with Maps search parameters
+            db: Database connection
+
+        Returns:
+            Response with created leads
+        """
+        print(f"\n{'='*80}")
+        print(f"[GOOGLE MAPS LEADS] Starting lead generation")
+        print(f"[GOOGLE MAPS LEADS] Form: {lead_form.get('form_title', 'Unknown')}")
+        print(f"[GOOGLE MAPS LEADS] User: {lead_form.get('user_id', 'Unknown')}")
+        print(f"{'='*80}\n")
+
+        user_id = lead_form.get("user_id", "")
+        if not user_id:
+            raise Exception(
+                f"No user_id provided for Google Maps leads gen for lead form {lead_form}"
+            )
+
+        # Get current feature limit
+        limit_available, current_count = (
+            await UriTaskManagerService.get_elapsed_leads_limit_and_count(user_id)
+        )
+
+        # Extract search parameters from lead form
+        search_params = {
+            "query": lead_form.get("maps_search_query"),
+            "location": lead_form.get("maps_location"),
+            "latitude": lead_form.get("maps_latitude"),
+            "longitude": lead_form.get("maps_longitude"),
+            "radius_km": lead_form.get("maps_radius_km", 5.0),
+            "business_types": lead_form.get("maps_business_types"),
+            "min_rating": lead_form.get("maps_min_rating"),
+            "exclude_closed": lead_form.get("maps_exclude_closed", True),
+            "max_results": lead_form.get("maps_max_results", 20),
+            "search_mode": lead_form.get("maps_search_mode", "auto")
+        }
+
+        print(f"[GOOGLE MAPS] Search parameters: {search_params}")
+
+        # Call Google Maps Service
+        try:
+            businesses = await GoogleMapsService.search_businesses(**search_params)
+            print(f"[GOOGLE MAPS] Found {len(businesses)} businesses from Google")
+        except Exception as e:
+            print(f"[GOOGLE MAPS] ❌ Search failed: {e}")
+            raise ValueError(f"Google Maps search failed: {str(e)}")
+
+        if not businesses:
+            print("[GOOGLE MAPS] No businesses found with search criteria")
+            return UriResponse.custom_response(
+                message="No businesses found matching your search criteria",
+                data={"businesses_found": 0},
+                error_code=200,
+                success=True
+            )
+
+        # Convert businesses to Lead objects
+        leads_to_create = []
+        for business in businesses:
+            # Merge business data with lead form metadata
+            lead_data = {
+                **business,
+                "assigned_to": user_id,
+                "lead_type": LeadFormTypeEnum.GOOGLE_MAPS,
+                "lead_form_snapshot_id": lead_form.get("lead_form_id"),
+                "lead_status": LeadStatusEnum.NEW,
+                "interest_level": LeadInterestLevelEnum.MEDIUM,
+                "lead_source": LeadSourceEnum.GOOGLE_MAPS
+            }
+
+            try:
+                leads_to_create.append(LeadCreate(**lead_data))
+            except Exception as e:
+                print(f"⚠️ Skipping invalid business: {business.get('company_name')} - {e}")
+
+        if not leads_to_create:
+            print("[GOOGLE MAPS] No valid leads to create after validation")
+            return UriResponse.custom_response(
+                message="No valid businesses found",
+                data={"businesses_found": len(businesses), "valid_leads": 0},
+                error_code=200,
+                success=True
+            )
+
+        print(f"[GOOGLE MAPS] Creating {len(leads_to_create)} leads...")
+
+        # Apply feature limit
+        leads_to_save = (
+            leads_to_create[:limit_available]
+            if limit_available
+            else leads_to_create
+        )
+
+        # Save to database
+        response = await LeadRepository.multiple_create_leads(
+            db=db,
+            leads=leads_to_save,
+        )
+
+        leads_count = len(response.get("responseData", {}).get("leads", []))
+
+        if not leads_count:
+            print("[GOOGLE MAPS] No new leads created (all duplicates)")
+            company_names = [lead.company_name for lead in leads_to_create[:5] if lead.company_name]
+            await LeadService.send_duplicate_maps_leads_notification(lead_form, company_names)
+            return response
+
+        print(f"✅ [GOOGLE MAPS] Created {leads_count} leads")
+
+        # Update feature limit
+        print(f"🔄 [GOOGLE MAPS] Updating feature limit - User: {user_id}, Previous: {current_count}, New: {leads_count}, Total: {leads_count + current_count}")
+        update_result = await UriTaskManagerService.update_user_feature_limit_specific_limit(
+            user_id=user_id,
+            url_path=EndpointsEnum.LEAD_GEN.value,
+            count=leads_count + current_count,
+        )
+
+        if update_result and update_result.get("status"):
+            print(f"✅ [GOOGLE MAPS] Feature limit updated successfully")
+        else:
+            print(f"❌ [GOOGLE MAPS] Feature limit update FAILED: {update_result}")
+
+        # Send success notification
+        await LeadService.send_successful_maps_leads_notification(lead_form, leads_count)
+
+        print(f"\n[GOOGLE MAPS] ✅ COMPLETED")
+        print(f"{'='*80}\n")
+
+        return response
+
+    @staticmethod
+    async def send_successful_maps_leads_notification(
+        lead_form: dict, leads_count: int
+    ):
+        """Send notification for successful Google Maps lead generation"""
+        user_id = lead_form.get("user_id")
+
+        data_to_send = (
+            await NotificationHelper.build_extended_lead_notification_payload(
+                user_id, LeadFormTypeEnum.GOOGLE_MAPS.value, {"leadsCount": leads_count}
+            )
+        )
+
+        await NotificationService.send_lead_notification(
+            data_to_send,
+            UserNotificationQueueMessageTypeEnum.LEADS_GENERATED_SUCCESSFULLY,
+        )
+
+    @staticmethod
+    async def send_duplicate_maps_leads_notification(
+        lead_form: dict, company_names: List[str]
+    ):
+        """Send notification when Google Maps leads are duplicates"""
+        user_id = lead_form.get("user_id")
+
+        data_to_send = (
+            await NotificationHelper.build_extended_lead_notification_payload(
+                user_id,
+                LeadFormTypeEnum.GOOGLE_MAPS.value,
+                {"leadNames": company_names[:5]}
+            )
+        )
+
+        await NotificationService.send_lead_notification(
+            data_to_send,
+            UserNotificationQueueMessageTypeEnum.LEADS_ALREADY_EXIST,
+        )
 
     @staticmethod
     async def send_successful_apollo_leads_gen_notification(

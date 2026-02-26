@@ -118,6 +118,24 @@ class LeadFormBase(BaseModel):
     # AI Next Steps fields
     lead_generation_goal: Optional[str] = None  # User's business goal/reason for generating leads (e.g., "I want to sell gadgets to programmers")
 
+    # Google Maps Search Configuration
+    maps_search_mode: Optional[str] = "auto"  # "text", "nearby", "auto" - which API to use
+
+    # Text Search fields (natural language queries)
+    maps_search_query: Optional[str] = None  # e.g., "small businesses in Ogba"
+    maps_location: Optional[str] = None  # e.g., "Ogba, Lagos, Nigeria"
+
+    # Nearby Search fields (precise location-based)
+    maps_latitude: Optional[float] = None  # Latitude for precise search
+    maps_longitude: Optional[float] = None  # Longitude for precise search
+    maps_radius_km: Optional[float] = 5.0  # Search radius in kilometers
+
+    # Common Google Maps filters
+    maps_business_types: Optional[List[str]] = None  # e.g., ["restaurant", "cafe", "store"]
+    maps_min_rating: Optional[float] = None  # Minimum Google rating (0-5)
+    maps_exclude_closed: Optional[bool] = True  # Exclude closed businesses
+    maps_max_results: Optional[int] = 20  # Maximum number of results to return
+
     # Pagination
     page: Optional[int] = 1
     per_page: Optional[int] = 10

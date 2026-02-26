@@ -6,6 +6,7 @@ class LeadFormTypeEnum(str, Enum):
     ORGANIZATION = "ORGANIZATION"
     CONVERSATIONAL = "CONVERSATIONAL"  # Sales Signals (kept for backward compatibility)
     BUSINESS = "BUSINESS"
+    GOOGLE_MAPS = "GOOGLE_MAPS"  # Google Maps local business discovery
 
 
 class PartnershipTypeEnum(str, Enum):

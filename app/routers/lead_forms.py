@@ -79,6 +79,85 @@ async def create_business_lead_form(
     )
 
 
+@router.post("/google-maps-search/create")
+async def create_google_maps_lead_form(
+    data: BusinessSearchFormInput,  # Reuse BusinessSearchFormInput, add Maps-specific fields later if needed
+    background_tasks: BackgroundTasks,
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+    _: dict = Depends(enforce_feature_limit),
+):
+    """
+    Create a Google Maps lead form for local business discovery
+
+    Supports both Text Search (natural language) and Nearby Search (precise location)
+    """
+    try:
+        payload = LeadFormCreate(**data.model_dump())
+        result = await LeadFormService.create(db, payload, background_tasks)
+        return UriResponse.get_status_response(
+            response=jsonable_encoder(result), status_code=result["responseCode"]
+        )
+    except Exception as e:
+        print(f"\n❌ ERROR creating Google Maps lead form:")
+        print(f"   Error: {str(e)}")
+        return UriResponse.error_response(
+            message=f"Failed to create Google Maps lead form: {str(e)}",
+            error_code=500
+        )
+
+
+@router.post("/google-maps-search/generate")
+async def generate_google_maps_leads(
+    lead_form_id: str,
+    user_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Generate leads from Google Maps/Places API
+
+    Uses intelligent API selection (Text Search or Nearby Search) based on form parameters
+    """
+    try:
+        print(f"\n🗺️ [API] Google Maps lead generation request:")
+        print(f"   Lead Form ID: {lead_form_id}")
+        print(f"   User ID: {user_id}")
+
+        # Get lead form
+        lead_form = await LeadFormRepository.get_by_id(db, lead_form_id)
+
+        if not lead_form:
+            return UriResponse.error_response(
+                message="Lead form not found",
+                error_code=404
+            )
+
+        if lead_form.get("form_type") != LeadFormTypeEnum.GOOGLE_MAPS.value:
+            return UriResponse.error_response(
+                message="Invalid form type. Must be GOOGLE_MAPS.",
+                error_code=400
+            )
+
+        # Import here to avoid circular dependency
+        from app.services.LeadService import LeadService
+
+        # Generate leads
+        result = await LeadService.generate_google_maps_leads(lead_form, db)
+
+        return result
+
+    except Exception as e:
+        print(f"\n❌ ERROR generating Google Maps leads:")
+        print(f"   Error type: {type(e).__name__}")
+        print(f"   Error message: {str(e)}")
+        import traceback
+        traceback.print_exc()
+
+        return UriResponse.error_response(
+            message=f"Failed to generate Google Maps leads: {str(e)}",
+            error_code=500
+        )
+
+
 @router.post("/conversation-search/create")
 async def create_conversational_lead_form(
     data: ConversationalSearchFormInput,

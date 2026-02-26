@@ -44,18 +44,23 @@ class UriTaskManagerService:
         user_id: str, url_path: str, count: int
     ):
         if not user_id or not url_path:
-            print("User ID or URL path is missing for updating feature limit")
+            print("❌ [UriTaskManagerService] User ID or URL path is missing for updating feature limit")
             return None
         url = (
             UriTaskManagerService.base_url
             + settings.URI_TASK_MANAGER_UPDATE_FEATURE_LIMIT_SPECIFIC_LIMIT
         )
         request_body = {"userId": user_id, "urlPath": url_path, "count": count}
+        print(f"🔄 [UriTaskManagerService] Calling task-manager: {url}")
+        print(f"📦 [UriTaskManagerService] Request body: {request_body}")
         try:
             result = await UriGatewayService.put(url, request_body)
+            print(f"✅ [UriTaskManagerService] Task-manager response: {result}")
             return result
         except Exception as e:
-            print("Exception occurred in updating specific feature limit: ", e)
+            print(f"❌ [UriTaskManagerService] Exception occurred in updating specific feature limit: {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
     @staticmethod

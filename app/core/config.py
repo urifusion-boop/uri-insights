@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str
     GOOGLE_API_KEY: str
     GOOGLE_CUSTOM_SEARCH_ENGINE_API_KEY: str
+    GOOGLE_PLACES_API_KEY: str = ""  # Google Places API for Maps business discovery (optional until enabled)
     URI_SEARCH_ENGINE_ID: str
     META_API_KEY: str
     META_APP_ID: str

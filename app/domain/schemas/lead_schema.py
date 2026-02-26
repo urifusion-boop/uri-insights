@@ -148,6 +148,19 @@ class LeadBase(BaseModel):
     marked_dead_date: Optional[datetime] = None  # When was this lead marked as DEAD?
     marked_dead_reason: Optional[str] = None  # Why was this lead marked as DEAD?
 
+    # Google Maps - Local business discovery fields
+    google_place_id: Optional[str] = None  # Unique Google Place identifier
+    google_rating: Optional[float] = None  # Business rating (0-5 stars)
+    google_reviews_count: Optional[int] = None  # Number of reviews
+    business_status: Optional[str] = None  # "OPERATIONAL", "CLOSED_TEMPORARILY", "CLOSED_PERMANENTLY"
+    business_category: Optional[str] = None  # Primary business type (e.g., "restaurant", "store")
+    business_types: Optional[List[str]] = None  # All business types from Google
+    formatted_address: Optional[str] = None  # Full formatted address from Google
+    latitude: Optional[float] = None  # Latitude coordinate
+    longitude: Optional[float] = None  # Longitude coordinate
+    opening_hours: Optional[str] = None  # Business hours (optional, for future enhancement)
+    price_level: Optional[int] = None  # Price level 0-4 (0=free, 4=expensive)
+
     class Config:
         json_encoders = {datetime: lambda v: DateHelper.to_iso8601_utc(v) if v else None}
 
