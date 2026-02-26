@@ -1210,6 +1210,10 @@ class LeadService:
             leads_to_create = await ApolloService.handle_organization_leads_gen(
                 lead_form=lead_form, db=db
             )
+        elif lead_form_type == LeadFormTypeEnum.GOOGLE_MAPS.value:
+            # Google Maps leads are handled separately - trigger async generation
+            await LeadService.generate_google_maps_leads(lead_form=lead_form, db=db)
+            return  # Return early since Google Maps handles everything internally
         else:
             raise ValueError(
                 f"Invalid lead form type in lead form {lead_form.get('lead_form_id')}."
