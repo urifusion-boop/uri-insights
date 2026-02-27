@@ -223,6 +223,27 @@ class GoogleMapsService:
 
 
     @staticmethod
+    def _convert_price_level(price_level_str: Optional[str]) -> Optional[int]:
+        """
+        Convert Google's NEW API price level string to integer
+
+        NEW API: "PRICE_LEVEL_FREE", "PRICE_LEVEL_INEXPENSIVE", etc.
+        Database: 0, 1, 2, 3, 4
+        """
+        if not price_level_str:
+            return None
+
+        price_level_map = {
+            "PRICE_LEVEL_FREE": 0,
+            "PRICE_LEVEL_INEXPENSIVE": 1,
+            "PRICE_LEVEL_MODERATE": 2,
+            "PRICE_LEVEL_EXPENSIVE": 3,
+            "PRICE_LEVEL_VERY_EXPENSIVE": 4,
+        }
+
+        return price_level_map.get(price_level_str)
+
+    @staticmethod
     def _parse_places_response(
         data: Dict,
         min_rating: Optional[float] = None,
@@ -261,7 +282,7 @@ class GoogleMapsService:
                 "business_status": business_status,
                 "business_types": place.get("types", []),
                 "business_category": place.get("types", [None])[0] if place.get("types") else None,
-                "price_level": place.get("priceLevel"),
+                "price_level": GoogleMapsService._convert_price_level(place.get("priceLevel")),
                 "lead_source": "Google Maps"
             }
 
