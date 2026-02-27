@@ -84,7 +84,6 @@ async def create_google_maps_lead_form(
     data: BusinessSearchFormInput,  # Reuse BusinessSearchFormInput, add Maps-specific fields later if needed
     background_tasks: BackgroundTasks,
     db: AsyncIOMotorDatabase = Depends(get_db_dependency),
-    _: dict = Depends(enforce_feature_limit),
 ):
     """
     Create a Google Maps lead form for local business discovery
