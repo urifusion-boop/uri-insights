@@ -1387,6 +1387,13 @@ class LeadService:
 
         print(f"✅ [GOOGLE MAPS] Created {leads_count} leads")
 
+        # Log details of created leads (like Individual leads does)
+        created_leads = response.get("responseData", {}).get("leads", [])
+        for i, lead in enumerate(created_leads[:5], 1):  # Show first 5
+            print(f"   {i}. {lead.get('company_name', 'Unknown')} - {lead.get('location', 'No location')}")
+        if leads_count > 5:
+            print(f"   ... and {leads_count - 5} more")
+
         # Update feature limit
         print(f"🔄 [GOOGLE MAPS] Updating feature limit - User: {user_id}, Previous: {current_count}, New: {leads_count}, Total: {leads_count + current_count}")
         update_result = await UriTaskManagerService.update_user_feature_limit_specific_limit(
