@@ -8,6 +8,7 @@ from app.domain.enums.leadform_enum import LeadFormTypeEnum
 from app.domain.schemas.leadform_schema import (
     BusinessLeadFormUpdate,
     ConversationalLeadFormUpdate,
+    GoogleMapsLeadFormUpdate,
     LeadFormCreate,
     OrganizationLeadFormUpdate,
     PersonLeadFormUpdate,
@@ -665,6 +666,21 @@ async def update_business_lead_form(
     _: dict = Depends(enforce_feature_limit),
 ):
     result = await LeadFormService.update_business_lead_form(
+        db, lead_form_id, data, background_tasks
+    )
+    return UriResponse.get_status_response(
+        response=jsonable_encoder(result), status_code=result["responseCode"]
+    )
+
+
+@router.put("/google-maps-search/update")
+async def update_google_maps_lead_form(
+    lead_form_id: str,
+    data: GoogleMapsLeadFormUpdate,
+    background_tasks: BackgroundTasks,
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    result = await LeadFormService.update_google_maps_lead_form(
         db, lead_form_id, data, background_tasks
     )
     return UriResponse.get_status_response(

@@ -21,6 +21,7 @@ from app.domain.responses.uri_response import UriResponse
 from app.domain.schemas.leadform_schema import (
     BusinessLeadFormUpdate,
     ConversationalLeadFormUpdate,
+    GoogleMapsLeadFormUpdate,
     LeadFormCreate,
     OrganizationLeadFormUpdate,
     PersonLeadFormUpdate,
@@ -268,6 +269,34 @@ class LeadFormService:
                 LeadFormService.__generate_business_leads,
                 form_data,
             )
+
+        return updated_form
+
+    @staticmethod
+    async def update_google_maps_lead_form(
+        db: AsyncIOMotorDatabase,
+        lead_form_id: str,
+        updates: GoogleMapsLeadFormUpdate,
+        background_tasks: BackgroundTasks,
+    ):
+        update_data = updates.dict(exclude_none=True)
+
+        await db[LeadFormRepository.COLLECTION_NAME].update_one(
+            {"lead_form_id": lead_form_id}, {"$set": update_data}
+        )
+
+        updated_form = await LeadFormRepository.get_by_id(db, lead_form_id)
+
+        if updated_form.get("status"):
+            form_data = updated_form.get("responseData")
+            # Trigger Google Maps lead generation in background if auto_generate is enabled
+            if form_data.get("auto_generate"):
+                from app.services.LeadService import LeadService
+                background_tasks.add_task(
+                    LeadService.generate_google_maps_leads,
+                    form_data,
+                    db
+                )
 
         return updated_form
 

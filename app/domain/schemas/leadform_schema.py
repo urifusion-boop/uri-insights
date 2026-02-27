@@ -241,6 +241,21 @@ class ConversationalLeadFormUpdate(BizConvLeadFormUpdateBase):
     job_keywords: Optional[List[str]] = None  # AI-generated job role keywords (PRD Section 5)
 
 
+class GoogleMapsLeadFormUpdate(LeadFormUpdateBase):
+    # Google Maps Search fields
+    maps_search_mode: Optional[str] = None  # "auto", "text", "nearby"
+    maps_search_query: Optional[str] = None  # Natural language query for Text Search
+    maps_location: Optional[str] = None  # Location name for Text Search
+    maps_latitude: Optional[float] = None  # Latitude for Nearby Search
+    maps_longitude: Optional[float] = None  # Longitude for Nearby Search
+    maps_radius_km: Optional[float] = None  # Search radius in kilometers
+    maps_business_types: Optional[List[str]] = None  # Filter by business types
+    maps_min_rating: Optional[float] = None  # Minimum Google rating (0-5)
+    maps_exclude_closed: Optional[bool] = None  # Exclude closed businesses
+    maps_max_results: Optional[int] = None  # Maximum results to return
+    monitoring_interval_hours: Optional[int] = None  # How often to check for new businesses
+
+
 class LeadForm(LeadFormBase):
     id: str = Field(default_factory=lambda: str(ObjectId()))
 
