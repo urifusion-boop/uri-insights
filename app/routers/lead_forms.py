@@ -18,6 +18,7 @@ from app.domain.requests.leadform_requests import (
     AutoPopulationQuery,
     BusinessSearchFormInput,
     ConversationalSearchFormInput,
+    GoogleMapsSearchFormInput,
     LeadFormFilterQuery,
     PersonSearchFormInput,
     OrganizationSearchFormInput,
@@ -81,7 +82,7 @@ async def create_business_lead_form(
 
 @router.post("/google-maps-search/create")
 async def create_google_maps_lead_form(
-    data: BusinessSearchFormInput,  # Reuse BusinessSearchFormInput, add Maps-specific fields later if needed
+    data: GoogleMapsSearchFormInput,
     background_tasks: BackgroundTasks,
     db: AsyncIOMotorDatabase = Depends(get_db_dependency),
 ):

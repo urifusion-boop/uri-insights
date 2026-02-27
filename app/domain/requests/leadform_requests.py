@@ -93,6 +93,21 @@ class ConversationalSearchFormInput(BaseFormInput, ConversationalSearchRequest):
     form_type: Optional[LeadFormTypeEnum] = LeadFormTypeEnum.CONVERSATIONAL
 
 
+# --- Google Maps Search Form ---
+class GoogleMapsSearchFormInput(BaseFormInput):
+    form_type: Optional[LeadFormTypeEnum] = LeadFormTypeEnum.GOOGLE_MAPS
+    maps_search_mode: Optional[str] = "auto"  # "auto", "text", "nearby"
+    maps_search_query: Optional[str] = None  # Natural language query for Text Search
+    maps_location: Optional[str] = None  # Location name for Text Search
+    maps_latitude: Optional[float] = None  # Latitude for Nearby Search
+    maps_longitude: Optional[float] = None  # Longitude for Nearby Search
+    maps_radius_km: Optional[float] = None  # Search radius in kilometers
+    maps_business_types: Optional[List[str]] = None  # Filter by business types
+    maps_min_rating: Optional[float] = None  # Minimum Google rating (0-5)
+    maps_exclude_closed: Optional[bool] = True  # Exclude closed businesses
+    maps_max_results: Optional[int] = 20  # Maximum results to return
+
+
 class LeadFormFilterQuery(BaseModel):
     lead_form_id: Optional[str] = None
     user_id: Optional[str] = None
