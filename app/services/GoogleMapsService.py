@@ -228,17 +228,20 @@ class GoogleMapsService:
         Convert Google's NEW API price level string to integer
 
         NEW API: "PRICE_LEVEL_FREE", "PRICE_LEVEL_INEXPENSIVE", etc.
-        Database: 0, 1, 2, 3, 4
+        Database: 0 (unspecified), 1 (free), 2-5 (inexpensive to very expensive)
+
+        Source: https://developers.google.com/maps/documentation/places/web-service/reference/rpc/google.maps.places.v1#pricelevel
         """
         if not price_level_str:
             return None
 
         price_level_map = {
-            "PRICE_LEVEL_FREE": 0,
-            "PRICE_LEVEL_INEXPENSIVE": 1,
-            "PRICE_LEVEL_MODERATE": 2,
-            "PRICE_LEVEL_EXPENSIVE": 3,
-            "PRICE_LEVEL_VERY_EXPENSIVE": 4,
+            "PRICE_LEVEL_UNSPECIFIED": 0,
+            "PRICE_LEVEL_FREE": 1,
+            "PRICE_LEVEL_INEXPENSIVE": 2,
+            "PRICE_LEVEL_MODERATE": 3,
+            "PRICE_LEVEL_EXPENSIVE": 4,
+            "PRICE_LEVEL_VERY_EXPENSIVE": 5,
         }
 
         return price_level_map.get(price_level_str)
