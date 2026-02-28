@@ -62,23 +62,16 @@ class GoogleMapsService:
         print(f"   Coords: ({latitude}, {longitude}), Radius: {radius_km}km")
 
         # Decision: Which API to use?
-        if search_mode == "nearby" or (latitude and longitude and radius_km):
-            print("📍 Using Nearby Search API (precise location-based)")
-            return await GoogleMapsService._nearby_search(
-                latitude=latitude,
-                longitude=longitude,
-                radius_meters=radius_km * 1000,
-                business_types=business_types,
-                min_rating=min_rating,
-                exclude_closed=exclude_closed,
-                max_results=max_results
-            )
-
-        elif search_mode == "text" or query or location:
+        # Prefer Text Search when query exists (supports natural language like "coffee shops", "ogbonno vendors")
+        # Nearby Search has very limited type filtering
+        if search_mode == "text" or query or location:
             print("🔍 Using Text Search API (natural language)")
             return await GoogleMapsService._text_search(
                 query=query,
                 location=location,
+                latitude=latitude,
+                longitude=longitude,
+                radius_km=radius_km,
                 business_types=business_types,
                 min_rating=min_rating,
                 exclude_closed=exclude_closed,
@@ -205,6 +198,11 @@ class GoogleMapsService:
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(url, headers=headers, json=body)
+
+                # Log response for debugging
+                if response.status_code != 200:
+                    print(f"❌ API Error {response.status_code}: {response.text}")
+
                 response.raise_for_status()
 
             data = response.json()
