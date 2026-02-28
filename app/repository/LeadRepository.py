@@ -197,6 +197,11 @@ class LeadRepository:
     ) -> Dict[str, Any]:
         query: Dict[str, Any] = filters.model_dump(exclude_none=True)
 
+        # 🔍 DEBUG: Log the query being built
+        print(f"\n🔍 [GET_LEADS_BY_FILTERS] Building query from filters:")
+        print(f"   Filters: {filters.model_dump()}")
+        print(f"   Query (before date filter): {query}")
+
         if date_filter:
             start_date, end_date = DateHelper.get_date_range(date_filter)
             query["created_date"] = {
@@ -210,8 +215,11 @@ class LeadRepository:
                 {"is_pre_stored": {"$exists": False}},
             ]
 
+        print(f"   Final query: {query}")
+
         # Count total leads matching the query
         total_leads = await db["leads"].count_documents(query)
+        print(f"   Total leads found: {total_leads}")
 
         # Use aggregation pipeline to join with lead_form_snapshots and populate form_title
         pipeline = [
@@ -246,7 +254,16 @@ class LeadRepository:
 
         leads = await db["leads"].aggregate(pipeline).to_list(length=limit)
 
+        print(f"   Leads retrieved from aggregation: {len(leads)}")
+        if len(leads) > 0:
+            print(f"   First lead sample: {leads[0].get('lead_id', 'no-id')} - {leads[0].get('company_name', 'no-name')}")
+        else:
+            print(f"   ⚠️ No leads returned from aggregation pipeline!")
+
         leads_list = [Lead(**lead).dict() for lead in leads]
+        print(f"   Leads after parsing: {len(leads_list)}")
+        print(f"   📤 Returning response with {len(leads_list)} leads\n")
+
         return UriResponse.get_paged_data_response(
             "leads", leads_list, total_leads, skip + 1, limit
         )
