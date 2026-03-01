@@ -289,14 +289,14 @@ class LeadFormService:
 
         if updated_form.get("status"):
             form_data = updated_form.get("responseData")
-            # Trigger Google Maps lead generation in background if auto_generate is enabled
-            if form_data.get("auto_generate"):
-                from app.services.LeadService import LeadService
-                background_tasks.add_task(
-                    LeadService.generate_google_maps_leads,
-                    form_data,
-                    db
-                )
+            # Trigger Google Maps lead generation in background (same as create flow)
+            from app.services.LeadService import LeadService
+            print("[GOOGLE MAPS UPDATE] ✅ Triggering background lead generation")
+            background_tasks.add_task(
+                LeadService.trigger_apollo_leads_generation,
+                form_data,
+                db
+            )
 
         return updated_form
 
