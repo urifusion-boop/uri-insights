@@ -86,6 +86,9 @@ class GoogleMapsService:
     async def _text_search(
         query: str,
         location: Optional[str] = None,
+        latitude: Optional[float] = None,
+        longitude: Optional[float] = None,
+        radius_km: Optional[float] = None,
         business_types: Optional[List[str]] = None,
         min_rating: Optional[float] = None,
         exclude_closed: bool = True,
@@ -95,6 +98,7 @@ class GoogleMapsService:
         Text Search API - Natural language queries
 
         Best for: "small businesses in Ogba", "restaurants in Lagos"
+        Supports both location string and lat/lng coordinates for location biasing
         """
 
         # Build search query
@@ -118,8 +122,20 @@ class GoogleMapsService:
             "maxResultCount": max_results
         }
 
-        # Add location bias if location provided
-        if location:
+        # Add location bias - prefer coordinates if available, otherwise geocode location string
+        if latitude and longitude:
+            radius_meters = (radius_km * 1000) if radius_km else 5000.0
+            body["locationBias"] = {
+                "circle": {
+                    "center": {
+                        "latitude": latitude,
+                        "longitude": longitude
+                    },
+                    "radius": radius_meters
+                }
+            }
+            print(f"   Added location bias: ({latitude}, {longitude}) with {radius_meters}m radius")
+        elif location:
             try:
                 coords = await GoogleMapsService._geocode(location)
                 body["locationBias"] = {
