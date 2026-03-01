@@ -294,9 +294,11 @@ class LeadFormRepository:
             return UriResponse.custom_response("Lead form not found", 404)
 
         # Return success with details
-        return UriResponse.success_response(
-            f"Lead form deleted successfully. "
-            f"Also deleted: {snapshots_deleted} snapshots, {leads_deleted} leads, {spam_deleted} spam items."
+        return UriResponse.custom_response(
+            message=f"Lead form deleted successfully. "
+            f"Also deleted: {snapshots_deleted} snapshots, {leads_deleted} leads, {spam_deleted} spam items.",
+            error_code=200,
+            success=True
         )
 
     # ========== Multi-Form Support Methods (PRD Section 4.1) ==========
