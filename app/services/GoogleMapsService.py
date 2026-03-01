@@ -154,6 +154,11 @@ class GoogleMapsService:
                 response.raise_for_status()
 
             data = response.json()
+
+            # Debug: Log first place structure
+            if data.get("places") and len(data["places"]) > 0:
+                print(f"   📋 Sample place data: {data['places'][0]}")
+
             results = GoogleMapsService._parse_places_response(
                 data,
                 min_rating=min_rating,
@@ -161,6 +166,8 @@ class GoogleMapsService:
             )
 
             print(f"✅ Text Search returned {len(results)} businesses")
+            if results:
+                print(f"   📋 Sample parsed lead: {results[0]}")
             return results
 
         except Exception as e:
