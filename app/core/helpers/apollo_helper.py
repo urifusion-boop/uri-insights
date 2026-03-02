@@ -158,6 +158,13 @@ class ApolloHelper:
             "maps_min_rating",
             "maps_exclude_closed",
             "maps_max_results",
+            # Location Intelligence fields (URI-specific, not sent to Apollo)
+            "enable_location_intelligence",
+            "location_zone_center_lat",
+            "location_zone_center_lng",
+            "location_zone_radius_km",
+            "location_zone_name",
+            "min_trust_score",
         ]
         organization_search_request_dict = DictHelper.remove_keys(
             lead_form.copy(), unwanted_keys
