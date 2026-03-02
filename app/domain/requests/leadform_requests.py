@@ -82,6 +82,14 @@ class OrganizationSearchFormInput(BaseFormInput, OrganizationSearchRequest):
     form_type: Optional[LeadFormTypeEnum] = LeadFormTypeEnum.ORGANIZATION
     technology_uids: Optional[List[str]] = None
 
+    # Location Intelligence fields (URI-branded geographic targeting)
+    enable_location_intelligence: Optional[bool] = False
+    location_zone_center_lat: Optional[float] = None
+    location_zone_center_lng: Optional[float] = None
+    location_zone_radius_km: Optional[float] = None
+    location_zone_name: Optional[str] = None
+    min_trust_score: Optional[float] = None
+
 
 # --- Business Search Form ---
 class BusinessSearchFormInput(BaseFormInput, BusinessSearchRequest):
