@@ -195,6 +195,14 @@ class OrganizationLeadFormUpdate(LeadFormUpdateBase, ApolloFormsFields):
     q_organization_keyword_tags: Optional[List[str]] = None
     q_organization_name: Optional[str] = None
 
+    # Location Intelligence fields (URI-branded geographic targeting)
+    enable_location_intelligence: Optional[bool] = False
+    location_zone_center_lat: Optional[float] = None
+    location_zone_center_lng: Optional[float] = None
+    location_zone_radius_km: Optional[float] = None
+    location_zone_name: Optional[str] = None  # Display name: "Ogba, Lagos"
+    min_trust_score: Optional[float] = None  # Minimum trust score filter (0-5)
+
 
 class BizConvLeadFormUpdateBase(LeadFormUpdateBase):
     keywords: Optional[List[str]] = None

@@ -1207,9 +1207,17 @@ class LeadService:
                 lead_form=lead_form, db=db
             )
         elif lead_form_type == LeadFormTypeEnum.ORGANIZATION.value:
-            leads_to_create = await ApolloService.handle_organization_leads_gen(
-                lead_form=lead_form, db=db
-            )
+            # Check if Location Intelligence is enabled
+            if lead_form.get('enable_location_intelligence'):
+                print("[ORG LEADS] 📍 Location Intelligence enabled - using geographic targeting")
+                leads_to_create = await LeadService._generate_location_intelligent_org_leads(
+                    lead_form=lead_form, db=db
+                )
+            else:
+                # Standard Apollo-only organization search
+                leads_to_create = await ApolloService.handle_organization_leads_gen(
+                    lead_form=lead_form, db=db
+                )
         elif lead_form_type == LeadFormTypeEnum.GOOGLE_MAPS.value:
             # Google Maps leads are handled separately - trigger async generation
             await LeadService.generate_google_maps_leads(lead_form=lead_form, db=db)
@@ -1414,6 +1422,161 @@ class LeadService:
         print(f"{'='*80}\n")
 
         return response
+
+    @staticmethod
+    async def _generate_location_intelligent_org_leads(
+        lead_form: dict, db: AsyncIOMotorDatabase
+    ) -> List[LeadCreate]:
+        """
+        Generate organization leads using Location Intelligence (Google Maps + Apollo merge)
+
+        This method is called when enable_location_intelligence is True in org lead forms.
+        It searches Google Maps for businesses in a geographic area, then enriches with Apollo data.
+
+        Returns leads as ORGANIZATION type (not GOOGLE_MAPS) to maintain URI branding.
+        """
+        from app.services.GoogleMapsService import GoogleMapsService
+        from app.services.ApolloService import ApolloService
+
+        print(f"\n{'='*80}")
+        print(f"[LOCATION INTELLIGENCE] Starting geographic organization search")
+        print(f"[LOCATION INTELLIGENCE] Zone: {lead_form.get('location_zone_name', 'Unknown')}")
+        print(f"[LOCATION INTELLIGENCE] Radius: {lead_form.get('location_zone_radius_km', 0)}km")
+        print(f"{'='*80}\n")
+
+        # Step 1: Search Google Maps for businesses in the geographic area
+        google_search_params = {
+            "latitude": lead_form.get("location_zone_center_lat"),
+            "longitude": lead_form.get("location_zone_center_lng"),
+            "radius_km": lead_form.get("location_zone_radius_km", 10.0),
+            "min_rating": lead_form.get("min_trust_score", 3.0),
+            "exclude_closed": True,
+            "max_results": 100,  # Get more to compensate for filtering
+            "search_mode": "nearby"
+        }
+
+        print(f"[LOCATION INTELLIGENCE] 🗺️ Searching geographic area...")
+        try:
+            businesses = await GoogleMapsService.search_businesses(**google_search_params)
+            print(f"[LOCATION INTELLIGENCE] Found {len(businesses)} businesses in target zone")
+        except Exception as e:
+            print(f"[LOCATION INTELLIGENCE] ❌ Geographic search failed: {e}")
+            # Fallback to standard Apollo search
+            print(f"[LOCATION INTELLIGENCE] Falling back to standard Apollo search...")
+            return await ApolloService.handle_organization_leads_gen(lead_form=lead_form, db=db)
+
+        if not businesses:
+            print("[LOCATION INTELLIGENCE] No businesses found in geographic area")
+            return []
+
+        # Step 2: Extract domains/websites for Apollo enrichment
+        domains_for_apollo = []
+        businesses_by_domain = {}
+
+        for business in businesses:
+            if business.get('website_url'):
+                domain = business['website_url'].replace('https://', '').replace('http://', '').split('/')[0]
+                domains_for_apollo.append(domain)
+                businesses_by_domain[domain] = business
+
+        print(f"[LOCATION INTELLIGENCE] Extracted {len(domains_for_apollo)} websites for Apollo enrichment")
+
+        # Step 3: Try to enrich with Apollo data (if domains exist)
+        apollo_enriched = {}
+        if domains_for_apollo and len(domains_for_apollo) > 0:
+            print(f"[LOCATION INTELLIGENCE] 🔍 Querying Apollo for company data...")
+            try:
+                # Create a modified lead_form for Apollo with domain filter
+                apollo_form = {**lead_form, 'organization_domains_list': domains_for_apollo}
+                apollo_leads_raw = await ApolloService.handle_organization_leads_gen(
+                    lead_form=apollo_form, db=db
+                )
+
+                # Index Apollo results by domain for quick lookup
+                for lead in apollo_leads_raw:
+                    if lead.primary_domain:
+                        apollo_enriched[lead.primary_domain] = lead
+
+                print(f"[LOCATION INTELLIGENCE] Apollo enriched {len(apollo_enriched)} companies")
+            except Exception as e:
+                print(f"[LOCATION INTELLIGENCE] ⚠️ Apollo enrichment failed: {e} - continuing with Google data only")
+
+        # Step 4: Merge Google location data with Apollo firmographics
+        merged_leads = []
+        for business in businesses:
+            domain = None
+            if business.get('website_url'):
+                domain = business['website_url'].replace('https://', '').replace('http://', '').split('/')[0]
+
+            # Check if we have Apollo data for this business
+            apollo_data = apollo_enriched.get(domain) if domain else None
+
+            if apollo_data:
+                # HYBRID: Merge Apollo firmographics + Google location/contact
+                lead_data = {
+                    # Apollo data (firmographics)
+                    "company_name": apollo_data.company_name or business.get('company_name'),
+                    "primary_domain": apollo_data.primary_domain,
+                    "organization_revenue": apollo_data.organization_revenue,
+                    "organization_revenue_printed": apollo_data.organization_revenue_printed,
+                    "founded_year": apollo_data.founded_year,
+                    "linkedin_url": apollo_data.linkedin_url,
+                    "twitter_url": apollo_data.twitter_url,
+                    "facebook_url": apollo_data.facebook_url,
+                    "industry": apollo_data.industry,
+
+                    # Google Maps data (location/contact)
+                    "formatted_address": business.get('formatted_address'),
+                    "latitude": business.get('latitude'),
+                    "longitude": business.get('longitude'),
+                    "phone": business.get('phone'),
+                    "google_rating": business.get('google_rating'),  # Displayed as "Trust Score"
+                    "google_reviews_count": business.get('google_reviews_count'),
+                    "business_status": business.get('business_status'),
+                    "business_category": business.get('business_category'),
+
+                    # Metadata
+                    "lead_source": LeadSourceEnum.ORGANIZATION,  # NOT Google Maps!
+                    "lead_type": LeadFormTypeEnum.ORGANIZATION,
+                    "lead_form_snapshot_id": lead_form.get("lead_form_id"),
+                    "assigned_to": lead_form.get("user_id"),
+                    "lead_status": LeadStatusEnum.NEW,
+                    "interest_level": LeadInterestLevelEnum.MEDIUM,
+                }
+            else:
+                # Google-only: No Apollo match found
+                lead_data = {
+                    "company_name": business.get('company_name'),
+                    "formatted_address": business.get('formatted_address'),
+                    "latitude": business.get('latitude'),
+                    "longitude": business.get('longitude'),
+                    "phone": business.get('phone'),
+                    "website_url": business.get('website_url'),
+                    "google_rating": business.get('google_rating'),
+                    "google_reviews_count": business.get('google_reviews_count'),
+                    "business_status": business.get('business_status'),
+                    "business_category": business.get('business_category'),
+
+                    # Metadata - disguise as organization lead
+                    "lead_source": LeadSourceEnum.ORGANIZATION,
+                    "lead_type": LeadFormTypeEnum.ORGANIZATION,
+                    "lead_form_snapshot_id": lead_form.get("lead_form_id"),
+                    "assigned_to": lead_form.get("user_id"),
+                    "lead_status": LeadStatusEnum.NEW,
+                    "interest_level": LeadInterestLevelEnum.MEDIUM,
+                }
+
+            try:
+                merged_leads.append(LeadCreate(**lead_data))
+            except Exception as e:
+                print(f"⚠️ [LOCATION INTELLIGENCE] Skipping invalid business: {business.get('company_name')} - {e}")
+
+        print(f"\n[LOCATION INTELLIGENCE] ✅ Created {len(merged_leads)} organization leads")
+        print(f"   - {len(apollo_enriched)} with Apollo enrichment")
+        print(f"   - {len(merged_leads) - len(apollo_enriched)} from geographic data only")
+        print(f"{'='*80}\n")
+
+        return merged_leads
 
     @staticmethod
     async def send_successful_maps_leads_notification(
