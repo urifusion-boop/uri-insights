@@ -86,11 +86,30 @@ class LeadFormRepository:
     async def update(
         db: AsyncIOMotorDatabase, data: LeadFormUpdateBase, lead_form_id: str
     ):
-        # Changed: Don't exclude unset fields - keep all fields including Location Intelligence
-        lead_form = data.model_dump(exclude_unset=False, exclude_none=False)
+        # Restore original: Use exclude_unset=True for safety
+        lead_form = data.model_dump(exclude_unset=True)
 
-        # 🔍 LOG: Check what Pydantic dumped
-        print(f"💾 [REPOSITORY UPDATE] Pydantic model_dump result:")
+        # 🔍 FIX: Manually add Location Intelligence fields if they exist in data
+        # This fixes Pydantic treating fields with default values as "unset"
+        location_intel_fields = [
+            'enable_location_intelligence',
+            'location_zone_center_lat',
+            'location_zone_center_lng',
+            'location_zone_radius_km',
+            'location_zone_name',
+            'min_trust_score'
+        ]
+
+        for field in location_intel_fields:
+            if hasattr(data, field):
+                value = getattr(data, field)
+                # Add field to lead_form dict (including False/0 values, but not None)
+                if value is not None:
+                    lead_form[field] = value
+                    print(f"✅ [REPOSITORY] Manually added {field} = {value}")
+
+        # 🔍 LOG: Check what will be saved
+        print(f"💾 [REPOSITORY UPDATE] Final update payload:")
         print(f"   - enable_location_intelligence: {lead_form.get('enable_location_intelligence')}")
         print(f"   - location_zone_center_lat: {lead_form.get('location_zone_center_lat')}")
         print(f"   - location_zone_center_lng: {lead_form.get('location_zone_center_lng')}")
