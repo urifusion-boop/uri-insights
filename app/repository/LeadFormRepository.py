@@ -86,7 +86,8 @@ class LeadFormRepository:
     async def update(
         db: AsyncIOMotorDatabase, data: LeadFormUpdateBase, lead_form_id: str
     ):
-        lead_form = data.model_dump(exclude_unset=True)
+        # Changed: Don't exclude unset fields - keep all fields including Location Intelligence
+        lead_form = data.model_dump(exclude_unset=False, exclude_none=False)
 
         # 🔍 LOG: Check what Pydantic dumped
         print(f"💾 [REPOSITORY UPDATE] Pydantic model_dump result:")
