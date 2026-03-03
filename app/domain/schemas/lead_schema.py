@@ -150,12 +150,13 @@ class LeadBase(BaseModel):
 
     # Google Maps - Local business discovery fields
     google_place_id: Optional[str] = None  # Unique Google Place identifier
-    google_rating: Optional[float] = None  # Business rating (0-5 stars)
+    google_rating: Optional[float] = None  # Business rating (0-5 stars) - stored but not displayed directly
     google_reviews_count: Optional[int] = None  # Number of reviews
+    trust_score: Optional[float] = None  # URI-branded Trust Score (calculated from google_rating: 1-5 → 20-100)
     business_status: Optional[str] = None  # "OPERATIONAL", "CLOSED_TEMPORARILY", "CLOSED_PERMANENTLY"
     business_category: Optional[str] = None  # Primary business type (e.g., "restaurant", "store")
     business_types: Optional[List[str]] = None  # All business types from Google
-    formatted_address: Optional[str] = None  # Full formatted address from Google
+    formatted_address: Optional[str] = None  # Full formatted address from Google (displayed as "Regional Zone")
     latitude: Optional[float] = None  # Latitude coordinate
     longitude: Optional[float] = None  # Longitude coordinate
     opening_hours: Optional[str] = None  # Business hours (optional, for future enhancement)

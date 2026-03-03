@@ -1158,6 +1158,11 @@ class ApolloService:
         tasks = []
 
         for organization in organizations:
+            # 🔍 LOG: Full Apollo organization data to check available fields
+            if len(organizations) > 0 and organizations.index(organization) == 0:
+                print(f"\n🔍 [APOLLO DEBUG] Full organization data keys: {list(organization.keys())}")
+                print(f"🔍 [APOLLO DEBUG] Sample organization data: {organization}\n")
+
             lead_to_create_dict = LeadHelper.extract_apollo_organization_lead(
                 organization
             )

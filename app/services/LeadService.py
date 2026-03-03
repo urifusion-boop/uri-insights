@@ -1438,155 +1438,102 @@ class LeadService:
         lead_form: dict, db: AsyncIOMotorDatabase
     ) -> List[LeadCreate]:
         """
-        Generate organization leads using Location Intelligence (Google Maps + Apollo merge)
+        Generate organization leads using Location Intelligence (Apollo + Google Maps enrichment)
 
-        This method is called when enable_location_intelligence is True in org lead forms.
-        It searches Google Maps for businesses in a geographic area, then enriches with Apollo data.
+        CORRECT FLOW:
+        1. Get companies from Apollo (as normal)
+        2. For each Apollo company, search Google Maps for their physical location
+        3. Enrich Apollo data with: Trust Score, formatted_address, phone, latitude, longitude
 
-        Returns leads as ORGANIZATION type (not GOOGLE_MAPS) to maintain URI branding.
+        Returns leads as ORGANIZATION type with enhanced location data.
         """
         from app.services.GoogleMapsService import GoogleMapsService
         from app.services.ApolloService import ApolloService
 
         print(f"\n{'='*80}")
-        print(f"[LOCATION INTELLIGENCE] Starting geographic organization search")
-        print(f"[LOCATION INTELLIGENCE] Zone: {lead_form.get('location_zone_name', 'Unknown')}")
+        print(f"[LOCATION INTELLIGENCE] Starting Apollo search with Google Maps enrichment")
+        print(f"[LOCATION INTELLIGENCE] Target Zone: {lead_form.get('location_zone_name', 'Unknown')}")
         print(f"[LOCATION INTELLIGENCE] Radius: {lead_form.get('location_zone_radius_km', 0)}km")
         print(f"{'='*80}\n")
 
-        # Step 1: Search Google Maps for businesses in the geographic area
-        google_search_params = {
-            "latitude": lead_form.get("location_zone_center_lat"),
-            "longitude": lead_form.get("location_zone_center_lng"),
-            "radius_km": lead_form.get("location_zone_radius_km", 10.0),
-            "min_rating": lead_form.get("min_trust_score", 3.0),
-            "exclude_closed": True,
-            "max_results": 20,  # Google API max limit is 20
-            "search_mode": "nearby"
-        }
+        # Step 1: Get companies from Apollo (standard search)
+        print(f"[LOCATION INTELLIGENCE] 🔍 Fetching companies from Apollo...")
+        apollo_leads = await ApolloService.handle_organization_leads_gen(lead_form=lead_form, db=db)
 
-        print(f"[LOCATION INTELLIGENCE] 🗺️ Searching geographic area...")
-        try:
-            businesses = await GoogleMapsService.search_businesses(**google_search_params)
-            print(f"[LOCATION INTELLIGENCE] Found {len(businesses)} businesses in target zone")
-        except Exception as e:
-            print(f"[LOCATION INTELLIGENCE] ❌ Geographic search failed: {e}")
-            # Fallback to standard Apollo search
-            print(f"[LOCATION INTELLIGENCE] Falling back to standard Apollo search...")
-            return await ApolloService.handle_organization_leads_gen(lead_form=lead_form, db=db)
-
-        if not businesses:
-            print("[LOCATION INTELLIGENCE] No businesses found in geographic area")
+        if not apollo_leads:
+            print("[LOCATION INTELLIGENCE] ⚠️ No companies found from Apollo")
             return []
 
-        # Step 2: Extract domains/websites for Apollo enrichment
-        domains_for_apollo = []
-        businesses_by_domain = {}
+        print(f"[LOCATION INTELLIGENCE] Found {len(apollo_leads)} companies from Apollo")
 
-        for business in businesses:
-            if business.get('website_url'):
-                domain = business['website_url'].replace('https://', '').replace('http://', '').split('/')[0]
-                domains_for_apollo.append(domain)
-                businesses_by_domain[domain] = business
+        # Step 2: For each Apollo company, enrich with Google Maps location data
+        enriched_leads = []
+        google_enriched_count = 0
 
-        print(f"[LOCATION INTELLIGENCE] Extracted {len(domains_for_apollo)} websites for Apollo enrichment")
+        for apollo_lead in apollo_leads:
+            # Start with Apollo data
+            lead_dict = apollo_lead.model_dump() if hasattr(apollo_lead, 'model_dump') else apollo_lead.dict()
 
-        # Step 3: Try to enrich with Apollo data (if domains exist)
-        apollo_enriched = {}
-        if domains_for_apollo and len(domains_for_apollo) > 0:
-            print(f"[LOCATION INTELLIGENCE] 🔍 Querying Apollo for company data...")
+            # Try to find Google Maps data for this company
+            company_name = lead_dict.get('company_name')
+            if not company_name:
+                enriched_leads.append(apollo_lead)
+                continue
+
+            # Search Google Maps for this specific company within the target zone
             try:
-                # Create a modified lead_form for Apollo with domain filter
-                apollo_form = {**lead_form, 'q_organization_domains_list': domains_for_apollo}
-                apollo_leads_raw = await ApolloService.handle_organization_leads_gen(
-                    lead_form=apollo_form, db=db
+                print(f"[LOCATION INTELLIGENCE] 📍 Searching Google Maps for: {company_name}")
+                google_results = await GoogleMapsService.search_businesses(
+                    query=company_name,
+                    latitude=lead_form.get("location_zone_center_lat"),
+                    longitude=lead_form.get("location_zone_center_lng"),
+                    radius_km=lead_form.get("location_zone_radius_km", 10.0),
+                    min_rating=lead_form.get("min_trust_score"),
+                    exclude_closed=True,
+                    max_results=1,  # Only get the best match
+                    search_mode="text"
                 )
 
-                # Index Apollo results by domain for quick lookup
-                for lead in apollo_leads_raw:
-                    if lead.primary_domain:
-                        apollo_enriched[lead.primary_domain] = lead
+                if google_results and len(google_results) > 0:
+                    google_data = google_results[0]
 
-                print(f"[LOCATION INTELLIGENCE] Apollo enriched {len(apollo_enriched)} companies")
+                    # Calculate URI-branded Trust Score from Google rating (1-5 stars → 20-100 scale)
+                    google_rating = google_data.get('google_rating')
+                    trust_score = None
+                    if google_rating is not None:
+                        # Convert 1-5 star rating to 20-100 Trust Score
+                        # 1 star = 20, 2 stars = 40, 3 stars = 60, 4 stars = 80, 5 stars = 100
+                        trust_score = round(google_rating * 20, 1)
+
+                    # Enrich Apollo data with Google Maps location data
+                    lead_dict.update({
+                        "formatted_address": google_data.get('formatted_address'),
+                        "latitude": google_data.get('latitude'),
+                        "longitude": google_data.get('longitude'),
+                        "phone": google_data.get('phone') or lead_dict.get('phone'),  # Keep Apollo phone as fallback
+                        "google_rating": google_rating,  # Stored but not displayed
+                        "trust_score": trust_score,  # URI-branded score displayed to users
+                        "google_reviews_count": google_data.get('google_reviews_count'),
+                        "business_status": google_data.get('business_status'),
+                        "business_category": google_data.get('business_category'),
+                    })
+                    google_enriched_count += 1
+                    print(f"   ✅ Enriched with Google Maps data (Trust Score: {trust_score}/100)")
             except Exception as e:
-                print(f"[LOCATION INTELLIGENCE] ⚠️ Apollo enrichment failed: {e} - continuing with Google data only")
+                print(f"   ⚠️ Google Maps enrichment failed for {company_name}: {e}")
 
-        # Step 4: Merge Google location data with Apollo firmographics
-        merged_leads = []
-        for business in businesses:
-            domain = None
-            if business.get('website_url'):
-                domain = business['website_url'].replace('https://', '').replace('http://', '').split('/')[0]
-
-            # Check if we have Apollo data for this business
-            apollo_data = apollo_enriched.get(domain) if domain else None
-
-            if apollo_data:
-                # HYBRID: Merge Apollo firmographics + Google location/contact
-                lead_data = {
-                    # Apollo data (firmographics)
-                    "company_name": apollo_data.company_name or business.get('company_name'),
-                    "primary_domain": apollo_data.primary_domain,
-                    "organization_revenue": apollo_data.organization_revenue,
-                    "organization_revenue_printed": apollo_data.organization_revenue_printed,
-                    "founded_year": apollo_data.founded_year,
-                    "linkedin_url": apollo_data.linkedin_url,
-                    "twitter_url": apollo_data.twitter_url,
-                    "facebook_url": apollo_data.facebook_url,
-                    "industry": apollo_data.industry,
-
-                    # Google Maps data (location/contact)
-                    "formatted_address": business.get('formatted_address'),
-                    "latitude": business.get('latitude'),
-                    "longitude": business.get('longitude'),
-                    "phone": business.get('phone'),
-                    "google_rating": business.get('google_rating'),  # Displayed as "Trust Score"
-                    "google_reviews_count": business.get('google_reviews_count'),
-                    "business_status": business.get('business_status'),
-                    "business_category": business.get('business_category'),
-
-                    # Metadata
-                    "lead_source": LeadSourceEnum.LAZARUS,  # Location Intelligence source
-                    "lead_type": LeadFormTypeEnum.ORGANIZATION,
-                    "lead_form_snapshot_id": lead_form.get("lead_form_id"),
-                    "assigned_to": lead_form.get("user_id"),
-                    "lead_status": LeadStatusEnum.NEW,
-                    "interest_level": LeadInterestLevelEnum.MEDIUM,
-                }
-            else:
-                # Google-only: No Apollo match found
-                lead_data = {
-                    "company_name": business.get('company_name'),
-                    "formatted_address": business.get('formatted_address'),
-                    "latitude": business.get('latitude'),
-                    "longitude": business.get('longitude'),
-                    "phone": business.get('phone'),
-                    "website_url": business.get('website_url'),
-                    "google_rating": business.get('google_rating'),
-                    "google_reviews_count": business.get('google_reviews_count'),
-                    "business_status": business.get('business_status'),
-                    "business_category": business.get('business_category'),
-
-                    # Metadata - disguise as organization lead
-                    "lead_source": LeadSourceEnum.LAZARUS,  # Location Intelligence source
-                    "lead_type": LeadFormTypeEnum.ORGANIZATION,
-                    "lead_form_snapshot_id": lead_form.get("lead_form_id"),
-                    "assigned_to": lead_form.get("user_id"),
-                    "lead_status": LeadStatusEnum.NEW,
-                    "interest_level": LeadInterestLevelEnum.MEDIUM,
-                }
-
+            # Create LeadCreate object with enriched data
             try:
-                merged_leads.append(LeadCreate(**lead_data))
+                enriched_leads.append(LeadCreate(**lead_dict))
             except Exception as e:
-                print(f"⚠️ [LOCATION INTELLIGENCE] Skipping invalid business: {business.get('company_name')} - {e}")
+                print(f"⚠️ [LOCATION INTELLIGENCE] Skipping invalid lead: {company_name} - {e}")
 
-        print(f"\n[LOCATION INTELLIGENCE] ✅ Created {len(merged_leads)} organization leads")
-        print(f"   - {len(apollo_enriched)} with Apollo enrichment")
-        print(f"   - {len(merged_leads) - len(apollo_enriched)} from geographic data only")
+        print(f"\n[LOCATION INTELLIGENCE] ✅ Created {len(enriched_leads)} organization leads")
+        print(f"   - {google_enriched_count} enriched with Google Maps location data")
+        print(f"   - {len(enriched_leads) - google_enriched_count} Apollo-only (Google Maps not found)")
         print(f"{'='*80}\n")
 
-        return merged_leads
+        return enriched_leads
 
     @staticmethod
     async def send_successful_maps_leads_notification(
