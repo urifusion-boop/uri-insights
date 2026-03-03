@@ -1217,17 +1217,17 @@ class LeadService:
             print(f"   - location_zone_name: {lead_form.get('location_zone_name')}")
             print(f"   - min_trust_score: {lead_form.get('min_trust_score')}")
 
+            # Always use Location Intelligence flow (enriches Apollo with Google Maps)
+            # If Location Intelligence enabled → Use geographic targeting for fallback
+            # If Location Intelligence disabled → Just enrich Apollo leads with location/trust score
             if lead_form.get('enable_location_intelligence'):
-                print("[ORG LEADS] ✅ 📍 Location Intelligence ENABLED - using geographic targeting with Google Maps + Apollo merge")
-                leads_to_create = await LeadService._generate_location_intelligent_org_leads(
-                    lead_form=lead_form, db=db
-                )
+                print("[ORG LEADS] ✅ 📍 Location Intelligence ENABLED - using geographic targeting")
             else:
-                print("[ORG LEADS] ❌ Location Intelligence DISABLED - using standard Apollo-only search")
-                # Standard Apollo-only organization search
-                leads_to_create = await ApolloService.handle_organization_leads_gen(
-                    lead_form=lead_form, db=db
-                )
+                print("[ORG LEADS] Location Intelligence DISABLED - but will still enrich Apollo leads with Google Maps location/trust score")
+
+            leads_to_create = await LeadService._generate_location_intelligent_org_leads(
+                lead_form=lead_form, db=db
+            )
         elif lead_form_type == LeadFormTypeEnum.GOOGLE_MAPS.value:
             # Google Maps leads are handled separately - trigger async generation
             await LeadService.generate_google_maps_leads(lead_form=lead_form, db=db)
