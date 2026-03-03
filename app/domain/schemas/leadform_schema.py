@@ -80,6 +80,7 @@ class LeadFormBase(BaseModel):
     revenue_range_min: Optional[int] = None
     revenue_range_max: Optional[int] = None
     technology_uids: Optional[List[str]] = None
+    currently_using_any_of_technology_uids: Optional[List[str]] = None
     q_organization_keyword_tags: Optional[List[str]] = None
     q_organization_name: Optional[str] = None
 
@@ -205,6 +206,7 @@ class OrganizationLeadFormUpdate(LeadFormUpdateBase, ApolloFormsFields):
     revenue_range_min: Optional[int] = None
     revenue_range_max: Optional[int] = None
     technology_uids: Optional[List[str]] = None
+    currently_using_any_of_technology_uids: Optional[List[str]] = None
     q_organization_keyword_tags: Optional[List[str]] = None
     q_organization_name: Optional[str] = None
 
