@@ -92,10 +92,12 @@ class GoogleMapsService:
             if not (latitude and longitude and radius_km):
                 raise ValueError("Nearby mode requires latitude, longitude, and radius_km")
             print("🔍 Using Nearby Search API (coordinate-based)")
+            # Convert km to meters for the API
+            radius_meters = radius_km * 1000
             return await GoogleMapsService._nearby_search(
                 latitude=latitude,
                 longitude=longitude,
-                radius_km=radius_km,
+                radius_meters=radius_meters,
                 business_types=business_types,
                 min_rating=min_rating,
                 exclude_closed=exclude_closed,
