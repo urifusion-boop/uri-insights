@@ -61,10 +61,21 @@ class GoogleMapsService:
         print(f"   Query: {query}, Location: {location}")
         print(f"   Coords: ({latitude}, {longitude}), Radius: {radius_km}km")
 
-        # Decision: Which API to use?
-        # Prefer Text Search when query exists (supports natural language like "coffee shops", "ogbonno vendors")
-        # Nearby Search has very limited type filtering
-        if search_mode == "text" or query or location:
+        # Auto mode: intelligently pick the right API
+        if search_mode == "auto":
+            # If query or location is provided, use Text Search (supports natural language)
+            if query or location:
+                search_mode = "text"
+                print("🔍 AUTO: Detected query/location → Using Text Search API")
+            # If only coordinates provided, use Nearby Search
+            elif latitude and longitude and radius_km:
+                search_mode = "nearby"
+                print("🔍 AUTO: Detected coordinates → Using Nearby Search API")
+            else:
+                raise ValueError("Auto mode requires either (query/location) OR (lat/lng + radius)")
+
+        # Execute the appropriate search method
+        if search_mode == "text":
             print("🔍 Using Text Search API (natural language)")
             return await GoogleMapsService._text_search(
                 query=query,
@@ -77,9 +88,21 @@ class GoogleMapsService:
                 exclude_closed=exclude_closed,
                 max_results=max_results
             )
-
+        elif search_mode == "nearby":
+            if not (latitude and longitude and radius_km):
+                raise ValueError("Nearby mode requires latitude, longitude, and radius_km")
+            print("🔍 Using Nearby Search API (coordinate-based)")
+            return await GoogleMapsService._nearby_search(
+                latitude=latitude,
+                longitude=longitude,
+                radius_km=radius_km,
+                business_types=business_types,
+                min_rating=min_rating,
+                exclude_closed=exclude_closed,
+                max_results=max_results
+            )
         else:
-            raise ValueError("Provide either (lat/lng + radius) OR (query/location)")
+            raise ValueError(f"Invalid search_mode: {search_mode}. Use 'auto', 'text', or 'nearby'")
 
 
     @staticmethod
