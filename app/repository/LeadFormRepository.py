@@ -87,6 +87,16 @@ class LeadFormRepository:
         db: AsyncIOMotorDatabase, data: LeadFormUpdateBase, lead_form_id: str
     ):
         lead_form = data.model_dump(exclude_unset=True)
+
+        # 🔍 LOG: Check what Pydantic dumped
+        print(f"💾 [REPOSITORY UPDATE] Pydantic model_dump result:")
+        print(f"   - enable_location_intelligence: {lead_form.get('enable_location_intelligence')}")
+        print(f"   - location_zone_center_lat: {lead_form.get('location_zone_center_lat')}")
+        print(f"   - location_zone_center_lng: {lead_form.get('location_zone_center_lng')}")
+        print(f"   - location_zone_radius_km: {lead_form.get('location_zone_radius_km')}")
+        print(f"   - location_zone_name: {lead_form.get('location_zone_name')}")
+        print(f"   - min_trust_score: {lead_form.get('min_trust_score')}")
+
         lead_form["last_updated"] = DateHelper.utc_now_iso()
 
         existing_form = (await LeadFormRepository.get_by_id(db, lead_form_id)).get(
