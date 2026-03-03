@@ -1521,24 +1521,58 @@ class LeadService:
                     if google_results and len(google_results) > 0:
                         google_data = google_results[0]
 
-                        # Calculate trust score
-                        google_rating = google_data.get('google_rating')
-                        trust_score = round(google_rating * 20, 1) if google_rating else None
+                        # 🔒 VERIFY: Check if Google Maps result matches Apollo company
+                        is_verified = False
+                        verification_method = None
 
-                        # Extract city, country
-                        location = LeadService._extract_city_country(google_data.get('formatted_address'))
+                        # Method 1: Domain verification (most reliable)
+                        apollo_domain = lead_dict.get('primary_domain') or lead_dict.get('website_url', '').replace('http://', '').replace('https://', '').replace('www.', '').split('/')[0]
+                        google_website = google_data.get('website', '').replace('http://', '').replace('https://', '').replace('www.', '').split('/')[0]
 
-                        # Enrich Apollo data with ONLY location and trust score
-                        lead_dict.update({
-                            "location": location,
-                            "trust_score": trust_score,
-                            "google_rating": google_rating,
-                            "google_reviews_count": google_data.get('google_reviews_count'),
-                            "formatted_address": google_data.get('formatted_address'),
-                            "latitude": google_data.get('latitude'),
-                            "longitude": google_data.get('longitude'),
-                        })
-                        print(f"      ✅ Enriched: Location={location}, Trust Score={trust_score}/100")
+                        if apollo_domain and google_website and apollo_domain.lower() == google_website.lower():
+                            is_verified = True
+                            verification_method = "domain_match"
+
+                        # Method 2: Name similarity check (if domain not available)
+                        if not is_verified:
+                            google_name = google_data.get('name', '').lower()
+                            apollo_name = company_name.lower()
+
+                            # Check if names are very similar (exact match or one contains the other)
+                            if google_name == apollo_name or google_name in apollo_name or apollo_name in google_name:
+                                # Additional check: Must be in same country if location hint provided
+                                if location_hint:
+                                    google_address = google_data.get('formatted_address', '').lower()
+                                    if location_hint.lower() in google_address:
+                                        is_verified = True
+                                        verification_method = "name_similarity + location_match"
+                                else:
+                                    is_verified = True
+                                    verification_method = "name_similarity"
+
+                        # Only enrich if verified
+                        if is_verified:
+                            # Calculate trust score
+                            google_rating = google_data.get('google_rating')
+                            trust_score = round(google_rating * 20, 1) if google_rating else None
+
+                            # Extract city, country
+                            location = LeadService._extract_city_country(google_data.get('formatted_address'))
+
+                            # Enrich Apollo data with ONLY location and trust score
+                            lead_dict.update({
+                                "location": location,
+                                "trust_score": trust_score,
+                                "google_rating": google_rating,
+                                "google_reviews_count": google_data.get('google_reviews_count'),
+                                "formatted_address": google_data.get('formatted_address'),
+                                "latitude": google_data.get('latitude'),
+                                "longitude": google_data.get('longitude'),
+                            })
+                            print(f"      ✅ VERIFIED ({verification_method}) & Enriched: Location={location}, Trust Score={trust_score}/100")
+                        else:
+                            print(f"      ⚠️ Google Maps result found but NOT VERIFIED (possible wrong match - skipping enrichment)")
+                            print(f"         Apollo: {company_name} | Google: {google_data.get('name')}")
                     else:
                         print(f"      ⚠️ No Google Maps data found")
 
