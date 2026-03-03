@@ -1497,7 +1497,7 @@ class LeadService:
             print(f"[LOCATION INTELLIGENCE] 🔍 Querying Apollo for company data...")
             try:
                 # Create a modified lead_form for Apollo with domain filter
-                apollo_form = {**lead_form, 'organization_domains_list': domains_for_apollo}
+                apollo_form = {**lead_form, 'q_organization_domains_list': domains_for_apollo}
                 apollo_leads_raw = await ApolloService.handle_organization_leads_gen(
                     lead_form=apollo_form, db=db
                 )
@@ -1546,7 +1546,7 @@ class LeadService:
                     "business_category": business.get('business_category'),
 
                     # Metadata
-                    "lead_source": LeadSourceEnum.ORGANIZATION,  # NOT Google Maps!
+                    "lead_source": LeadSourceEnum.LAZARUS,  # Location Intelligence source
                     "lead_type": LeadFormTypeEnum.ORGANIZATION,
                     "lead_form_snapshot_id": lead_form.get("lead_form_id"),
                     "assigned_to": lead_form.get("user_id"),
@@ -1568,7 +1568,7 @@ class LeadService:
                     "business_category": business.get('business_category'),
 
                     # Metadata - disguise as organization lead
-                    "lead_source": LeadSourceEnum.ORGANIZATION,
+                    "lead_source": LeadSourceEnum.LAZARUS,  # Location Intelligence source
                     "lead_type": LeadFormTypeEnum.ORGANIZATION,
                     "lead_form_snapshot_id": lead_form.get("lead_form_id"),
                     "assigned_to": lead_form.get("user_id"),

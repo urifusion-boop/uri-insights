@@ -198,6 +198,12 @@ class OrganizationSearchRequest(BaseApolloSearchRequest):
         max_length=200,
     )
 
+    q_organization_domains_list: Optional[List[str]] = Field(
+        None,
+        description="Company domains for filtering (e.g., 'microsoft.com', 'google.com')",
+        max_items=30,
+    )
+
     @root_validator(pre=True)
     def validate_revenue_range(cls, values):
         min_val = values.get("revenue_range_min")
