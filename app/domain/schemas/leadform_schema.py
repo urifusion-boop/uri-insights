@@ -136,6 +136,14 @@ class LeadFormBase(BaseModel):
     maps_exclude_closed: Optional[bool] = None  # Exclude closed businesses
     maps_max_results: Optional[int] = None  # Maximum number of results to return
 
+    # Location Intelligence fields (URI-branded geographic targeting for Organization forms)
+    enable_location_intelligence: Optional[bool] = False
+    location_zone_center_lat: Optional[float] = None
+    location_zone_center_lng: Optional[float] = None
+    location_zone_radius_km: Optional[float] = None
+    location_zone_name: Optional[str] = None
+    min_trust_score: Optional[float] = None
+
     # Pagination
     page: Optional[int] = 1
     per_page: Optional[int] = 10
