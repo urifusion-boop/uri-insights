@@ -1461,7 +1461,7 @@ class LeadService:
             "radius_km": lead_form.get("location_zone_radius_km", 10.0),
             "min_rating": lead_form.get("min_trust_score", 3.0),
             "exclude_closed": True,
-            "max_results": 100,  # Get more to compensate for filtering
+            "max_results": 20,  # Google API max limit is 20
             "search_mode": "nearby"
         }
 
