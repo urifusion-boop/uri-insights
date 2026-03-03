@@ -65,7 +65,6 @@ from app.domain.enums.lead_enum import (
     LeadSourceEnum,
     LeadStatusEnum,
     LeadOpportunityTypeEnum,
-    LeadTypeEnum,
 )
 from app.domain.schemas.lead_schema import LeadCreate
 from app.services.LeadExporterService import LeadExporter
@@ -1679,7 +1678,7 @@ class LeadService:
                     "business_status": business.get('business_status'),
                     "business_category": business.get('business_category'),
                     "lead_source": LeadSourceEnum.LAZARUS,
-                    "lead_type": LeadTypeEnum.ORGANIZATION,
+                    "lead_type": "ORGANIZATION",  # String value instead of enum
                 }
 
                 google_leads.append(LeadCreate(**lead_data))
