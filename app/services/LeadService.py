@@ -1666,7 +1666,7 @@ class LeadService:
 
                 lead_data = {
                     "company_name": business.get('name'),
-                    "website": business.get('website'),
+                    "website_url": business.get('website'),  # FIX: Changed from 'website' to 'website_url'
                     "phone": business.get('phone'),
                     "formatted_address": business.get('formatted_address'),
                     "location": location,  # City, Country only
