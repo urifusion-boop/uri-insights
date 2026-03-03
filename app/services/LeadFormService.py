@@ -194,6 +194,16 @@ class LeadFormService:
         lead_form_id: str,
         background_tasks: BackgroundTasks,
     ):
+        # 🔍 LOG: Service layer received update
+        print(f"📝 [FORM UPDATE SERVICE] Processing update for form: {lead_form_id}")
+        print(f"🔍 [FORM UPDATE SERVICE] Location Intelligence in update_data:")
+        print(f"   - enable_location_intelligence: {getattr(update_data, 'enable_location_intelligence', None)}")
+        print(f"   - location_zone_center_lat: {getattr(update_data, 'location_zone_center_lat', None)}")
+        print(f"   - location_zone_center_lng: {getattr(update_data, 'location_zone_center_lng', None)}")
+        print(f"   - location_zone_radius_km: {getattr(update_data, 'location_zone_radius_km', None)}")
+        print(f"   - location_zone_name: {getattr(update_data, 'location_zone_name', None)}")
+        print(f"   - min_trust_score: {getattr(update_data, 'min_trust_score', None)}")
+
         if update_data.per_page and update_data.per_page == 0:
             return UriResponse.custom_response(
                 "You cannot generate 0 leads per page.", 400
@@ -205,6 +215,18 @@ class LeadFormService:
         update_data.disabled = False
         update_data.disabled_reason = None
         update_response = await LeadFormRepository.update(db, update_data, lead_form_id)
+
+        # 🔍 LOG: Check what was saved to database
+        if update_response.get("status"):
+            saved_form = update_response.get("responseData", {})
+            print(f"✅ [FORM UPDATE SERVICE] Form saved successfully")
+            print(f"🔍 [FORM UPDATE SERVICE] Location Intelligence in saved form:")
+            print(f"   - enable_location_intelligence: {saved_form.get('enable_location_intelligence')}")
+            print(f"   - location_zone_center_lat: {saved_form.get('location_zone_center_lat')}")
+            print(f"   - location_zone_center_lng: {saved_form.get('location_zone_center_lng')}")
+            print(f"   - location_zone_radius_km: {saved_form.get('location_zone_radius_km')}")
+            print(f"   - location_zone_name: {saved_form.get('location_zone_name')}")
+            print(f"   - min_trust_score: {saved_form.get('min_trust_score')}")
 
         if update_response.get("status"):
             lead_form = update_response.get("responseData", {})

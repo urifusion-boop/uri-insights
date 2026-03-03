@@ -1208,12 +1208,22 @@ class LeadService:
             )
         elif lead_form_type == LeadFormTypeEnum.ORGANIZATION.value:
             # Check if Location Intelligence is enabled
+            print(f"🔍 [ORG LEADS GENERATION] Checking Location Intelligence for form: {lead_form.get('lead_form_id')}")
+            print(f"🔍 [ORG LEADS GENERATION] Location Intelligence fields in lead_form:")
+            print(f"   - enable_location_intelligence: {lead_form.get('enable_location_intelligence')}")
+            print(f"   - location_zone_center_lat: {lead_form.get('location_zone_center_lat')}")
+            print(f"   - location_zone_center_lng: {lead_form.get('location_zone_center_lng')}")
+            print(f"   - location_zone_radius_km: {lead_form.get('location_zone_radius_km')}")
+            print(f"   - location_zone_name: {lead_form.get('location_zone_name')}")
+            print(f"   - min_trust_score: {lead_form.get('min_trust_score')}")
+
             if lead_form.get('enable_location_intelligence'):
-                print("[ORG LEADS] 📍 Location Intelligence enabled - using geographic targeting")
+                print("[ORG LEADS] ✅ 📍 Location Intelligence ENABLED - using geographic targeting with Google Maps + Apollo merge")
                 leads_to_create = await LeadService._generate_location_intelligent_org_leads(
                     lead_form=lead_form, db=db
                 )
             else:
+                print("[ORG LEADS] ❌ Location Intelligence DISABLED - using standard Apollo-only search")
                 # Standard Apollo-only organization search
                 leads_to_create = await ApolloService.handle_organization_leads_gen(
                     lead_form=lead_form, db=db

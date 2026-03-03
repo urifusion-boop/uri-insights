@@ -634,6 +634,16 @@ async def update_organization_lead_form(
     db: AsyncIOMotorDatabase = Depends(get_db_dependency),
     _: dict = Depends(enforce_feature_limit),
 ):
+    # 🔍 LOG: Received update request
+    print(f"📥 [FORM UPDATE API] Received update for form: {lead_form_id}")
+    print(f"🔍 [FORM UPDATE API] Location Intelligence data in request:")
+    print(f"   - enable_location_intelligence: {getattr(data, 'enable_location_intelligence', None)}")
+    print(f"   - location_zone_center_lat: {getattr(data, 'location_zone_center_lat', None)}")
+    print(f"   - location_zone_center_lng: {getattr(data, 'location_zone_center_lng', None)}")
+    print(f"   - location_zone_radius_km: {getattr(data, 'location_zone_radius_km', None)}")
+    print(f"   - location_zone_name: {getattr(data, 'location_zone_name', None)}")
+    print(f"   - min_trust_score: {getattr(data, 'min_trust_score', None)}")
+
     result = await LeadFormService.update_apollo_lead_forms(
         db, data, lead_form_id, background_tasks
     )
