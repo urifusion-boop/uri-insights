@@ -65,6 +65,7 @@ from app.domain.enums.lead_enum import (
     LeadSourceEnum,
     LeadStatusEnum,
     LeadOpportunityTypeEnum,
+    LeadTypeEnum,
 )
 from app.domain.schemas.lead_schema import LeadCreate
 from app.services.LeadExporterService import LeadExporter

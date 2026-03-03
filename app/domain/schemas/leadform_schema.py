@@ -46,8 +46,8 @@ class ScoringThresholds(BaseModel):
 
 class LeadFormBase(BaseModel):
     lead_form_id: str = Field(default_factory=lambda: str(ObjectId()))
-    form_type: LeadFormTypeEnum
-    form_title: str
+    form_type: Optional[LeadFormTypeEnum] = None  # Made optional to handle corrupted forms
+    form_title: Optional[str] = None  # Made optional to handle corrupted forms
     user_id: str
     is_default: Optional[bool] = False  # Multi-form support: Mark one form as default per user per type
     disabled: bool = False
@@ -158,7 +158,12 @@ class LeadFormBase(BaseModel):
 
 
 class LeadFormCreate(LeadFormBase):
-    pass
+    # Override to make these required for creation
+    form_type: LeadFormTypeEnum
+    form_title: str
+
+    class Config:
+        extra = "forbid"
 
 
 class LeadFormUpdateBase(BaseModel):
