@@ -1466,11 +1466,11 @@ class LeadService:
         lead_form: dict, db: AsyncIOMotorDatabase
     ) -> List[LeadCreate]:
         """
-        Generate organization leads using Location Intelligence (Apollo-first, Google Maps fallback)
+        Generate organization leads using Location Intelligence (Apollo-first with Google Maps enrichment)
 
         CORRECT FLOW:
         1. Try Apollo with user's filters
-        2. If Apollo returns results → Use Apollo data as-is
+        2. If Apollo returns results → Enrich each with location & trust score from Google Maps
         3. If Apollo returns 0 results → Fallback to Google Maps search
            - If Location Intelligence enabled (has target zone) → Use nearby search
            - If Location Intelligence disabled → Use text search with organization_locations
@@ -1481,7 +1481,7 @@ class LeadService:
         from app.services.ApolloService import ApolloService
 
         print(f"\n{'='*80}")
-        print(f"[LOCATION INTELLIGENCE] Apollo-first strategy with Google Maps fallback")
+        print(f"[LOCATION INTELLIGENCE] Apollo-first with Google Maps enrichment")
         print(f"[LOCATION INTELLIGENCE] Target Zone: {lead_form.get('location_zone_name', 'Not set')}")
         print(f"[LOCATION INTELLIGENCE] Radius: {lead_form.get('location_zone_radius_km', 0)}km")
         print(f"{'='*80}\n")
@@ -1492,9 +1492,68 @@ class LeadService:
 
         if apollo_leads and len(apollo_leads) > 0:
             print(f"[LOCATION INTELLIGENCE] ✅ Apollo SUCCESS: Found {len(apollo_leads)} companies")
-            print(f"[LOCATION INTELLIGENCE] Using Apollo data as-is (no Google Maps needed)")
+            print(f"[LOCATION INTELLIGENCE] 🗺️ Enriching each with Google Maps location & trust score...")
+
+            # Enrich Apollo leads with Google Maps data
+            enriched_leads = []
+            locations_list = lead_form.get("organization_locations", [])
+            location_hint = locations_list[0] if locations_list else None
+
+            for apollo_lead in apollo_leads:
+                lead_dict = apollo_lead.model_dump() if hasattr(apollo_lead, 'model_dump') else apollo_lead.dict()
+                company_name = lead_dict.get('company_name')
+
+                if not company_name:
+                    enriched_leads.append(apollo_lead)
+                    continue
+
+                # Search Google Maps for this company to get location & trust score
+                try:
+                    search_query = f"{company_name} {location_hint}" if location_hint else company_name
+                    print(f"   🔍 Searching Google Maps for: {search_query}")
+
+                    google_results = await GoogleMapsService.search_businesses(
+                        query=search_query,
+                        max_results=1,  # Just need the first match
+                        search_mode="text"
+                    )
+
+                    if google_results and len(google_results) > 0:
+                        google_data = google_results[0]
+
+                        # Calculate trust score
+                        google_rating = google_data.get('google_rating')
+                        trust_score = round(google_rating * 20, 1) if google_rating else None
+
+                        # Extract city, country
+                        location = LeadService._extract_city_country(google_data.get('formatted_address'))
+
+                        # Enrich Apollo data with ONLY location and trust score
+                        lead_dict.update({
+                            "location": location,
+                            "trust_score": trust_score,
+                            "google_rating": google_rating,
+                            "google_reviews_count": google_data.get('google_reviews_count'),
+                            "formatted_address": google_data.get('formatted_address'),
+                            "latitude": google_data.get('latitude'),
+                            "longitude": google_data.get('longitude'),
+                        })
+                        print(f"      ✅ Enriched: Location={location}, Trust Score={trust_score}/100")
+                    else:
+                        print(f"      ⚠️ No Google Maps data found")
+
+                except Exception as e:
+                    print(f"      ⚠️ Google Maps enrichment failed: {e}")
+
+                # Add enriched lead
+                try:
+                    enriched_leads.append(LeadCreate(**lead_dict))
+                except Exception as e:
+                    print(f"      ❌ Failed to create lead: {e}")
+
+            print(f"\n[LOCATION INTELLIGENCE] ✅ Enriched {len(enriched_leads)} Apollo leads with Google Maps data")
             print(f"{'='*80}\n")
-            return apollo_leads
+            return enriched_leads
 
         # Step 2: Apollo returned 0 results - fallback to Google Maps
         print(f"[LOCATION INTELLIGENCE] ⚠️ Apollo returned 0 results")
