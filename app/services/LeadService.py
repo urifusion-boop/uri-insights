@@ -1434,106 +1434,169 @@ class LeadService:
         return response
 
     @staticmethod
+    def _extract_city_country(formatted_address: Optional[str]) -> Optional[str]:
+        """
+        Extract city and country from Google Maps formatted address.
+
+        Example: "12b Olubunmi Owa St, Lekki Phase I, Lagos 106104, Nigeria" → "Lagos, Nigeria"
+
+        Args:
+            formatted_address: Full address from Google Maps
+
+        Returns:
+            "City, Country" string or None if cannot parse
+        """
+        if not formatted_address:
+            return None
+
+        parts = [p.strip() for p in formatted_address.split(',')]
+
+        if len(parts) >= 3:
+            # Get second-to-last part (usually city with postal code) and last part (country)
+            city_part = parts[-2].split()[0]  # Remove postal code if present
+            country = parts[-1]
+            return f"{city_part}, {country}"
+        elif len(parts) == 2:
+            return formatted_address  # Already in "City, Country" format
+        else:
+            return formatted_address  # Return as-is if cannot parse
+
+    @staticmethod
     async def _generate_location_intelligent_org_leads(
         lead_form: dict, db: AsyncIOMotorDatabase
     ) -> List[LeadCreate]:
         """
-        Generate organization leads using Location Intelligence (Apollo + Google Maps enrichment)
+        Generate organization leads using Location Intelligence (Apollo-first, Google Maps fallback)
 
         CORRECT FLOW:
-        1. Get companies from Apollo (as normal)
-        2. For each Apollo company, search Google Maps for their physical location
-        3. Enrich Apollo data with: Trust Score, formatted_address, phone, latitude, longitude
+        1. Try Apollo with user's filters
+        2. If Apollo returns results → Use Apollo data as-is
+        3. If Apollo returns 0 results → Fallback to Google Maps search
+           - If Location Intelligence enabled (has target zone) → Use nearby search
+           - If Location Intelligence disabled → Use text search with organization_locations
 
-        Returns leads as ORGANIZATION type with enhanced location data.
+        Returns leads with trust_score (Google rating * 20) and location (city, country).
         """
         from app.services.GoogleMapsService import GoogleMapsService
         from app.services.ApolloService import ApolloService
 
         print(f"\n{'='*80}")
-        print(f"[LOCATION INTELLIGENCE] Starting Apollo search with Google Maps enrichment")
-        print(f"[LOCATION INTELLIGENCE] Target Zone: {lead_form.get('location_zone_name', 'Unknown')}")
+        print(f"[LOCATION INTELLIGENCE] Apollo-first strategy with Google Maps fallback")
+        print(f"[LOCATION INTELLIGENCE] Target Zone: {lead_form.get('location_zone_name', 'Not set')}")
         print(f"[LOCATION INTELLIGENCE] Radius: {lead_form.get('location_zone_radius_km', 0)}km")
         print(f"{'='*80}\n")
 
-        # Step 1: Get companies from Apollo (standard search)
-        print(f"[LOCATION INTELLIGENCE] 🔍 Fetching companies from Apollo...")
+        # Step 1: Try Apollo first
+        print(f"[LOCATION INTELLIGENCE] 🔍 Step 1: Trying Apollo...")
         apollo_leads = await ApolloService.handle_organization_leads_gen(lead_form=lead_form, db=db)
 
-        if not apollo_leads:
-            print("[LOCATION INTELLIGENCE] ⚠️ No companies found from Apollo")
-            return []
+        if apollo_leads and len(apollo_leads) > 0:
+            print(f"[LOCATION INTELLIGENCE] ✅ Apollo SUCCESS: Found {len(apollo_leads)} companies")
+            print(f"[LOCATION INTELLIGENCE] Using Apollo data as-is (no Google Maps needed)")
+            print(f"{'='*80}\n")
+            return apollo_leads
 
-        print(f"[LOCATION INTELLIGENCE] Found {len(apollo_leads)} companies from Apollo")
+        # Step 2: Apollo returned 0 results - fallback to Google Maps
+        print(f"[LOCATION INTELLIGENCE] ⚠️ Apollo returned 0 results")
+        print(f"[LOCATION INTELLIGENCE] 🗺️ Step 2: Falling back to Google Maps...")
 
-        # Step 2: For each Apollo company, enrich with Google Maps location data
-        enriched_leads = []
-        google_enriched_count = 0
+        # Check if Location Intelligence is enabled (has target zone)
+        has_target_zone = (
+            lead_form.get("enable_location_intelligence") and
+            lead_form.get("location_zone_center_lat") and
+            lead_form.get("location_zone_center_lng") and
+            lead_form.get("location_zone_radius_km")
+        )
 
-        for apollo_lead in apollo_leads:
-            # Start with Apollo data
-            lead_dict = apollo_lead.model_dump() if hasattr(apollo_lead, 'model_dump') else apollo_lead.dict()
+        # Get search keywords
+        keywords_list = lead_form.get("organization_keywords", [])
+        keywords = " ".join(keywords_list) if keywords_list else "business"
 
-            # Try to find Google Maps data for this company
-            company_name = lead_dict.get('company_name')
-            if not company_name:
-                enriched_leads.append(apollo_lead)
-                continue
+        google_results = []
+        try:
+            if has_target_zone:
+                # Use nearby search with coordinates
+                print(f"[LOCATION INTELLIGENCE] Using NEARBY search (coordinate-based)")
+                print(f"   Lat: {lead_form['location_zone_center_lat']}, Lng: {lead_form['location_zone_center_lng']}")
+                print(f"   Radius: {lead_form['location_zone_radius_km']}km")
 
-            # Search Google Maps for this specific company within the target zone
-            try:
-                print(f"[LOCATION INTELLIGENCE] 📍 Searching Google Maps for: {company_name}")
                 google_results = await GoogleMapsService.search_businesses(
-                    query=company_name,
-                    latitude=lead_form.get("location_zone_center_lat"),
-                    longitude=lead_form.get("location_zone_center_lng"),
-                    radius_km=lead_form.get("location_zone_radius_km", 10.0),
-                    min_rating=lead_form.get("min_trust_score"),
+                    query=keywords,
+                    latitude=lead_form["location_zone_center_lat"],
+                    longitude=lead_form["location_zone_center_lng"],
+                    radius_km=lead_form["location_zone_radius_km"],
+                    min_rating=lead_form.get("min_trust_score", 0) / 20 if lead_form.get("min_trust_score") else None,  # Convert trust score back to 1-5 rating
                     exclude_closed=True,
-                    max_results=1,  # Only get the best match
+                    max_results=20,
+                    search_mode="nearby"
+                )
+            else:
+                # Use text search with location name
+                locations_list = lead_form.get("organization_locations", [])
+                location_name = locations_list[0] if locations_list else "Nigeria"
+
+                print(f"[LOCATION INTELLIGENCE] Using TEXT search (location-based)")
+                print(f"   Location: {location_name}")
+                print(f"   Keywords: {keywords}")
+
+                google_results = await GoogleMapsService.search_businesses(
+                    query=keywords,
+                    location=location_name,
+                    exclude_closed=True,
+                    max_results=20,
                     search_mode="text"
                 )
+        except Exception as e:
+            print(f"[LOCATION INTELLIGENCE] ❌ Google Maps search failed: {e}")
+            print(f"{'='*80}\n")
+            return []
 
-                if google_results and len(google_results) > 0:
-                    google_data = google_results[0]
+        if not google_results:
+            print(f"[LOCATION INTELLIGENCE] ⚠️ Google Maps also returned 0 results")
+            print(f"{'='*80}\n")
+            return []
 
-                    # Calculate URI-branded Trust Score from Google rating (1-5 stars → 20-100 scale)
-                    google_rating = google_data.get('google_rating')
-                    trust_score = None
-                    if google_rating is not None:
-                        # Convert 1-5 star rating to 20-100 Trust Score
-                        # 1 star = 20, 2 stars = 40, 3 stars = 60, 4 stars = 80, 5 stars = 100
-                        trust_score = round(google_rating * 20, 1)
+        print(f"[LOCATION INTELLIGENCE] ✅ Google Maps SUCCESS: Found {len(google_results)} businesses")
 
-                    # Enrich Apollo data with Google Maps location data
-                    lead_dict.update({
-                        "formatted_address": google_data.get('formatted_address'),
-                        "latitude": google_data.get('latitude'),
-                        "longitude": google_data.get('longitude'),
-                        "phone": google_data.get('phone') or lead_dict.get('phone'),  # Keep Apollo phone as fallback
-                        "google_rating": google_rating,  # Stored but not displayed
-                        "trust_score": trust_score,  # URI-branded score displayed to users
-                        "google_reviews_count": google_data.get('google_reviews_count'),
-                        "business_status": google_data.get('business_status'),
-                        "business_category": google_data.get('business_category'),
-                    })
-                    google_enriched_count += 1
-                    print(f"   ✅ Enriched with Google Maps data (Trust Score: {trust_score}/100)")
-            except Exception as e:
-                print(f"   ⚠️ Google Maps enrichment failed for {company_name}: {e}")
-
-            # Create LeadCreate object with enriched data
+        # Step 3: Convert Google Maps results to leads
+        google_leads = []
+        for business in google_results:
             try:
-                enriched_leads.append(LeadCreate(**lead_dict))
-            except Exception as e:
-                print(f"⚠️ [LOCATION INTELLIGENCE] Skipping invalid lead: {company_name} - {e}")
+                # Calculate URI-branded Trust Score from Google rating (1-5 stars → 20-100 scale)
+                google_rating = business.get('google_rating')
+                trust_score = None
+                if google_rating is not None:
+                    trust_score = round(google_rating * 20, 1)
 
-        print(f"\n[LOCATION INTELLIGENCE] ✅ Created {len(enriched_leads)} organization leads")
-        print(f"   - {google_enriched_count} enriched with Google Maps location data")
-        print(f"   - {len(enriched_leads) - google_enriched_count} Apollo-only (Google Maps not found)")
+                # Extract city and country from formatted address
+                location = LeadService._extract_city_country(business.get('formatted_address'))
+
+                lead_data = {
+                    "company_name": business.get('name'),
+                    "website": business.get('website'),
+                    "phone": business.get('phone'),
+                    "formatted_address": business.get('formatted_address'),
+                    "location": location,  # City, Country only
+                    "latitude": business.get('latitude'),
+                    "longitude": business.get('longitude'),
+                    "google_rating": google_rating,  # Stored but not displayed
+                    "trust_score": trust_score,  # URI-branded score (20-100)
+                    "google_reviews_count": business.get('google_reviews_count'),
+                    "business_status": business.get('business_status'),
+                    "business_category": business.get('business_category'),
+                    "lead_source": LeadSourceEnum.LAZARUS,
+                    "lead_type": LeadTypeEnum.ORGANIZATION,
+                }
+
+                google_leads.append(LeadCreate(**lead_data))
+                print(f"   ✅ {business.get('name')} - Trust Score: {trust_score}/100, Location: {location}")
+            except Exception as e:
+                print(f"   ⚠️ Skipping invalid business: {business.get('name')} - {e}")
+
+        print(f"\n[LOCATION INTELLIGENCE] ✅ Created {len(google_leads)} organization leads from Google Maps")
         print(f"{'='*80}\n")
 
-        return enriched_leads
+        return google_leads
 
     @staticmethod
     async def send_successful_maps_leads_notification(
