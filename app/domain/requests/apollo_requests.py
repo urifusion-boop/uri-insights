@@ -127,6 +127,36 @@ class PersonSearchRequest(BaseApolloSearchRequest):
         max_length=500,
     )
 
+    # Location Intelligence fields (only used for Organization forms, but included here to prevent validation errors)
+    currently_using_any_of_technology_uids: Optional[List[str]] = Field(
+        None,
+        description="Technology UIDs for filtering organizations",
+    )
+    enable_location_intelligence: Optional[bool] = Field(
+        None,
+        description="Enable Location Intelligence feature (Organization forms only)",
+    )
+    location_zone_center_lat: Optional[float] = Field(
+        None,
+        description="Latitude of target zone center (Organization forms only)",
+    )
+    location_zone_center_lng: Optional[float] = Field(
+        None,
+        description="Longitude of target zone center (Organization forms only)",
+    )
+    location_zone_radius_km: Optional[float] = Field(
+        None,
+        description="Radius in kilometers for target zone (Organization forms only)",
+    )
+    location_zone_name: Optional[str] = Field(
+        None,
+        description="Name of target zone location (Organization forms only)",
+    )
+    min_trust_score: Optional[float] = Field(
+        None,
+        description="Minimum trust score threshold (Organization forms only)",
+    )
+
     class Config:
         use_enum_values = True
         validate_assignment = True
