@@ -104,7 +104,7 @@ class LeadFormService:
                 raise ValueError(f"Invalid form_type for Apollo: {form_type}")
 
             # Queue immediately (no delay for first execution)
-            await LeadGenerationProducer.queue_lead_generation_job(
+            await LeadGenerationProducer.send_lead_generation_job(
                 lead_form_id=lead_form_data.get("lead_form_id"),
                 user_id=lead_form_data.get("user_id"),
                 lead_form=lead_form_with_job,

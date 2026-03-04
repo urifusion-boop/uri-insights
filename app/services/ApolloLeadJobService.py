@@ -169,8 +169,17 @@ class ApolloLeadJobService:
             if monitoring_interval_hours and monitoring_interval_hours > 0:
                 try:
                     from app.services.azure.producers.LeadGenerationProducer import LeadGenerationProducer
+                    from app.domain.enums.queue_message_type_enum import LeadGenerationQueueMessageTypeEnum
 
                     print(f"🔄 Recurring monitoring enabled: scheduling next run in {monitoring_interval_hours} hour(s)")
+
+                    # Determine correct message type based on form_type
+                    if form_type == "PERSON":
+                        message_type = LeadGenerationQueueMessageTypeEnum.APOLLO_PERSON_LEAD_GENERATION.value
+                    elif form_type == "ORGANIZATION":
+                        message_type = LeadGenerationQueueMessageTypeEnum.APOLLO_ORGANIZATION_LEAD_GENERATION.value
+                    else:
+                        raise ValueError(f"Unknown form_type for recurring Apollo job: {form_type}")
 
                     # Create a NEW job_id for the next monitoring cycle
                     # CRITICAL: Don't reuse the old job_id - workers will skip it as "completed"
@@ -191,9 +200,10 @@ class ApolloLeadJobService:
                         lead_form_id=lead_form_id,
                         user_id=user_id,
                         lead_form=next_lead_form,  # Use fresh copy with new job_id
-                        delay_hours=monitoring_interval_hours
+                        delay_hours=monitoring_interval_hours,
+                        message_type=message_type  # Pass correct message type for Apollo jobs
                     )
-                    print(f"✅ Next Apollo monitoring job {next_job_id} scheduled for {monitoring_interval_hours} hour(s) from now")
+                    print(f"✅ Next Apollo monitoring job {next_job_id} scheduled for {monitoring_interval_hours} hour(s) from now with message_type={message_type}")
                 except Exception as schedule_error:
                     # Don't fail the entire job if scheduling fails
                     print(f"⚠️ Failed to schedule next monitoring job: {schedule_error}")

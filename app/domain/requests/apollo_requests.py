@@ -234,6 +234,32 @@ class OrganizationSearchRequest(BaseApolloSearchRequest):
         max_items=30,
     )
 
+    # Location Intelligence fields (URI-branded geographic targeting)
+    enable_location_intelligence: Optional[bool] = Field(
+        None,
+        description="Enable Location Intelligence feature for geographic targeting",
+    )
+    location_zone_center_lat: Optional[float] = Field(
+        None,
+        description="Latitude of target zone center",
+    )
+    location_zone_center_lng: Optional[float] = Field(
+        None,
+        description="Longitude of target zone center",
+    )
+    location_zone_radius_km: Optional[float] = Field(
+        None,
+        description="Radius in kilometers for target zone",
+    )
+    location_zone_name: Optional[str] = Field(
+        None,
+        description="Name of target zone location",
+    )
+    min_trust_score: Optional[float] = Field(
+        None,
+        description="Minimum trust score threshold (20-100 scale)",
+    )
+
     @root_validator(pre=True)
     def validate_revenue_range(cls, values):
         min_val = values.get("revenue_range_min")
