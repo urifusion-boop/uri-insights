@@ -876,10 +876,13 @@ class ApolloService:
             ).get("responseData", {})
             print(f"[EMAIL SAVE] Updated lead with email: {email}")
             if email != "UNAVAILABLE":
-                await UriTaskManagerService.update_user_feature_limit_specific_limit(
-                    updated_lead.get("assigned_to", ""),
-                    EndpointsEnum.LEAD_ENRICHMENT_EMAIL.value,
-                    0,
+                await UriTaskManagerService.deduct_payment(
+                    user_id=updated_lead.get("assigned_to", ""),
+                    action_type="ENRICHMENT_EMAIL",
+                    payment_mode="CREDITS",
+                    quantity=1,
+                    reference=lead_id,
+                    narration=f"Email enrichment for lead {lead_id}"
                 )
         return response
 
@@ -891,10 +894,13 @@ class ApolloService:
             updated_lead = (
                 await LeadRepository.update_lead(db, lead_id, LeadUpdate(phone=phone))
             ).get("responseData", {})
-            await UriTaskManagerService.update_user_feature_limit_specific_limit(
-                updated_lead.get("assigned_to", ""),
-                EndpointsEnum.LEAD_ENRICHMENT_PHONE.value,
-                0,
+            await UriTaskManagerService.deduct_payment(
+                user_id=updated_lead.get("assigned_to", ""),
+                action_type="ENRICHMENT_PHONE",
+                payment_mode="CREDITS",
+                quantity=1,
+                reference=lead_id,
+                narration=f"Phone enrichment for lead {lead_id}"
             )
         return response
 
@@ -982,22 +988,28 @@ class ApolloService:
 
             print(f"[ORG ENRICHMENT] ✅ Updated lead in database")
 
-            # Update feature limits
+            # Deduct credits using FIFO credit batch system
             if reveal_phone and phone and phone != "UNAVAILABLE":
-                await UriTaskManagerService.update_user_feature_limit_specific_limit(
-                    updated_lead.get("assigned_to", ""),
-                    EndpointsEnum.LEAD_ENRICHMENT_PHONE.value,
-                    0,
+                await UriTaskManagerService.deduct_payment(
+                    user_id=updated_lead.get("assigned_to", ""),
+                    action_type="ENRICHMENT_PHONE",
+                    payment_mode="CREDITS",
+                    quantity=1,
+                    reference=lead_id,
+                    narration=f"Organization phone enrichment for lead {lead_id}"
                 )
-                print(f"[ORG ENRICHMENT] ✅ Updated phone feature limit")
+                print(f"[ORG ENRICHMENT] ✅ Deducted phone credits from batch")
 
             if reveal_email and email and email != "UNAVAILABLE":
-                await UriTaskManagerService.update_user_feature_limit_specific_limit(
-                    updated_lead.get("assigned_to", ""),
-                    EndpointsEnum.LEAD_ENRICHMENT_EMAIL.value,
-                    0,
+                await UriTaskManagerService.deduct_payment(
+                    user_id=updated_lead.get("assigned_to", ""),
+                    action_type="ENRICHMENT_EMAIL",
+                    payment_mode="CREDITS",
+                    quantity=1,
+                    reference=lead_id,
+                    narration=f"Organization email enrichment for lead {lead_id}"
                 )
-                print(f"[ORG ENRICHMENT] ✅ Updated email feature limit")
+                print(f"[ORG ENRICHMENT] ✅ Deducted email credits from batch")
         else:
             print(f"[ORG ENRICHMENT] ⚠️ No data to update")
 
@@ -1325,10 +1337,13 @@ class ApolloService:
                 db, lead_id, updates=LeadUpdate(phone=phone)
             )
 
-            await UriTaskManagerService.update_user_feature_limit_specific_limit(
-                assigned_to,
-                EndpointsEnum.LEAD_ENRICHMENT_PHONE.value,
-                0,
+            await UriTaskManagerService.deduct_payment(
+                user_id=assigned_to,
+                action_type="ENRICHMENT_PHONE",
+                payment_mode="CREDITS",
+                quantity=1,
+                reference=lead_id,
+                narration=f"Phone enrichment for lead {lead_id}"
             )
         else:
             # Update all leads concurrently
@@ -1339,12 +1354,15 @@ class ApolloService:
                 for lead in leads
             ]
 
-            # Update all user limits concurrently
+            # Deduct credits for all leads concurrently
             feature_tasks = [
-                UriTaskManagerService.update_user_feature_limit_specific_limit(
-                    lead.get("assigned_to"),
-                    EndpointsEnum.LEAD_ENRICHMENT_PHONE.value,
-                    0,
+                UriTaskManagerService.deduct_payment(
+                    user_id=lead.get("assigned_to"),
+                    action_type="ENRICHMENT_PHONE",
+                    payment_mode="CREDITS",
+                    quantity=1,
+                    reference=lead.get("lead_id"),
+                    narration=f"Phone enrichment for lead {lead.get('lead_id')}"
                 )
                 for lead in leads
             ]

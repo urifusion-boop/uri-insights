@@ -389,6 +389,23 @@ class LazarusMonitoringService:
 
                 total_scanned += 1
 
+            # Deduct Lazarus scan credits for this user's batch (10 credits per contact)
+            if len(user_contacts) > 0:
+                try:
+                    from app.services.uri_microservices.UriTaskManagerService import UriTaskManagerService
+                    await UriTaskManagerService.deduct_payment(
+                        user_id=user_id,
+                        action_type="LAZARUS_SCAN",
+                        payment_mode="CREDITS",
+                        quantity=len(user_contacts),  # 10 credits × number of contacts scanned
+                        reference=f"lazarus_scan_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}",
+                        narration=f"Lazarus scan for {len(user_contacts)} focus contact(s)"
+                    )
+                    print(f"💳 Deducted {len(user_contacts) * 10} credits ({len(user_contacts)} contacts × 10) for user {user_id}")
+                except Exception as credit_error:
+                    print(f"⚠️ Failed to deduct Lazarus scan credits for user {user_id}: {str(credit_error)}")
+                    # Don't fail the scan if credit deduction fails - log and continue
+
         print(f"✅ Focus Contact scan complete: {total_scanned} scanned, {total_alerts} alerts")
         return {
             "scanned": total_scanned,
@@ -1579,6 +1596,8 @@ class LazarusMonitoringService:
             print("✅ No company monitors due for scanning")
             return {"scanned": 0, "alerts_created": 0}
 
+        # Group monitors by user for credit deduction tracking
+        user_monitor_counts: Dict[str, int] = {}
         total_scanned = 0
         total_alerts = 0
 
@@ -1642,6 +1661,29 @@ class LazarusMonitoringService:
             )
 
             total_scanned += 1
+
+            # Track monitor count per user for credit deduction
+            user_id = monitor.user_id
+            if user_id not in user_monitor_counts:
+                user_monitor_counts[user_id] = 0
+            user_monitor_counts[user_id] += 1
+
+        # Deduct Lazarus scan credits for each user (10 credits per company monitor)
+        for user_id, monitor_count in user_monitor_counts.items():
+            try:
+                from app.services.uri_microservices.UriTaskManagerService import UriTaskManagerService
+                await UriTaskManagerService.deduct_payment(
+                    user_id=user_id,
+                    action_type="LAZARUS_SCAN",
+                    payment_mode="CREDITS",
+                    quantity=monitor_count,  # 10 credits × number of monitors scanned
+                    reference=f"lazarus_company_scan_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}",
+                    narration=f"Lazarus company monitor scan for {monitor_count} company/companies"
+                )
+                print(f"💳 Deducted {monitor_count * 10} credits ({monitor_count} monitors × 10) for user {user_id}")
+            except Exception as credit_error:
+                print(f"⚠️ Failed to deduct Lazarus company scan credits for user {user_id}: {str(credit_error)}")
+                # Don't fail the scan if credit deduction fails - log and continue
 
         print(f"✅ Company Monitor scan complete: {total_scanned} scanned, {total_alerts} alerts")
         return {"scanned": total_scanned, "alerts_created": total_alerts}
