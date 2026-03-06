@@ -1465,7 +1465,7 @@ class LazarusMonitoringService:
                     logger.error(f"Failed to save scan history: {str(e)}")
                     print(f"⚠️  Failed to save scan history: {str(e)}")
 
-                if analysis_result:
+                if analysis_result and analysis_result.get('signal_detected', True):
                     # Check for duplicate alerts (same contact, same alert type, same content, within last 7 days)
                     seven_days_ago = datetime.utcnow() - timedelta(days=7)
 

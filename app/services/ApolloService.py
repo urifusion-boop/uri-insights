@@ -869,21 +869,15 @@ class ApolloService:
         email = response.get("person", {}).get("email", "")
         print(f"[EMAIL SAVE] Lead ID: {lead_id}, Email being saved: {email}")
         if email:
-            updated_lead = (
-                await LeadRepository.update_lead(
-                    db, lead_id, LeadUpdate(lead_email=email)
-                )
-            ).get("responseData", {})
+            updated_lead_response = await LeadRepository.update_lead(
+                db, lead_id, LeadUpdate(lead_email=email)
+            )
+            updated_lead = updated_lead_response.get("responseData", {})
             print(f"[EMAIL SAVE] Updated lead with email: {email}")
-            if email != "UNAVAILABLE":
-                await UriTaskManagerService.deduct_payment(
-                    user_id=updated_lead.get("assigned_to", ""),
-                    action_type="ENRICHMENT_EMAIL",
-                    payment_mode="CREDITS",
-                    quantity=1,
-                    reference=lead_id,
-                    narration=f"Email enrichment for lead {lead_id}"
-                )
+            # NOTE: Credit deduction already handled in handle_person_email_enrichment_request
+            # Removed duplicate deduction to prevent double charging
+            # Return the updated lead so frontend can display it immediately
+            return updated_lead_response
         return response
 
     @staticmethod
@@ -891,17 +885,14 @@ class ApolloService:
         db: AsyncIOMotorDatabase, lead_id: str, phone: Optional[str], response: dict
     ):
         if phone:
-            updated_lead = (
-                await LeadRepository.update_lead(db, lead_id, LeadUpdate(phone=phone))
-            ).get("responseData", {})
-            await UriTaskManagerService.deduct_payment(
-                user_id=updated_lead.get("assigned_to", ""),
-                action_type="ENRICHMENT_PHONE",
-                payment_mode="CREDITS",
-                quantity=1,
-                reference=lead_id,
-                narration=f"Phone enrichment for lead {lead_id}"
+            updated_lead_response = await LeadRepository.update_lead(
+                db, lead_id, LeadUpdate(phone=phone)
             )
+            updated_lead = updated_lead_response.get("responseData", {})
+            # NOTE: Credit deduction already handled in handle_person_phone_enrichment_request
+            # Removed duplicate deduction to prevent double charging
+            # Return the updated lead so frontend can display it immediately
+            return updated_lead_response
         return response
 
     @staticmethod
