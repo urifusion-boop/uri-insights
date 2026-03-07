@@ -142,19 +142,24 @@ class LeadRepository:
 
     @staticmethod
     async def update_lead(
-        db: AsyncIOMotorDatabase, lead_id: str, updates: LeadUpdate
+        db: AsyncIOMotorDatabase, lead_id: str, updates: LeadUpdate, user_id: Optional[str] = None
     ) -> Dict[str, Any]:
         updates_data = updates.dict(exclude_unset=True)
         updates_data["last_updated"] = DateHelper.utc_now_iso()
 
+        # Build query with user_id for security if provided
+        query = {"lead_id": lead_id}
+        if user_id:
+            query["assigned_to"] = user_id
+
         result = await db["leads"].update_one(
-            {"lead_id": lead_id}, {"$set": updates_data}
+            query, {"$set": updates_data}
         )
 
         if result.matched_count == 0:
             return UriResponse.get_single_data_response("lead", None)
 
-        updated_lead = await db["leads"].find_one({"lead_id": lead_id})
+        updated_lead = await db["leads"].find_one(query)
         return UriResponse.update_response("lead", Lead(**updated_lead).dict())
 
     @staticmethod
@@ -181,8 +186,13 @@ class LeadRepository:
         return UriResponse.update_response("leads", updated_leads)
 
     @staticmethod
-    async def get_lead_by_id(db: AsyncIOMotorDatabase, lead_id: str) -> Dict[str, Any]:
-        lead = await db["leads"].find_one({"lead_id": lead_id})
+    async def get_lead_by_id(db: AsyncIOMotorDatabase, lead_id: str, user_id: Optional[str] = None) -> Dict[str, Any]:
+        # Build query with user_id for security if provided
+        query = {"lead_id": lead_id}
+        if user_id:
+            query["assigned_to"] = user_id
+
+        lead = await db["leads"].find_one(query)
         return UriResponse.get_single_data_response(
             "lead", Lead(**lead).dict() if lead else None
         )

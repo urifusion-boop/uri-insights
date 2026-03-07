@@ -368,7 +368,7 @@ class ApolloService:
 
         # Process and persist
         return await ApolloService._process_person_email_enrichment_response(
-            db, lead_id, payload
+            db, lead_id, payload, user_id
         )
 
     @staticmethod
@@ -385,7 +385,7 @@ class ApolloService:
             person = response.get("person", {})
             if person:
                 await LeadRepository.update_lead(
-                    db, lead_id, LeadUpdate(apollo_id=person.get("id"))
+                    db, lead_id, LeadUpdate(apollo_id=person.get("id")), user_id
                 )
                 await ApolloRepository.create(db, person)
         else:  # Handle leads that already have an apollo id attached to them
@@ -433,7 +433,7 @@ class ApolloService:
             )
             print(f"[PHONE ENRICHMENT] Apollo Response: {response}")
             await LeadRepository.update_lead(
-                db, lead_id, LeadUpdate(phone="PROCESSING")
+                db, lead_id, LeadUpdate(phone="PROCESSING"), user_id
             )
             print(f"[PHONE ENRICHMENT] Phone set to PROCESSING (awaiting webhook)")
 
@@ -454,7 +454,7 @@ class ApolloService:
             print(f"[PHONE ENRICHMENT] Lead: {lead.get('username', 'Unknown')} - Phone found in DB: {phone}")
 
         return await ApolloService._process_person_phone_enrichment_response(
-            db, lead_id, phone, response
+            db, lead_id, phone, response, user_id
         )
 
     @staticmethod
@@ -864,13 +864,14 @@ class ApolloService:
 
     @staticmethod
     async def _process_person_email_enrichment_response(
-        db: AsyncIOMotorDatabase, lead_id: str, response: dict
+        db: AsyncIOMotorDatabase, lead_id: str, response: dict, user_id: Optional[str] = None
     ):
         email = response.get("person", {}).get("email", "")
         print(f"[EMAIL SAVE] Lead ID: {lead_id}, Email being saved: {email}")
         if email:
+            # Pass user_id for security - prevents updating other users' leads
             updated_lead_response = await LeadRepository.update_lead(
-                db, lead_id, LeadUpdate(lead_email=email)
+                db, lead_id, LeadUpdate(lead_email=email), user_id
             )
             updated_lead = updated_lead_response.get("responseData", {})
             print(f"[EMAIL SAVE] Updated lead with email: {email}")
@@ -882,11 +883,12 @@ class ApolloService:
 
     @staticmethod
     async def _process_person_phone_enrichment_response(
-        db: AsyncIOMotorDatabase, lead_id: str, phone: Optional[str], response: dict
+        db: AsyncIOMotorDatabase, lead_id: str, phone: Optional[str], response: dict, user_id: Optional[str] = None
     ):
         if phone:
+            # Pass user_id for security - prevents updating other users' leads
             updated_lead_response = await LeadRepository.update_lead(
-                db, lead_id, LeadUpdate(phone=phone)
+                db, lead_id, LeadUpdate(phone=phone), user_id
             )
             updated_lead = updated_lead_response.get("responseData", {})
             # NOTE: Credit deduction already handled in handle_person_phone_enrichment_request
