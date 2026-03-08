@@ -48,8 +48,10 @@ class DataSenderService:
         # Await the producer.send_message to ensure it completes and catch any errors
         # Extract string value from QueueEnum if needed
         queue_name_str = queue_name if isinstance(queue_name, str) else queue_name
+        # Handle both Enum objects and string values for message_type
+        message_type_str = message_type.value if hasattr(message_type, 'value') else message_type
         await producer.send_message(
             queue_name_str,
             data,
-            message_type.value,
+            message_type_str,
         )
