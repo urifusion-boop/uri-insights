@@ -358,7 +358,9 @@ class ApolloService:
                     user_id=user_id,
                     action_type="ENRICHMENT_EMAIL",
                     payment_mode="CREDITS",
-                    quantity=1
+                    quantity=1,
+                    reference=lead_id,  # FIX: Added missing reference parameter
+                    narration=f"Email enrichment for lead {lead_id}"
                 )
                 print(f"[EMAIL ENRICHMENT] 💳 Deducted 1 credit for email enrichment (user: {user_id})")
                 print(f"[EMAIL ENRICHMENT] 💳 Deduction result: {deduction_result}")
