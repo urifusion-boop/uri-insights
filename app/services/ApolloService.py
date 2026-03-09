@@ -353,16 +353,20 @@ class ApolloService:
         # Deduct credits after successful enrichment (1 credit for email)
         if email and email != "UNAVAILABLE" and user_id:
             try:
-                await UriTaskManagerService.deduct_payment(
+                print(f"[EMAIL ENRICHMENT] 🔄 Attempting to deduct 1 credit for user: {user_id}")
+                deduction_result = await UriTaskManagerService.deduct_payment(
                     user_id=user_id,
                     action_type="ENRICHMENT_EMAIL",
                     payment_mode="CREDITS",
                     quantity=1
                 )
                 print(f"[EMAIL ENRICHMENT] 💳 Deducted 1 credit for email enrichment (user: {user_id})")
+                print(f"[EMAIL ENRICHMENT] 💳 Deduction result: {deduction_result}")
             except Exception as credit_error:
                 print(f"[EMAIL ENRICHMENT] ⚠️ Failed to deduct credits: {str(credit_error)}")
                 # Don't fail the enrichment if credit deduction fails
+        else:
+            print(f"[EMAIL ENRICHMENT] ❌ Skipping credit deduction - email={email}, user_id={user_id}")
 
         print(f"{'='*80}\n")
         payload = {"person": {"email": email}} if isinstance(email, str) else email
