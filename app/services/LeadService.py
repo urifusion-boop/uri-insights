@@ -1512,11 +1512,31 @@ class LeadService:
                     search_query = f"{company_name} {location_hint}" if location_hint else company_name
                     print(f"   🔍 Searching Google Maps for: {search_query}")
 
-                    google_results = await GoogleMapsService.search_businesses(
-                        query=search_query,
-                        max_results=1,  # Just need the first match
-                        search_mode="text"
+                    # FIX: Use coordinates from Location Intelligence if available
+                    has_coordinates = (
+                        lead_form.get("location_zone_center_lat") and
+                        lead_form.get("location_zone_center_lng") and
+                        lead_form.get("location_zone_radius_km")
                     )
+
+                    if has_coordinates:
+                        # Use coordinate-based search for more precise results
+                        google_results = await GoogleMapsService.search_businesses(
+                            query=search_query,
+                            latitude=lead_form["location_zone_center_lat"],
+                            longitude=lead_form["location_zone_center_lng"],
+                            radius_km=lead_form["location_zone_radius_km"],
+                            max_results=1,
+                            search_mode="auto"  # Will use nearby search with coordinates
+                        )
+                        print(f"      📍 Using coordinate-based search within {lead_form['location_zone_radius_km']}km radius")
+                    else:
+                        # Fallback to text search if no coordinates
+                        google_results = await GoogleMapsService.search_businesses(
+                            query=search_query,
+                            max_results=1,
+                            search_mode="text"
+                        )
 
                     if google_results and len(google_results) > 0:
                         google_data = google_results[0]
@@ -1601,8 +1621,8 @@ class LeadService:
             lead_form.get("location_zone_radius_km")
         )
 
-        # Get search keywords
-        keywords_list = lead_form.get("organization_keywords", [])
+        # Get search keywords - use the correct field from Apollo organization search
+        keywords_list = lead_form.get("q_organization_keyword_tags", [])
         keywords = " ".join(keywords_list) if keywords_list else "business"
 
         google_results = []
@@ -1628,12 +1648,17 @@ class LeadService:
                 locations_list = lead_form.get("organization_locations", [])
                 location_name = locations_list[0] if locations_list else "Nigeria"
 
+                # Build a more specific search query combining keywords and location
+                # This helps Google Maps return more relevant results
+                specific_query = f"{keywords} in {location_name}"
+
                 print(f"[LOCATION INTELLIGENCE] Using TEXT search (location-based)")
                 print(f"   Location: {location_name}")
                 print(f"   Keywords: {keywords}")
+                print(f"   Specific Query: {specific_query}")
 
                 google_results = await GoogleMapsService.search_businesses(
-                    query=keywords,
+                    query=specific_query,
                     location=location_name,
                     exclude_closed=True,
                     max_results=20,
