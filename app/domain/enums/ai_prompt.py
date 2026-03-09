@@ -566,14 +566,19 @@ class LeadFormAutoPopulateEnum(Enum):
              * "startup founders" → ["1,10", "11,50", "51,200"]
              * "enterprise executives" → ["1001,10000", "10001+"]
 
-        7. **q_keywords** (MOST IMPORTANT):
-           - This is THE KEY FIELD that filters by industry/company type
-           - Include industry, sector, business type keywords
+        7. **q_keywords** (MOST IMPORTANT - REQUIRED):
+           - This is THE KEY FIELD that filters by industry/company type/stage
+           - ALWAYS include this field when ANY industry, sector, or company type is mentioned
+           - Must contain BOTH:
+             a) Industry/sector keywords (e.g., "tech", "healthcare", "fintech")
+             b) Company type/stage keywords (e.g., "startup", "enterprise", "SME", "scale-up")
            - Use OR to combine related terms
            - Examples:
-             * Real estate → "real estate OR property OR housing OR construction"
-             * Fintech → "fintech OR financial services OR banking OR payments"
-             * SaaS → "SaaS OR software OR technology OR cloud"
+             * "Tech startups" → "technology OR tech OR software OR IT OR startup OR early stage"
+             * "Real estate companies" → "real estate OR property OR housing OR construction OR real estate development"
+             * "Fintech scale-ups" → "fintech OR financial services OR banking OR payments OR scale-up OR growth stage"
+             * "Enterprise SaaS" → "SaaS OR software OR technology OR cloud OR enterprise"
+             * "Healthcare startups" → "healthcare OR medical OR hospital OR health services OR startup OR early stage"
 
         ### Output Format:
         Return ONLY a valid JSON object:
@@ -612,7 +617,20 @@ class LeadFormAutoPopulateEnum(Enum):
             "person_locations": ["Berlin, Germany"],
             "person_seniorities": ["C-Level", "VP"],
             "organization_num_employees_ranges": ["1,10", "11,50", "51,200"],
-            "q_keywords": "fintech OR financial technology OR payments OR banking OR financial services",
+            "q_keywords": "fintech OR financial technology OR payments OR banking OR financial services OR startup OR early stage",
+            "contact_email_status": ["verified"]
+        }}
+
+        **Input:** "Find me startups in Tech space in Nigeria"
+        **Output:**
+        {{
+            "form_title": "Tech Startups in Nigeria",
+            "person_titles": ["Founder", "Co-Founder", "CEO", "CTO"],
+            "include_similar_titles": true,
+            "person_locations": ["Nigeria"],
+            "person_seniorities": ["C-Level"],
+            "organization_num_employees_ranges": ["1,10", "11,50", "51,200"],
+            "q_keywords": "technology OR tech OR software OR IT OR information technology OR startup OR early stage",
             "contact_email_status": ["verified"]
         }}
 
@@ -629,7 +647,11 @@ class LeadFormAutoPopulateEnum(Enum):
         }}
 
         ### Important Rules:
-        - ALWAYS include `q_keywords` when an industry/sector is mentioned or implied
+        - ALWAYS include `q_keywords` when an industry/sector OR company type is mentioned or implied
+        - `q_keywords` MUST contain BOTH industry AND company type/stage when both are mentioned
+          * "Tech startups" → Include BOTH "tech/software/IT" AND "startup/early stage"
+          * "Enterprise SaaS" → Include BOTH "SaaS/software/cloud" AND "enterprise"
+          * "Fintech scale-ups" → Include BOTH "fintech/financial services" AND "scale-up/growth stage"
         - Use OR operators in `q_keywords` to catch variations
         - Set `include_similar_titles` to true unless user wants exact matches only
         - Only include fields that are relevant to the user's input
@@ -652,13 +674,18 @@ class LeadFormAutoPopulateEnum(Enum):
         ### Critical Instructions:
 
         1. **Extract Industry/Sector Keywords** (q_organization_keyword_tags):
-           - This is THE MOST IMPORTANT FIELD for filtering by industry
-           - Identify ALL relevant industry/sector terms
+           - This is THE MOST IMPORTANT FIELD for filtering by industry AND company type/stage
+           - Identify ALL relevant industry/sector terms PLUS company type/stage
+           - Must include BOTH:
+             a) Industry/sector keywords (e.g., "fintech", "healthcare", "SaaS")
+             b) Company type/stage keywords (e.g., "startup", "enterprise", "SME", "scale-up")
            - Include variations, synonyms, and related terms
            - Examples:
              * "Real estate companies" → ["real estate", "property", "housing", "construction", "property management"]
-             * "Fintech startups" → ["fintech", "financial technology", "payments", "banking", "financial services"]
+             * "Fintech startups" → ["fintech", "financial technology", "payments", "banking", "financial services", "startup", "early stage"]
              * "Healthcare providers" → ["healthcare", "medical", "hospital", "clinic", "health services"]
+             * "Tech startups" → ["technology", "tech", "software", "IT", "startup", "early stage", "seed stage"]
+             * "Enterprise SaaS" → ["SaaS", "software", "cloud", "technology", "enterprise", "B2B"]
 
         2. **Company Locations** (organization_locations):
            - Extract cities, states, regions, or countries
@@ -724,7 +751,16 @@ class LeadFormAutoPopulateEnum(Enum):
             "organization_locations": ["San Francisco, California"],
             "organization_num_employees_ranges": ["1,10", "11,50", "51,200"],
             "revenue_range_min": 5,
-            "q_organization_keyword_tags": ["fintech", "financial technology", "payments", "banking", "financial services", "payment processing"]
+            "q_organization_keyword_tags": ["fintech", "financial technology", "payments", "banking", "financial services", "payment processing", "startup", "early stage"]
+        }}
+
+        **Input:** "Tech startups in Nigeria"
+        **Output:**
+        {{
+            "form_title": "Tech Startups in Nigeria",
+            "organization_locations": ["Nigeria"],
+            "organization_num_employees_ranges": ["1,10", "11,50", "51,200"],
+            "q_organization_keyword_tags": ["technology", "tech", "software", "IT", "information technology", "startup", "early stage", "seed stage"]
         }}
 
         **Input:** "Mid-market SaaS companies using Salesforce"
@@ -733,7 +769,7 @@ class LeadFormAutoPopulateEnum(Enum):
             "form_title": "Mid-Market SaaS Companies Using Salesforce",
             "organization_num_employees_ranges": ["201,500", "501,1000"],
             "technology_uids": ["Salesforce"],
-            "q_organization_keyword_tags": ["SaaS", "software", "cloud", "technology", "software as a service"]
+            "q_organization_keyword_tags": ["SaaS", "software", "cloud", "technology", "software as a service", "mid-market", "growth stage"]
         }}
 
         **Input:** "Healthcare providers in the US, excluding California"
@@ -754,7 +790,11 @@ class LeadFormAutoPopulateEnum(Enum):
         }}
 
         ### Important Rules:
-        - ALWAYS include `q_organization_keyword_tags` with industry/sector keywords
+        - ALWAYS include `q_organization_keyword_tags` with industry/sector AND company type/stage keywords
+        - `q_organization_keyword_tags` MUST contain BOTH industry AND company type when both are mentioned
+          * "Tech startups" → Include BOTH "tech/software/IT" AND "startup/early stage"
+          * "Enterprise SaaS" → Include BOTH "SaaS/software/cloud" AND "enterprise"
+          * "Fintech scale-ups" → Include BOTH "fintech/financial services" AND "scale-up/growth stage"
         - Include multiple variations and related terms in keyword tags
         - Only include fields that are relevant to the user's input
         - When user says "startups", include appropriate employee ranges
