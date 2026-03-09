@@ -514,46 +514,252 @@ class LeadFormAssistantPrompt(Enum):
 
 class LeadFormAutoPopulateEnum(Enum):
     PERSON_FORM_PROMPT = """
-        You are an expert lead generation analyst. A user has provided a brief description of the kind of professionals they want to reach out to.
+        You are an expert lead generation analyst specialized in person-based lead discovery. A user has described the type of professionals they want to find using Apollo's search platform.
 
-        Based on the user's preferences below, extract structured lead search parameters specifically for *person-based lead discovery* using the Apollo platform.
-
-        ### User Preferences:
-        {data}
-
-        Return a JSON object with the following structure. Only populate fields relevant to a PERSON form:
-        {{
-            "form_title": "<string>",
-            "person_titles": ["<string>", "..."],
-            "include_similar_titles": true,
-            "person_locations": ["<city>", "<state>", "..."],
-            "person_seniorities": ["<C-Level>", "<Manager>", "..."],
-            "organization_num_employees_ranges": ["1,10", "11,50"],
-            "q_organization_domains_list": ["<company1.com>", "..."],
-            "contact_email_status": ["verified", "guessed"],
-        }}
-        The JSON object above inly serves as an example, always return an object that meets the requirement of the user preferences.
-    """
-
-    ORGANIZATION_FORM_PROMPT = """
-        You are an intelligent B2B marketing assistant. A user has described their ideal customer or market segment.
-
-        Based on the user's description, extract structured parameters to populate an Apollo ORGANIZATION lead form.
+        Your job is to extract COMPLETE search parameters that capture:
+        1. **Job titles/roles** (what they do)
+        2. **Industry/sector context** (what field they work in)
+        3. **Geographic location** (where they are)
+        4. **Company characteristics** (size, type, domain)
+        5. **Seniority level** (their position in org hierarchy)
 
         ### User Input:
         {data}
 
-        Return a JSON object focused on ORGANIZATION search:
+        ### Critical Instructions:
+
+        1. **Extract Industry/Domain Context**:
+           - Identify the INDUSTRY or SECTOR mentioned (e.g., "real estate", "fintech", "healthcare", "e-commerce", "SaaS")
+           - Add industry keywords to BOTH `q_keywords` AND form_title
+           - Examples:
+             * "Real estate founders" → q_keywords: "real estate"
+             * "Tech startup CTOs" → q_keywords: "technology OR software OR SaaS"
+             * "Healthcare executives" → q_keywords: "healthcare OR medical OR hospital"
+
+        2. **Person Titles**:
+           - Extract job titles/roles (e.g., "Founder", "CEO", "CTO", "VP Sales")
+           - Be specific if user is specific, broad if user is broad
+           - Examples:
+             * "Real estate founders" → ["Founder", "Co-Founder", "Owner"]
+             * "Sales leaders in fintech" → ["VP Sales", "Sales Director", "Head of Sales"]
+
+        3. **Include Similar Titles**:
+           - Set to `true` by default to catch variations
+           - Set to `false` only if user wants EXACT titles only
+
+        4. **Locations**:
+           - Extract cities, states, or countries mentioned
+           - Format: ["City, State", "City, Country", "Country"]
+           - Examples: ["Lagos, Nigeria"], ["San Francisco, California"], ["United Kingdom"]
+
+        5. **Seniorities**:
+           - Map to Apollo seniority levels: "C-Level", "VP", "Director", "Manager", "Senior", "Entry"
+           - Examples:
+             * "Executives" → ["C-Level", "VP"]
+             * "Founders" → ["C-Level"]
+             * "Managers" → ["Manager", "Senior"]
+
+        6. **Company Size** (organization_num_employees_ranges):
+           - Only include if mentioned or strongly implied
+           - Format: ["1,10", "11,50", "51,200", "201,500", "501,1000", "1001,10000", "10001+"]
+           - Examples:
+             * "startup founders" → ["1,10", "11,50", "51,200"]
+             * "enterprise executives" → ["1001,10000", "10001+"]
+
+        7. **q_keywords** (MOST IMPORTANT):
+           - This is THE KEY FIELD that filters by industry/company type
+           - Include industry, sector, business type keywords
+           - Use OR to combine related terms
+           - Examples:
+             * Real estate → "real estate OR property OR housing OR construction"
+             * Fintech → "fintech OR financial services OR banking OR payments"
+             * SaaS → "SaaS OR software OR technology OR cloud"
+
+        ### Output Format:
+        Return ONLY a valid JSON object:
         {{
-            "form_title": "<string>",
-            "organization_locations": ["<string>", "..."],
-            "organization_not_locations": ["<string>", "..."],
-            "organization_num_employees_ranges": ["1,10", "11,50"],
-            "technology_uids": ["<CRM>", "<SaaS platform>", "..."],
-            "q_organization_name": "<optional name>"
-            "q_organization_keyword_tags": ["<string>", "..."],
+            "form_title": "<descriptive title including industry and role>",
+            "person_titles": ["<title1>", "<title2>", "..."],
+            "include_similar_titles": true,
+            "person_locations": ["<location1>", "..."],
+            "person_seniorities": ["<seniority1>", "..."],
+            "organization_num_employees_ranges": ["<range1>", "..."],
+            "q_keywords": "<industry keywords with OR operators>",
+            "contact_email_status": ["verified"]
         }}
-        The JSON object above only serves as an example, always return an object that meets the requirement of the user preferences.
+
+        ### Examples:
+
+        **Input:** "Real estate founders in Lagos, Nigeria"
+        **Output:**
+        {{
+            "form_title": "Real Estate Founders in Lagos, Nigeria",
+            "person_titles": ["Founder", "Co-Founder", "Owner", "CEO"],
+            "include_similar_titles": true,
+            "person_locations": ["Lagos, Nigeria"],
+            "person_seniorities": ["C-Level"],
+            "organization_num_employees_ranges": ["1,10", "11,50", "51,200"],
+            "q_keywords": "real estate OR property OR housing OR construction OR real estate development",
+            "contact_email_status": ["verified"]
+        }}
+
+        **Input:** "Tech startup CTOs in Berlin working in fintech"
+        **Output:**
+        {{
+            "form_title": "Fintech Startup CTOs in Berlin",
+            "person_titles": ["CTO", "Chief Technology Officer", "VP Engineering"],
+            "include_similar_titles": true,
+            "person_locations": ["Berlin, Germany"],
+            "person_seniorities": ["C-Level", "VP"],
+            "organization_num_employees_ranges": ["1,10", "11,50", "51,200"],
+            "q_keywords": "fintech OR financial technology OR payments OR banking OR financial services",
+            "contact_email_status": ["verified"]
+        }}
+
+        **Input:** "Healthcare executives in the US"
+        **Output:**
+        {{
+            "form_title": "Healthcare Executives in United States",
+            "person_titles": ["CEO", "COO", "CFO", "President", "Vice President"],
+            "include_similar_titles": true,
+            "person_locations": ["United States"],
+            "person_seniorities": ["C-Level", "VP"],
+            "q_keywords": "healthcare OR medical OR hospital OR clinic OR health services OR pharmaceutical",
+            "contact_email_status": ["verified"]
+        }}
+
+        ### Important Rules:
+        - ALWAYS include `q_keywords` when an industry/sector is mentioned or implied
+        - Use OR operators in `q_keywords` to catch variations
+        - Set `include_similar_titles` to true unless user wants exact matches only
+        - Only include fields that are relevant to the user's input
+        - Default `contact_email_status` to ["verified"] for best quality leads
+    """
+
+    ORGANIZATION_FORM_PROMPT = """
+        You are an intelligent B2B marketing assistant specialized in organization-based lead discovery. A user has described their ideal target companies using Apollo's search platform.
+
+        Your job is to extract COMPLETE search parameters that capture:
+        1. **Industry/sector** (what type of companies)
+        2. **Company size** (employee count, revenue)
+        3. **Geographic location** (where they operate)
+        4. **Technology stack** (what tools they use)
+        5. **Company characteristics** (keywords, tags, attributes)
+
+        ### User Input:
+        {data}
+
+        ### Critical Instructions:
+
+        1. **Extract Industry/Sector Keywords** (q_organization_keyword_tags):
+           - This is THE MOST IMPORTANT FIELD for filtering by industry
+           - Identify ALL relevant industry/sector terms
+           - Include variations, synonyms, and related terms
+           - Examples:
+             * "Real estate companies" → ["real estate", "property", "housing", "construction", "property management"]
+             * "Fintech startups" → ["fintech", "financial technology", "payments", "banking", "financial services"]
+             * "Healthcare providers" → ["healthcare", "medical", "hospital", "clinic", "health services"]
+
+        2. **Company Locations** (organization_locations):
+           - Extract cities, states, regions, or countries
+           - Format: ["City, State", "City, Country", "Country"]
+           - Examples: ["Lagos, Nigeria"], ["California, United States"], ["United Kingdom"]
+
+        3. **Company Size** (organization_num_employees_ranges):
+           - Extract or infer from descriptors like "startup", "enterprise", "SMB"
+           - Format: ["1,10", "11,50", "51,200", "201,500", "501,1000", "1001,10000", "10001+"]
+           - Examples:
+             * "startups" → ["1,10", "11,50", "51,200"]
+             * "mid-market" → ["201,500", "501,1000"]
+             * "enterprise" → ["1001,10000", "10001+"]
+             * "SMB" or "small business" → ["1,10", "11,50", "51,200"]
+
+        4. **Revenue Range** (revenue_range_min, revenue_range_max):
+           - Only if explicitly mentioned
+           - Values in millions (USD)
+           - Examples:
+             * "$1M-$10M ARR" → revenue_range_min: 1, revenue_range_max: 10
+             * "At least $5M revenue" → revenue_range_min: 5
+
+        5. **Technology Stack** (technology_uids):
+           - Extract specific tools/platforms mentioned
+           - Examples: ["Salesforce", "HubSpot", "Stripe", "AWS", "Shopify"]
+
+        6. **Exclude Locations** (organization_not_locations):
+           - Only if user explicitly excludes certain locations
+           - Format same as organization_locations
+
+        7. **Specific Company Name** (q_organization_name):
+           - Only if user mentions a specific company name to search for
+
+        ### Output Format:
+        Return ONLY a valid JSON object:
+        {{
+            "form_title": "<descriptive title including industry and criteria>",
+            "organization_locations": ["<location1>", "..."],
+            "organization_not_locations": ["<excluded location>", "..."],
+            "organization_num_employees_ranges": ["<range1>", "..."],
+            "revenue_range_min": <number or null>,
+            "revenue_range_max": <number or null>,
+            "technology_uids": ["<tech1>", "..."],
+            "q_organization_keyword_tags": ["<keyword1>", "<keyword2>", "..."],
+            "q_organization_name": "<company name or null>"
+        }}
+
+        ### Examples:
+
+        **Input:** "Real estate companies in Lagos, Nigeria"
+        **Output:**
+        {{
+            "form_title": "Real Estate Companies in Lagos, Nigeria",
+            "organization_locations": ["Lagos, Nigeria"],
+            "organization_num_employees_ranges": ["1,10", "11,50", "51,200", "201,500"],
+            "q_organization_keyword_tags": ["real estate", "property", "housing", "construction", "property management", "real estate development"]
+        }}
+
+        **Input:** "Fintech startups in San Francisco with at least $5M revenue"
+        **Output:**
+        {{
+            "form_title": "Fintech Startups in San Francisco ($5M+ Revenue)",
+            "organization_locations": ["San Francisco, California"],
+            "organization_num_employees_ranges": ["1,10", "11,50", "51,200"],
+            "revenue_range_min": 5,
+            "q_organization_keyword_tags": ["fintech", "financial technology", "payments", "banking", "financial services", "payment processing"]
+        }}
+
+        **Input:** "Mid-market SaaS companies using Salesforce"
+        **Output:**
+        {{
+            "form_title": "Mid-Market SaaS Companies Using Salesforce",
+            "organization_num_employees_ranges": ["201,500", "501,1000"],
+            "technology_uids": ["Salesforce"],
+            "q_organization_keyword_tags": ["SaaS", "software", "cloud", "technology", "software as a service"]
+        }}
+
+        **Input:** "Healthcare providers in the US, excluding California"
+        **Output:**
+        {{
+            "form_title": "Healthcare Providers in US (Excluding California)",
+            "organization_locations": ["United States"],
+            "organization_not_locations": ["California, United States"],
+            "q_organization_keyword_tags": ["healthcare", "medical", "hospital", "clinic", "health services", "medical services"]
+        }}
+
+        **Input:** "E-commerce companies in Europe"
+        **Output:**
+        {{
+            "form_title": "E-commerce Companies in Europe",
+            "organization_locations": ["United Kingdom", "Germany", "France", "Netherlands", "Spain", "Italy"],
+            "q_organization_keyword_tags": ["e-commerce", "ecommerce", "online retail", "retail", "online shopping", "marketplace"]
+        }}
+
+        ### Important Rules:
+        - ALWAYS include `q_organization_keyword_tags` with industry/sector keywords
+        - Include multiple variations and related terms in keyword tags
+        - Only include fields that are relevant to the user's input
+        - When user says "startups", include appropriate employee ranges
+        - When user says "enterprise", use larger employee ranges
+        - Use descriptive form titles that capture the search criteria
     """
 
     CONVERSATIONAL_FORM_PROMPT = """
