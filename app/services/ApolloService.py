@@ -276,12 +276,13 @@ class ApolloService:
             return UriResponse.custom_response("Lead not found for enrichment.", 404)
 
         lead_id = lead.get("lead_id", "")
-        user_id = lead.get("user_id", "")
+        user_id = lead.get("assigned_to", "")  # FIX: Lead has 'assigned_to', not 'user_id'
         cache_key = f"email-{ApolloHelper.generate_apollo_lead_cache_key(lead)}"
 
         print(f"\n{'='*80}")
         print(f"[EMAIL ENRICHMENT] Starting enrichment request")
         print(f"[EMAIL ENRICHMENT] Lead ID: {lead_id}")
+        print(f"[EMAIL ENRICHMENT] User ID (assigned_to): {user_id}")
         print(f"[EMAIL ENRICHMENT] Lead Username: {lead.get('username', 'Unknown')}")
         print(f"[EMAIL ENRICHMENT] Lead Name: {lead.get('name', 'Unknown')}")
         print(f"[EMAIL ENRICHMENT] Lead has apollo_id: {bool(lead.get('apollo_id'))}")
