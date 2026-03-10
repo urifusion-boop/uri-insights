@@ -679,18 +679,35 @@ class LeadFormAutoPopulateEnum(Enum):
            - Must include BOTH:
              a) Industry/sector keywords (e.g., "fintech", "healthcare", "SaaS")
              b) Company type/stage keywords (e.g., "startup", "enterprise", "SME", "scale-up")
-           - Include variations, synonyms, and related terms
+           - Include variations, synonyms, and related terms to maximize search coverage
            - Examples:
              * "Real estate companies" → ["real estate", "property", "housing", "construction", "property management"]
              * "Fintech startups" → ["fintech", "financial technology", "payments", "banking", "financial services", "startup", "early stage"]
              * "Healthcare providers" → ["healthcare", "medical", "hospital", "clinic", "health services"]
              * "Tech startups" → ["technology", "tech", "software", "IT", "startup", "early stage", "seed stage"]
              * "Enterprise SaaS" → ["SaaS", "software", "cloud", "technology", "enterprise", "B2B"]
+             * "Coworking spaces" → ["coworking", "co-working", "shared workspace", "flexible workspace", "office space", "business center"]
+             * "Small businesses" → ["small business", "SME", "small enterprise", "local business"]
+             * "FMCG" → ["FMCG", "fast moving consumer goods", "consumer goods", "consumer products", "food and beverage", "personal care", "household products"]
+             * "Manufacturing" → ["manufacturing", "industrial", "production", "factory", "fabrication", "assembly"]
+             * "Restaurants" → ["restaurant", "dining", "food service", "eatery", "food and beverage", "hospitality"]
+             * "Schools" → ["school", "education", "educational institution", "academy", "learning center"]
 
         2. **Company Locations** (organization_locations):
            - Extract cities, states, regions, or countries
-           - Format: ["City, State", "City, Country", "Country"]
-           - Examples: ["Lagos, Nigeria"], ["California, United States"], ["United Kingdom"]
+           - Format: ["City, Country"] or ["State, Country"] or ["Country"]
+           - **CRITICAL LOCATION RULES**:
+             * If ONLY a city name is mentioned that is commonly found in Nigeria (Lagos, Abuja, Port Harcourt, Ibadan, Kano, Ife, Benin, Enugu, etc.), ALWAYS append ", Nigeria"
+             * If ONLY a state name is mentioned (Ogun, Lagos State, Rivers, Kano, etc.), ALWAYS append ", Nigeria"
+             * For US states (California, Texas, New York, etc.), ALWAYS append ", United States"
+             * For other international cities without country, keep as-is if globally unique (e.g., Paris, London, Tokyo)
+           - Examples:
+             * "Lagos" → ["Lagos, Nigeria"]
+             * "Ogun state" → ["Ogun State, Nigeria"]
+             * "Abuja" → ["Abuja, Nigeria"]
+             * "Ife" → ["Ife, Nigeria"]
+             * "California" → ["California, United States"]
+             * "United Kingdom" → ["United Kingdom"]
 
         3. **Company Size** (organization_num_employees_ranges):
            - Extract or infer from descriptors like "startup", "enterprise", "SMB"
@@ -789,16 +806,73 @@ class LeadFormAutoPopulateEnum(Enum):
             "q_organization_keyword_tags": ["e-commerce", "ecommerce", "online retail", "retail", "online shopping", "marketplace"]
         }}
 
+        **Input:** "Find coworking spaces in Lagos"
+        **Output:**
+        {{
+            "form_title": "Coworking Spaces in Lagos, Nigeria",
+            "organization_locations": ["Lagos, Nigeria"],
+            "q_organization_keyword_tags": ["coworking", "co-working", "coworking space", "shared workspace", "flexible workspace", "office space", "business center"]
+        }}
+
+        **Input:** "Find small businesses in Lagos"
+        **Output:**
+        {{
+            "form_title": "Small Businesses in Lagos, Nigeria",
+            "organization_locations": ["Lagos, Nigeria"],
+            "organization_num_employees_ranges": ["1,10", "11,50"],
+            "q_organization_keyword_tags": ["small business", "SME", "small enterprise", "local business"]
+        }}
+
+        **Input:** "Find FMCGs in Lagos"
+        **Output:**
+        {{
+            "form_title": "FMCG Companies in Lagos, Nigeria",
+            "organization_locations": ["Lagos, Nigeria"],
+            "q_organization_keyword_tags": ["FMCG", "fast moving consumer goods", "consumer goods", "consumer products", "food and beverage", "personal care", "household products", "packaged goods"]
+        }}
+
+        **Input:** "Find manufacturing companies in Ogun state"
+        **Output:**
+        {{
+            "form_title": "Manufacturing Companies in Ogun State, Nigeria",
+            "organization_locations": ["Ogun State, Nigeria"],
+            "q_organization_keyword_tags": ["manufacturing", "industrial", "production", "factory", "fabrication", "assembly"]
+        }}
+
+        **Input:** "Find restaurants in Abuja"
+        **Output:**
+        {{
+            "form_title": "Restaurants in Abuja, Nigeria",
+            "organization_locations": ["Abuja, Nigeria"],
+            "q_organization_keyword_tags": ["restaurant", "dining", "food service", "eatery", "food and beverage", "hospitality"]
+        }}
+
+        **Input:** "Find secondary schools in Ife"
+        **Output:**
+        {{
+            "form_title": "Secondary Schools in Ife, Nigeria",
+            "organization_locations": ["Ife, Nigeria"],
+            "q_organization_keyword_tags": ["secondary school", "high school", "education", "school", "educational institution", "private school", "boarding school"]
+        }}
+
         ### Important Rules:
         - ALWAYS include `q_organization_keyword_tags` with industry/sector AND company type/stage keywords
         - `q_organization_keyword_tags` MUST contain BOTH industry AND company type when both are mentioned
           * "Tech startups" → Include BOTH "tech/software/IT" AND "startup/early stage"
           * "Enterprise SaaS" → Include BOTH "SaaS/software/cloud" AND "enterprise"
           * "Fintech scale-ups" → Include BOTH "fintech/financial services" AND "scale-up/growth stage"
-        - Include multiple variations and related terms in keyword tags
+        - Include multiple variations and related terms in keyword tags for better search coverage
+        - **LOCATION DEFAULTS**: When user mentions only a city/state name commonly found in Nigeria (Lagos, Abuja, Ogun, Ife, Port Harcourt, Ibadan, Kano, etc.) WITHOUT specifying a country, ALWAYS default to Nigeria
+          * "Lagos" → "Lagos, Nigeria"
+          * "Ogun state" → "Ogun State, Nigeria"
+          * "Ife" → "Ife, Nigeria"
+        - **STATE REQUIREMENT**: When user mentions only a state name (e.g., "Ogun state", "California"), ALWAYS append the country
+          * "Ogun state" → "Ogun State, Nigeria"
+          * "California" → "California, United States"
+        - For ambiguous international cities (e.g., "Paris", "London"), keep as-is unless context suggests otherwise
         - Only include fields that are relevant to the user's input
-        - When user says "startups", include appropriate employee ranges
-        - When user says "enterprise", use larger employee ranges
+        - When user says "startups" or "small business", include appropriate employee ranges: ["1,10", "11,50", "51,200"]
+        - When user says "enterprise", use larger employee ranges: ["1001,10000", "10001+"]
         - Use descriptive form titles that capture the search criteria
     """
 
