@@ -12,6 +12,8 @@ services:
     ports:
       - "9002:80"
       - "9445:443"
+    networks:
+      - uritest-network
 
   uri-insight.worker:
     image: uriteam/urisvc:uriinsightworkerdev
@@ -22,6 +24,8 @@ services:
     restart: always
     deploy:
       replicas: 5
+    networks:
+      - uritest-network
     # Worker processes background jobs from Azure Service Bus queue
     # No ports needed - this service only consumes from queue
 
