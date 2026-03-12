@@ -69,6 +69,7 @@ class BaseFormInput(BaseModel):
     add_to_history: Optional[bool] = None
     auto_generate: Optional[bool] = None
     lead_generation_goal: Optional[str] = None  # User's business goal/reason for generating leads
+    monitoring_interval_hours: Optional[int] = 0  # 0 = one-time only, >0 = recurring interval in hours
 
 
 # --- Person Search Form ---
@@ -81,6 +82,14 @@ class OrganizationSearchFormInput(BaseFormInput, OrganizationSearchRequest):
     form_type: Optional[LeadFormTypeEnum] = LeadFormTypeEnum.ORGANIZATION
     technology_uids: Optional[List[str]] = None
 
+    # Location Intelligence fields (URI-branded geographic targeting)
+    enable_location_intelligence: Optional[bool] = False
+    location_zone_center_lat: Optional[float] = None
+    location_zone_center_lng: Optional[float] = None
+    location_zone_radius_km: Optional[float] = None
+    location_zone_name: Optional[str] = None
+    min_trust_score: Optional[float] = None
+
 
 # --- Business Search Form ---
 class BusinessSearchFormInput(BaseFormInput, BusinessSearchRequest):
@@ -90,6 +99,21 @@ class BusinessSearchFormInput(BaseFormInput, BusinessSearchRequest):
 # --- Conversational Search Form ---
 class ConversationalSearchFormInput(BaseFormInput, ConversationalSearchRequest):
     form_type: Optional[LeadFormTypeEnum] = LeadFormTypeEnum.CONVERSATIONAL
+
+
+# --- Google Maps Search Form ---
+class GoogleMapsSearchFormInput(BaseFormInput):
+    form_type: Optional[LeadFormTypeEnum] = LeadFormTypeEnum.GOOGLE_MAPS
+    maps_search_mode: Optional[str] = "auto"  # "auto", "text", "nearby"
+    maps_search_query: Optional[str] = None  # Natural language query for Text Search
+    maps_location: Optional[str] = None  # Location name for Text Search
+    maps_latitude: Optional[float] = None  # Latitude for Nearby Search
+    maps_longitude: Optional[float] = None  # Longitude for Nearby Search
+    maps_radius_km: Optional[float] = None  # Search radius in kilometers
+    maps_business_types: Optional[List[str]] = None  # Filter by business types
+    maps_min_rating: Optional[float] = None  # Minimum Google rating (0-5)
+    maps_exclude_closed: Optional[bool] = True  # Exclude closed businesses
+    maps_max_results: Optional[int] = 20  # Maximum results to return
 
 
 class LeadFormFilterQuery(BaseModel):

@@ -84,6 +84,23 @@ class UriBackendService:
             return None
 
     @staticmethod
+    async def remove_app_token_by_provider(user_id: str, provider: str):
+        """
+        Remove app token by provider (e.g., FACEBOOK, INSTAGRAM, TIKTOK, TWITTER).
+
+        Args:
+            user_id: User ID
+            provider: Token provider (FACEBOOK, INSTAGRAM, TIKTOK, TWITTER)
+        """
+        url = f"{UriBackendService.base_url}/users/remove-app-token/{user_id}/{provider}"
+        try:
+            result = await UriGatewayService.delete(url)
+            return result
+        except Exception as e:
+            print(f"Exception occurred removing app token for provider {provider}: ", e)
+            return None
+
+    @staticmethod
     async def search_apollo_persons(params: dict):
         """
         Search for people in Apollo using person_titles and organization name.

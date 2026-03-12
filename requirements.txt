@@ -38,6 +38,7 @@ websockets>=10.0
 playwright>=1.40.0
 playwright-stealth>=1.0.0
 apify-client>=1.7.0
+brightdata-sdk>=2.0.0
 pytest>=7.4.0
 pytest-asyncio>=0.21.0
 httpx>=0.24.0

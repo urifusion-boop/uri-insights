@@ -148,6 +148,20 @@ class LeadBase(BaseModel):
     marked_dead_date: Optional[datetime] = None  # When was this lead marked as DEAD?
     marked_dead_reason: Optional[str] = None  # Why was this lead marked as DEAD?
 
+    # Google Maps - Local business discovery fields
+    google_place_id: Optional[str] = None  # Unique Google Place identifier
+    google_rating: Optional[float] = None  # Business rating (0-5 stars) - stored but not displayed directly
+    google_reviews_count: Optional[int] = None  # Number of reviews
+    trust_score: Optional[float] = None  # URI-branded Trust Score (calculated from google_rating: 1-5 → 20-100)
+    business_status: Optional[str] = None  # "OPERATIONAL", "CLOSED_TEMPORARILY", "CLOSED_PERMANENTLY"
+    business_category: Optional[str] = None  # Primary business type (e.g., "restaurant", "store")
+    business_types: Optional[List[str]] = None  # All business types from Google
+    formatted_address: Optional[str] = None  # Full formatted address from Google (displayed as "Regional Zone")
+    latitude: Optional[float] = None  # Latitude coordinate
+    longitude: Optional[float] = None  # Longitude coordinate
+    opening_hours: Optional[str] = None  # Business hours (optional, for future enhancement)
+    price_level: Optional[int] = None  # Price level 0-4 (0=free, 4=expensive)
+
     class Config:
         json_encoders = {datetime: lambda v: DateHelper.to_iso8601_utc(v) if v else None}
 
@@ -237,6 +251,16 @@ class LeadUpdate(BaseModel):
 
     # AI Next Steps (for updates)
     ai_next_steps: Optional[AINextSteps] = None
+
+    # Lazarus Protocol - Resurrection tracking fields (for updates)
+    is_lazarus_monitored: Optional[bool] = None
+    lazarus_focus_id: Optional[str] = None
+    lazarus_company_monitor_id: Optional[str] = None
+    resurrection_count: Optional[int] = None
+    last_resurrection_date: Optional[datetime] = None
+    last_resurrection_type: Optional[str] = None
+    marked_dead_date: Optional[datetime] = None
+    marked_dead_reason: Optional[str] = None
 
     last_updated: datetime = Field(default_factory=datetime.utcnow)
 

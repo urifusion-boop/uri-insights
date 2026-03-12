@@ -61,11 +61,20 @@ class LeadHelper:
     def extract_apollo_person_lead(data: dict) -> dict:
         organization = data.get("organization", {})
 
-        # DEBUG: Log organization data to see what Apollo returns
-        print(f"[EXTRACT LEAD] Person: {data.get('name')}")
-        print(f"[EXTRACT LEAD] Organization data: {organization}")
+        # DEBUG: Log critical fields to diagnose null lead_link and username issues
+        print(f"[EXTRACT LEAD] ========== PERSON DATA ==========")
+        print(f"[EXTRACT LEAD] Person name: {data.get('name')}")
+        print(f"[EXTRACT LEAD] Person first_name: {data.get('first_name')}")
+        print(f"[EXTRACT LEAD] Person last_name: {data.get('last_name')}")
+        print(f"[EXTRACT LEAD] Person linkedin_url: {data.get('linkedin_url')}")
+        print(f"[EXTRACT LEAD] Person title: {data.get('title')}")
+        print(f"[EXTRACT LEAD] Person email: {data.get('email')}")
+        print(f"[EXTRACT LEAD] Organization name: {organization.get('name')}")
+        print(f"[EXTRACT LEAD] Organization linkedin_url: {organization.get('linkedin_url')}")
         print(f"[EXTRACT LEAD] Organization website_url: {organization.get('website_url')}")
-        print(f"[EXTRACT LEAD] Organization primary_domain: {organization.get('primary_domain')}")
+        print(f"[EXTRACT LEAD] Final lead_link will be: {data.get('linkedin_url') or organization.get('linkedin_url')}")
+        print(f"[EXTRACT LEAD] Final username will be: {data.get('name')}")
+        print(f"[EXTRACT LEAD] ======================================")
 
         location_parts: List[str] = list(
             filter(None, [data.get("city"), data.get("state"), data.get("country")])

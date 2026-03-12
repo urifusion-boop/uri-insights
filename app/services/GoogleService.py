@@ -93,6 +93,180 @@ class GoogleService:
         base_url = f"https://www.googleapis.com/customsearch/v1?q={query}&key={settings.GOOGLE_CUSTOM_SEARCH_ENGINE_API_KEY}&cx={settings.URI_SEARCH_ENGINE_ID}"
         response = requests.get(base_url)
         return response
+    
+    
+    # ──────────────────────────────────────────────
+    #  Serper.dev integration (fallback / primary)
+    # ──────────────────────────────────────────────
+
+    @staticmethod
+    def _convert_serper_to_google_format(serper_response: dict) -> dict:
+        """
+        Convert a Serper.dev API response into the Google Custom Search JSON
+        format so that all downstream code (AdapterFactory, KeywordHelper, etc.)
+        continues to work without changes.
+        """
+        items = []
+        for result in serper_response.get("organic", []):
+            link = result.get("link", "")
+            parsed = urlparse(link)
+            display_link = parsed.netloc
+
+            # Build a pagemap-like structure from available Serper data
+            pagemap = {}
+
+            # Add metatags if sitelinks or other metadata exist
+            metatags = {}
+            if result.get("date"):
+                metatags["article:published_time"] = result["date"]
+            if result.get("snippet"):
+                metatags["og:description"] = result["snippet"]
+            if result.get("title"):
+                metatags["og:title"] = result["title"]
+            if metatags:
+                pagemap["metatags"] = [metatags]
+
+            # Add image if thumbnail exists
+            if result.get("imageUrl") or result.get("thumbnailUrl"):
+                image_url = result.get("imageUrl") or result.get("thumbnailUrl")
+                pagemap["cse_image"] = [{"src": image_url}]
+                pagemap["cse_thumbnail"] = [{"src": image_url}]
+
+            # Build sitelinks if present
+            if result.get("sitelinks"):
+                pagemap["sitelinks"] = result["sitelinks"]
+
+            item = {
+                "kind": "customsearch#result",
+                "title": result.get("title", ""),
+                "htmlTitle": result.get("title", ""),
+                "link": link,
+                "displayLink": display_link,
+                "snippet": result.get("snippet", ""),
+                "htmlSnippet": result.get("snippet", ""),
+                "formattedUrl": link,
+                "htmlFormattedUrl": link,
+                "pagemap": pagemap,
+            }
+            items.append(item)
+
+        # Build a response that mimics Google Custom Search structure
+        total_results = str(len(items))
+        return {
+            "kind": "customsearch#search",
+            "searchInformation": {
+                "totalResults": total_results,
+                "searchTime": 0,
+            },
+            "items": items,
+        }
+
+
+    @staticmethod
+    async def _serper_search(query: str, num: int = 10, page: int = 1) -> dict:
+        """
+        Perform a search using the Serper.dev API.
+
+        Args:
+            query: The search query string.
+            num: Number of results to return (max 100).
+            page: Page number for pagination.
+
+        Returns:
+            dict: Raw Serper API response.
+        """
+        serper_api_key = getattr(settings, "SERPER_API_KEY", None) or os.getenv(
+            "SERPER_API_KEY", ""
+        )
+        if not serper_api_key:
+            print("⚠️ SERPER_API_KEY not configured")
+            return {}
+
+        url = "https://google.serper.dev/search"
+        headers = {
+            "X-API-KEY": serper_api_key,
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "q": query,
+            "num": min(num, 100),
+        }
+        if page > 1:
+            payload["page"] = page
+
+        try:
+            response = requests.post(url, json=payload, headers=headers, timeout=30)
+            if response.status_code == 200:
+                return response.json()
+            else:
+                print(
+                    f"Serper API error: {response.status_code} - {response.text[:200]}"
+                )
+                return {}
+        except Exception as e:
+            print(f"Serper API request failed: {e}")
+            return {}
+
+    @staticmethod
+    async def _build_serper_query(params: GoogleSearchParams) -> str:
+        """
+        Build a plain-text search query string from GoogleSearchParams
+        suitable for the Serper.dev API.
+        """
+        query_parts = []
+
+        # Add included keywords
+        if params.includes:
+            for keyword in params.includes:
+                # Remove Google-specific operators for Serper
+                clean = keyword.replace('intitle:', '').replace('intext:', '').replace('OR ', '').strip('"')
+                if clean:
+                    query_parts.append(clean)
+
+        # Add exact phrases
+        if params.phrases:
+            for phrase in params.phrases:
+                query_parts.append(f'"{phrase}"')
+
+        # Add or_terms
+        if params.or_terms:
+            clean_or = params.or_terms.replace('intitle:', '').strip('"')
+            if clean_or:
+                query_parts.append(clean_or)
+
+        # Add platform/site restrictions
+        if params.platforms:
+            site_parts = []
+            for platform in params.platforms:
+                platform_lower = platform.lower()
+                # Map platform names to domains
+                platform_domain_map = {
+                    "instagram": "instagram.com",
+                    "twitter": "twitter.com",
+                    "x": "x.com",
+                    "facebook": "facebook.com",
+                    "linkedin": "linkedin.com",
+                    "reddit": "reddit.com",
+                    "tiktok": "tiktok.com",
+                    "youtube": "youtube.com",
+                    "threads": "threads.net",
+                    "pinterest": "pinterest.com",
+                }
+                domain = platform_domain_map.get(platform_lower, platform_lower)
+                # Only add site: if it looks like a domain
+                if "." in domain:
+                    site_parts.append(f"site:{domain}")
+                else:
+                    site_parts.append(platform)
+            if site_parts:
+                query_parts.append(" OR ".join(site_parts))
+
+        # Add excluded keywords
+        if params.excludes:
+            for keyword in params.excludes:
+                query_parts.append(f"-{keyword}")
+
+        return " ".join(query_parts).strip()    
 
     @staticmethod
     async def extract_urls(data: Dict):
@@ -106,15 +280,62 @@ class GoogleService:
         params: GoogleSearchParams, tracker: TrackerEnum = TrackerEnum.KEYWORD
     ) -> Any:
         """
-        Retrieve multiple pages of search data from the Google Custom Search API,
-        limiting to a maximum of 5 loops to avoid excessive API calls.
+        Retrieve multiple pages of search data. Tries Google Custom Search first,
+        falls back to Serper.dev if Google fails.
 
         Args:
             params (GoogleSearchParams): Parameters for the search query.
+            tracker (TrackerEnum): Type of tracker (KEYWORD or LEAD).
 
         Returns:
             dict: Aggregated search results containing all retrieved items.
         """
+
+        # ── Try Serper.dev first if API key is configured ──
+        serper_api_key = getattr(settings, "SERPER_API_KEY", None) or os.getenv(
+            "SERPER_API_KEY", ""
+        )
+        if serper_api_key:
+            print("🔍 Using Serper.dev for search...")
+            query = await GoogleService._build_serper_query(params)
+            print(f"   Serper query: {query}")
+
+            all_items = []
+            max_loops = min(params.max_search_iteration_count, 5)
+
+            for page in range(1, max_loops + 1):
+                serper_response = await GoogleService._serper_search(
+                    query=query, num=10, page=page
+                )
+                if not serper_response or not serper_response.get("organic"):
+                    break
+
+                google_format = GoogleService._convert_serper_to_google_format(
+                    serper_response
+                )
+                page_items = google_format.get("items", [])
+                all_items.extend(page_items)
+
+                # Check if there are more results
+                if len(serper_response.get("organic", [])) < 10:
+                    break  # No more pages
+
+            if all_items:
+                result = {
+                    "kind": "customsearch#search",
+                    "searchInformation": {
+                        "totalResults": str(len(all_items)),
+                        "searchTime": 0,
+                    },
+                    "items": all_items,
+                }
+                print(f"   ✅ Serper returned {len(all_items)} results")
+                return result
+            else:
+                print("   ⚠️ Serper returned no results")
+
+        # ── Fallback to Google Custom Search ──
+        print("🔍 Using Google Custom Search API...")
         if tracker == TrackerEnum.LEAD:
             query = await GoogleService.construct_lead_tracking_query_url(params)
         else:
@@ -132,13 +353,33 @@ class GoogleService:
 
         # Make the initial request and check totalResults
         url = f"{base_url}&start={start_index}&num={max_results_per_page}"
+        print(f"[GOOGLE SEARCH] 🔍 Fetching URL: {url[:200]}...")
         response = ScraperFactory.get_scraper("google", url).fetch_data()
+
         if not response:
+            print(f"[GOOGLE SEARCH] ❌ No response from scraper (returned None)")
             return None
-        data = response.json()
+
+        print(f"[GOOGLE SEARCH] Response status: {response.status_code}")
+
+        if response.status_code != 200:
+            error_text = response.text[:500] if response.text else "No error message"
+            print(f"[GOOGLE SEARCH] ❌ API Error ({response.status_code}): {error_text}")
+            return None
+
+        try:
+            data = response.json()
+        except Exception as e:
+            print(f"[GOOGLE SEARCH] ❌ Failed to parse JSON: {e}")
+            print(f"[GOOGLE SEARCH] Response text: {response.text[:500]}")
+            return None
+
+        items_count = len(data.get("items", []))
+        total_results = int(data.get("searchInformation", {}).get("totalResults", 0))
+        print(f"[GOOGLE SEARCH] ✅ Got {items_count} items (total available: {total_results})")
+
         # Initialize all_items with the first batch of results
         all_items.extend(data.get("items", []))
-        total_results = int(data.get("searchInformation", {}).get("totalResults", 0))
 
         # Loop to retrieve additional pages, with a maximum of 5 iterations
         while len(all_items) < total_results:
@@ -175,39 +416,36 @@ class GoogleService:
 
     @staticmethod
     async def construct_keyword_tracking_query_url(params: GoogleSearchParams) -> str:
+        from urllib.parse import quote_plus
+
+        # Build the query parts
+        query_parts = []
+
         # `includes` - Enforce presence in title and snippet
-        includes_query = (
-            [
-                f'intitle:"{keyword}" OR intext:"{keyword}"'
+        if params.includes:
+            includes_parts = [
+                f'(intitle:"{keyword}" OR intext:"{keyword}")'
                 for keyword in params.includes
             ]
-            if params.includes
-            else []
-        )
-
-        params.includes = includes_query
+            query_parts.append(" ".join(includes_parts))
 
         # `or_terms` - Enforce presence in title
-        or_terms_query = (
-            " ".join([f'intitle:"{term}"' for term in params.or_terms.split()])
-            if params.or_terms
-            else ""
-        )
-
-        params.or_terms = or_terms_query
+        if params.or_terms:
+            or_terms_query = " ".join([f'intitle:"{term}"' for term in params.or_terms.split()])
+            query_parts.append(or_terms_query)
 
         # `platforms` - Restrict search to specific sites
-        platforms_query = (
-            " ".join([f"site:{platform}" for platform in params.platforms])
-            if params.platforms
-            else ""
-        )
+        if params.platforms:
+            platform_parts = [f"site:{platform}" for platform in params.platforms]
+            query_parts.append(f"({' OR '.join(platform_parts)})")
 
-        # params.platforms = platforms_query
+        # Combine all query parts
+        query = " ".join(query_parts)
 
-        url = TextHelper.construct_query_url(params)
-        print("Query Url : ", url)
-        return url
+        print(f"[QUERY CONSTRUCTION] Raw query: {query}")
+        print(f"[QUERY CONSTRUCTION] URL-encoded query: {quote_plus(query)}")
+
+        return quote_plus(query)
 
     @staticmethod
     async def construct_lead_tracking_query_url(params: GoogleSearchParams) -> str:

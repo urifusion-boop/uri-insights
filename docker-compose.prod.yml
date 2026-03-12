@@ -1,9 +1,9 @@
 version: "3.9"
 
 services:
-  uri-insight.api:
+  uri-insight-prod.api:
     image: uriteam/urisvc:uriinsightprod
-    container_name: uri-insight.api
+    container_name: uri-insight-prod.api
     env_file:
       - .env
     environment:
@@ -15,10 +15,10 @@ services:
       - /etc/letsencrypt/live/api.uricreative.com/privkey.pem:/https/privkey.pem
     restart: always
     ports:
-      - "8002:80"
-      - "8445:443"
+      - "9002:80"
+      - "9445:443"
 
-  uri-insight.worker:
+  uri-insight-prod.worker:
     image: uriteam/urisvc:uriinsightworker
     env_file:
       - .env

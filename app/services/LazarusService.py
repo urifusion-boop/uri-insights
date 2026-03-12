@@ -23,6 +23,7 @@ from app.domain.schemas.lazarus_schema import (
     LazarusMetrics,
 )
 from app.domain.enums.lead_enum import LeadStatusEnum, LeadSourceEnum
+from app.domain.schemas.lead_schema import LeadUpdate
 
 
 class LazarusService:
@@ -48,6 +49,23 @@ class LazarusService:
                 "message": f"Slot limit reached. You have {slots.max_slots} slots on the {slots.plan_type} plan.",
                 "slots_available": 0,
             }
+
+        # If this contact is being created from an individual lead, fetch the lead to copy already-revealed email/phone
+        lead_email = None
+        lead_phone = None
+        if source_lead_id:
+            print(f"[LAZARUS] 📋 Fetching lead data from source_lead_id: {source_lead_id}")
+            lead_response = await LeadRepository.get_lead_by_id(db, source_lead_id)
+            lead_data = lead_response.get("lead") if lead_response else None
+            if lead_data:
+                # Copy already-revealed email and phone from lead (they already paid for these)
+                lead_email_value = lead_data.get("lead_email") or lead_data.get("email")
+                if lead_email_value and lead_email_value not in ["PROCESSING", "UNAVAILABLE", ""]:
+                    lead_email = lead_email_value
+                    print(f"[LAZARUS] 📧 Copying email from lead: {lead_email}")
+                if lead_data.get("phone") and lead_data.get("phone") not in ["PROCESSING", "UNAVAILABLE", ""]:
+                    lead_phone = lead_data.get("phone")
+                    print(f"[LAZARUS] 📱 Copying phone from lead: {lead_phone}")
 
         # Create MD5 hash of bio if provided
         last_bio_hash = None
@@ -84,6 +102,20 @@ class LazarusService:
             linkedin_url = SocialURLHelper.clean_linkedin_url(linkedin_url)
             print(f"[LAZARUS] Cleaned LinkedIn URL: {linkedin_url}")
 
+        # Check for duplicates - prevent adding the same contact twice
+        if linkedin_url or twitter_url:
+            existing_contact = await LazarusRepository.find_duplicate_focus_contact(
+                db, user_id, linkedin_url, twitter_url
+            )
+            if existing_contact:
+                platform = "LinkedIn" if linkedin_url else "Twitter"
+                return {
+                    "success": False,
+                    "message": f"This contact is already being monitored. Duplicate {platform} profile detected.",
+                    "duplicate_focus_id": existing_contact.focus_id,
+                    "duplicate_name": existing_contact.name,
+                }
+
         # Build focus contact data
         contact_data = {
             "focus_id": str(uuid.uuid4()),
@@ -107,6 +139,12 @@ class LazarusService:
             "last_updated": datetime.utcnow(),
         }
 
+        # Add already-revealed email/phone from lead if available (they already paid for this)
+        if lead_email:
+            contact_data["email"] = lead_email
+        if lead_phone:
+            contact_data["phone"] = lead_phone
+
         # Create in database
         contact = await LazarusRepository.create_focus_contact(db, contact_data)
         if not contact:
@@ -122,24 +160,29 @@ class LazarusService:
 
         # If linked to a lead, mark the lead as monitored
         if source_lead_id:
+            update_data = LeadUpdate(
+                is_lazarus_monitored=True,
+                lazarus_focus_id=contact_data["focus_id"],
+                lead_status=LeadStatusEnum.MONITORING,
+            )
             await LeadRepository.update_lead(
                 db,
                 source_lead_id,
-                user_id,
-                {
-                    "is_lazarus_monitored": True,
-                    "lazarus_focus_id": contact_data["focus_id"],
-                    "status": LeadStatusEnum.MONITORING,
-                },
+                update_data,
             )
 
         # Auto-trigger enrichment if LinkedIn URL is provided
         # This ensures profile photo, email, and other data are immediately available
+        print(f"[LAZARUS] 🔍 Checking if enrichment needed...")
+        print(f"[LAZARUS] 🔍 LinkedIn URL exists: {bool(linkedin_url)}")
+        print(f"[LAZARUS] 🔍 LinkedIn URL value: {linkedin_url}")
+
         if linkedin_url:
             from app.services.LinkedInProfileScraperService import LinkedInProfileScraperService
 
-            print(f"[LAZARUS] Auto-enriching new contact: {contact_create.name}")
-            print(f"[LAZARUS] LinkedIn URL: {linkedin_url}")
+            print(f"[LAZARUS] 🚀 AUTO-ENRICHMENT STARTING...")
+            print(f"[LAZARUS] 👤 Contact: {contact_create.name}")
+            print(f"[LAZARUS] 🔗 LinkedIn URL: {linkedin_url}")
 
             try:
                 # Update status to pending
@@ -147,9 +190,10 @@ class LazarusService:
                     db, contact_data["focus_id"], user_id, {"enrichment_status": "pending"}
                 )
 
-                # Call LinkedIn Profile Scraper
-                scraper_service = LinkedInProfileScraperService()
-                enrichment_result = await scraper_service.enrich_profile(
+                # Call Bright Data LinkedIn Profile Enrichment Service (FREE - no credits)
+                from app.services.BrightDataProfileEnrichmentService import BrightDataProfileEnrichmentService
+                enrichment_service = BrightDataProfileEnrichmentService()
+                enrichment_result = await enrichment_service.enrich_profile(
                     linkedin_url=linkedin_url,
                     timeout_seconds=90
                 )
@@ -157,29 +201,68 @@ class LazarusService:
                 if enrichment_result.get("success"):
                     profile_data = enrichment_result.get("profile", {})
 
+                    # Log what Bright Data returned
+                    print(f"[LAZARUS] ✅ Enrichment successful!")
+                    print(f"[LAZARUS] 📧 Email: {profile_data.get('email') or 'Not found'}")
+                    print(f"[LAZARUS] 📱 Phone: {profile_data.get('phone') or 'Not found'}")
+                    print(f"[LAZARUS] 📸 Profile Photo: {'✅ Found' if profile_data.get('profile_photo') else '❌ Not found'}")
+                    print(f"[LAZARUS] 💼 Headline: {profile_data.get('headline')[:50] if profile_data.get('headline') else 'Not found'}...")
+                    print(f"[LAZARUS] 🏢 Current Company: {profile_data.get('current_company') or 'Not found'}")
+                    print(f"[LAZARUS] 📍 Location: {profile_data.get('location') or 'Not found'}")
+                    print(f"[LAZARUS] 🔗 Connections: {profile_data.get('connections_count') or 'Not found'}")
+                    print(f"[LAZARUS] 📋 About: {'✅ Found' if profile_data.get('about') else '❌ Not found'}")
+                    print(f"[LAZARUS] 💪 Skills: {len(profile_data.get('skills', [])) if profile_data.get('skills') else 0} skills")
+                    print(f"[LAZARUS] 🎓 Education: {len(profile_data.get('education', [])) if profile_data.get('education') else 0} entries")
+                    print(f"[LAZARUS] 💼 Work Experience: {len(profile_data.get('work_experience', [])) if profile_data.get('work_experience') else 0} entries")
+
                     # Check if any actual profile data was retrieved
                     has_profile_data = any([
-                        profile_data.get("profile_photo_url"),
+                        profile_data.get("profile_photo"),
                         profile_data.get("email"),
                         profile_data.get("phone"),
                         profile_data.get("current_company"),
-                        profile_data.get("current_title")
+                        profile_data.get("headline"),
+                        profile_data.get("about")
                     ])
 
                     if has_profile_data:
-                        # Update contact with enriched data
+                        # Update contact with enriched data from Bright Data
+                        # IMPORTANT: Don't overwrite email/phone if they were copied from lead (user already paid)
                         update_data = {
-                            "profile_photo_url": profile_data.get("profile_photo_url"),
-                            "email": profile_data.get("email"),
-                            "phone": profile_data.get("phone"),
+                            "profile_photo": profile_data.get("profile_photo"),
+                            "headline": profile_data.get("headline"),
+                            "location": profile_data.get("location"),
+                            "connections_count": profile_data.get("connections_count"),
+                            "about": profile_data.get("about"),
                             "current_company": profile_data.get("current_company") or contact_data.get("current_company"),
-                            "current_title": profile_data.get("current_title"),
+                            "current_position": profile_data.get("current_position"),
+                            "work_experience": profile_data.get("work_experience"),
+                            "education": profile_data.get("education"),
+                            "skills": profile_data.get("skills"),
+                            "languages": profile_data.get("languages"),
+                            "certifications": profile_data.get("certifications"),
                             "enrichment_status": "completed",
                             "enriched_at": datetime.utcnow()
                         }
 
+                        # Only add email/phone from Bright Data if NOT already copied from lead
+                        if not lead_email:
+                            update_data["email"] = profile_data.get("email")
+                        if not lead_phone:
+                            update_data["phone"] = profile_data.get("phone")
+
                         # Remove None values
                         update_data = {k: v for k, v in update_data.items() if v is not None}
+
+                        # Debug: Log what we're about to save
+                        print(f"[LAZARUS] 📝 Saving enriched data to DB:")
+                        for key, value in update_data.items():
+                            if key == 'about':
+                                print(f"   {key}: {str(value)[:100]}...")
+                            elif isinstance(value, (list, dict)):
+                                print(f"   {key}: {type(value)} with {len(value)} items")
+                            else:
+                                print(f"   {key}: {value}")
 
                         await LazarusRepository.update_focus_contact(
                             db, contact_data["focus_id"], user_id, update_data
@@ -211,12 +294,96 @@ class LazarusService:
                 import traceback
                 traceback.print_exc()
 
+        # Auto-trigger enrichment if Twitter URL is provided
+        if twitter_url:
+            from app.services.TwitterEnrichmentService import TwitterEnrichmentService
+
+            print(f"[LAZARUS] 🐦 AUTO-ENRICHMENT STARTING (Twitter)...")
+            print(f"[LAZARUS] 👤 Contact: {contact_create.name}")
+            print(f"[LAZARUS] 🔗 Twitter URL: {twitter_url}")
+
+            try:
+                # Update status to pending
+                await LazarusRepository.update_focus_contact(
+                    db, contact_data["focus_id"], user_id, {"enrichment_status": "pending"}
+                )
+
+                # Call Twitter enrichment service (Bright Data)
+                twitter_service = TwitterEnrichmentService()
+                profile_data = await twitter_service.enrich_profile(
+                    twitter_url_or_handle=twitter_url,
+                    max_posts=5  # Get 5 posts for enrichment snapshot
+                )
+
+                if profile_data:
+                    print(f"[LAZARUS] ✅ Twitter enrichment successful!")
+                    print(f"[LAZARUS] 📸 Profile: {profile_data.get('profile_name')}")
+                    print(f"[LAZARUS] 👥 Followers: {profile_data.get('followers', 0):,}")
+                    print(f"[LAZARUS] ✓ Verified: {profile_data.get('is_verified')}")
+
+                    try:
+                        # Transform to FocusContact format
+                        enrichment_data = twitter_service.transform_to_focus_contact_data(profile_data)
+                        print(f"[LAZARUS] 🔧 Transform completed, type: {type(enrichment_data)}")
+
+                        # Remove None values - but keep nested dicts like twitter_data
+                        enrichment_data = {
+                            k: v for k, v in enrichment_data.items()
+                            if v is not None and v != ""
+                        }
+                        print(f"[LAZARUS] 🔧 After filtering None values, keys: {list(enrichment_data.keys())}")
+
+                        print(f"[LAZARUS] 📝 Saving Twitter enriched data to DB:")
+                        print(f"   Profile Photo: {'✅ Found' if enrichment_data.get('profile_photo') else '❌ Not found'}")
+                        print(f"   Twitter Handle: @{enrichment_data.get('twitter_handle')}")
+                        print(f"   Twitter ID: {enrichment_data.get('twitter_id')}")
+
+                        # Safely access nested twitter_data
+                        twitter_data = enrichment_data.get('twitter_data')
+                        if twitter_data and isinstance(twitter_data, dict):
+                            print(f"   Followers: {twitter_data.get('followers', 0):,}")
+                        else:
+                            print(f"   Followers: twitter_data not available")
+
+                        # Save enriched data to database
+                        await LazarusRepository.update_focus_contact(
+                            db, contact_data["focus_id"], user_id, enrichment_data
+                        )
+
+                        print(f"[LAZARUS] ✅ Twitter auto-enrichment completed for: {contact_create.name}")
+
+                    except Exception as transform_error:
+                        print(f"[LAZARUS] ❌ Transform error: {str(transform_error)}")
+                        import traceback
+                        traceback.print_exc()
+                        raise
+                else:
+                    print(f"[LAZARUS] ⚠️  Twitter enrichment failed - no profile data returned")
+                    await LazarusRepository.update_focus_contact(
+                        db, contact_data["focus_id"], user_id, {
+                            "enrichment_status": "failed",
+                            "enriched_at": datetime.utcnow()
+                        }
+                    )
+
+            except Exception as e:
+                print(f"[LAZARUS] ⚠️  Twitter auto-enrichment error: {str(e)}")
+                # Don't fail the whole operation if enrichment fails
+                import traceback
+                traceback.print_exc()
+
+        # Fetch the final enriched contact to return to frontend
+        enriched_contact = await LazarusRepository.get_focus_contact_by_id(
+            db, contact_data["focus_id"], user_id
+        )
+
         return {
             "success": True,
-            "message": "Focus contact added successfully" + (" and enrichment started" if linkedin_url else ""),
+            "message": "Focus contact added successfully" + (" and enrichment started" if (linkedin_url or twitter_url) else ""),
             "focus_id": contact_data["focus_id"],
             "slots_used": slots.used_slots + 1,
             "slots_available": slots.max_slots - (slots.used_slots + 1),
+            "contact": enriched_contact,  # Return full enriched contact data
         }
 
     @staticmethod
@@ -241,14 +408,14 @@ class LazarusService:
 
         # Unlink from lead if exists
         if contact.source_lead_id:
+            update_data = LeadUpdate(
+                is_lazarus_monitored=False,
+                lazarus_focus_id=None,
+            )
             await LeadRepository.update_lead(
                 db,
                 contact.source_lead_id,
-                user_id,
-                {
-                    "is_lazarus_monitored": False,
-                    "lazarus_focus_id": None,
-                },
+                update_data,
             )
 
         return {"success": True, "message": "Focus contact removed successfully"}
@@ -360,20 +527,86 @@ class LazarusService:
 
         # If linked to a lead, mark it as monitored
         if source_lead_id:
+            update_data = LeadUpdate(
+                is_lazarus_monitored=True,
+                lazarus_company_monitor_id=monitor_data["monitor_id"],
+                lead_status=LeadStatusEnum.MONITORING,
+            )
             await LeadRepository.update_lead(
                 db,
                 source_lead_id,
-                user_id,
-                {
-                    "is_lazarus_monitored": True,
-                    "lazarus_company_monitor_id": monitor_data["monitor_id"],
-                    "status": LeadStatusEnum.MONITORING,
-                },
+                update_data,
             )
+
+        # Auto-trigger enrichment if LinkedIn URL is provided
+        linkedin_url = monitor_create.linkedin_url
+        if linkedin_url:
+            from app.services.BrightDataCompanyEnrichmentService import BrightDataCompanyEnrichmentService
+
+            print(f"[LAZARUS] Auto-enriching company: {monitor_create.company_name}")
+            print(f"[LAZARUS] LinkedIn URL: {linkedin_url}")
+
+            try:
+                # Update status to pending
+                await LazarusRepository.update_company_monitor(
+                    db, monitor_data["monitor_id"], user_id, {"enrichment_status": "pending"}
+                )
+
+                # Call company enrichment service
+                company_service = BrightDataCompanyEnrichmentService()
+                enrichment_result = await company_service.enrich_company(
+                    linkedin_url=linkedin_url,
+                    timeout_seconds=60
+                )
+
+                print(f"[LAZARUS] Company enrichment result success: {enrichment_result.get('success')}")
+
+                if enrichment_result.get("success"):
+                    # Map company data to CompanyMonitor fields
+                    update_data = {
+                        "logo": enrichment_result.get("logo"),
+                        "company_image": enrichment_result.get("company_image"),
+                        "about": enrichment_result.get("about"),
+                        "slogan": enrichment_result.get("slogan"),
+                        "description": enrichment_result.get("description"),
+                        "specialties": enrichment_result.get("specialties"),
+                        "organization_type": enrichment_result.get("organization_type"),
+                        "company_size": enrichment_result.get("company_size"),
+                        "industries": enrichment_result.get("industries"),
+                        "founded": enrichment_result.get("founded"),
+                        "headquarters": enrichment_result.get("headquarters"),
+                        "followers": enrichment_result.get("followers"),
+                        "employees": enrichment_result.get("employees"),
+                        "enriched_at": datetime.utcnow(),
+                        "enrichment_status": "completed"
+                    }
+
+                    # Remove None values
+                    update_data = {k: v for k, v in update_data.items() if v is not None}
+
+                    print(f"[LAZARUS] Updating company with enriched data: {list(update_data.keys())}")
+
+                    # Save enriched data to database
+                    await LazarusRepository.update_company_monitor(
+                        db, monitor_data["monitor_id"], user_id, update_data
+                    )
+
+                    print(f"[LAZARUS] ✅ Company auto-enrichment completed for: {monitor_create.company_name}")
+                else:
+                    error_msg = enrichment_result.get("error_message", "Unknown error")
+                    print(f"[LAZARUS] ⚠️  Company enrichment failed: {error_msg}")
+                    await LazarusRepository.update_company_monitor(
+                        db, monitor_data["monitor_id"], user_id, {"enrichment_status": "failed"}
+                    )
+
+            except Exception as e:
+                print(f"[LAZARUS] ⚠️  Company auto-enrichment error: {str(e)}")
+                import traceback
+                traceback.print_exc()
 
         return {
             "success": True,
-            "message": "Company monitor added successfully",
+            "message": "Company monitor added successfully" + (" and enrichment started" if linkedin_url else ""),
             "monitor_id": monitor_data["monitor_id"],
             "slots_used": slots.used_slots + 1,
             "slots_available": slots.max_slots - (slots.used_slots + 1),
@@ -403,14 +636,14 @@ class LazarusService:
 
         # Unlink from lead if exists
         if monitor.source_lead_id:
+            update_data = LeadUpdate(
+                is_lazarus_monitored=False,
+                lazarus_company_monitor_id=None,
+            )
             await LeadRepository.update_lead(
                 db,
                 monitor.source_lead_id,
-                user_id,
-                {
-                    "is_lazarus_monitored": False,
-                    "lazarus_company_monitor_id": None,
-                },
+                update_data,
             )
 
         return {"success": True, "message": "Company monitor removed successfully"}
@@ -650,16 +883,16 @@ class LazarusService:
             focus_id: Focus contact ID
             linkedin_url: LinkedIn URL to enrich
         """
-        from app.services.LinkedInProfileScraperService import LinkedInProfileScraperService
+        from app.services.BrightDataProfileEnrichmentService import BrightDataProfileEnrichmentService
 
         # Update status to pending
         await LazarusRepository.update_focus_contact(
             db, focus_id, user_id, {"enrichment_status": "pending"}
         )
 
-        # Call LinkedIn Profile Scraper
-        scraper_service = LinkedInProfileScraperService()
-        enrichment_result = await scraper_service.enrich_profile(
+        # Call Bright Data LinkedIn Profile Enrichment Service
+        enrichment_service = BrightDataProfileEnrichmentService()
+        enrichment_result = await enrichment_service.enrich_profile(
             linkedin_url=linkedin_url,
             timeout_seconds=90
         )
@@ -739,14 +972,13 @@ class LazarusService:
 
         # If alert has linked lead, update the lead
         if updated.resurrected_lead_id:
+            update_data = LeadUpdate(
+                lead_status=LeadStatusEnum.CONTACTED,
+            )
             await LeadRepository.update_lead(
                 db,
                 updated.resurrected_lead_id,
-                user_id,
-                {
-                    "status": LeadStatusEnum.CONTACTED,
-                    "last_updated": datetime.utcnow(),
-                },
+                update_data,
             )
 
         return {"success": True, "message": "Alert marked as contacted"}
@@ -824,39 +1056,40 @@ class LazarusService:
         Optionally auto-add to Lazarus monitoring
         """
         # Update lead status to DEAD
-        updated_lead = await LeadRepository.update_lead(
+        update_data = LeadUpdate(
+            lead_status=LeadStatusEnum.DEAD,
+            marked_dead_date=datetime.utcnow(),
+            marked_dead_reason=reason,
+        )
+        updated_lead_response = await LeadRepository.update_lead(
             db,
             lead_id,
-            user_id,
-            {
-                "status": LeadStatusEnum.DEAD,
-                "marked_dead_date": datetime.utcnow(),
-                "marked_dead_reason": reason,
-            },
+            update_data,
         )
 
-        if not updated_lead:
+        updated_lead_data = updated_lead_response.get("lead") if updated_lead_response else None
+        if not updated_lead_data:
             return {"success": False, "message": "Lead not found"}
 
         # If auto_monitor is enabled, add to Lazarus
         if auto_monitor:
             # Determine type based on lead data
-            if updated_lead.social_handle or updated_lead.username:
+            if updated_lead_data.get("social_handle") or updated_lead_data.get("username"):
                 # Add as focus contact
                 contact_create = FocusContactCreate(
-                    name=updated_lead.name or updated_lead.username or "Unknown",
-                    social_handle=updated_lead.social_handle or updated_lead.username,
-                    last_bio_text=updated_lead.bio,
+                    name=updated_lead_data.get("first_name") or updated_lead_data.get("username") or "Unknown",
+                    social_handle=updated_lead_data.get("social_handle") or updated_lead_data.get("username"),
+                    last_bio_text=updated_lead_data.get("bio"),
                     industry_keywords=[],
                 )
                 monitor_result = await LazarusService.add_focus_contact(
                     db, user_id, contact_create, source_lead_id=lead_id
                 )
-            elif updated_lead.company_name and updated_lead.company_url:
+            elif updated_lead_data.get("company_name") and updated_lead_data.get("company_url"):
                 # Add as company monitor
                 monitor_create = CompanyMonitorCreate(
-                    company_name=updated_lead.company_name,
-                    website_url=updated_lead.company_url,
+                    company_name=updated_lead_data.get("company_name"),
+                    website_url=updated_lead_data.get("company_url"),
                     last_homepage_content=None,
                     last_job_count=0,
                 )
@@ -889,22 +1122,27 @@ class LazarusService:
         Resurrect a DEAD lead (change status to RESURRECTED)
         PRD Section 5.2: Resurrection
         """
-        lead = await LeadRepository.get_lead(db, lead_id, user_id)
-        if not lead:
+        lead_response = await LeadRepository.get_lead_by_id(db, lead_id)
+        lead_data = lead_response.get("lead") if lead_response else None
+        if not lead_data:
             return {"success": False, "message": "Lead not found"}
 
+        # Convert to Lead object for easier access
+        from app.domain.schemas.lead_schema import Lead
+        lead = Lead(**lead_data)
+
         # Update lead to RESURRECTED
+        update_data = LeadUpdate(
+            lead_status=LeadStatusEnum.RESURRECTED,
+            resurrection_count=(lead.resurrection_count or 0) + 1,
+            last_resurrection_date=datetime.utcnow(),
+            last_resurrection_type=alert_type,
+            lead_source=LeadSourceEnum.LAZARUS,
+        )
         updated_lead = await LeadRepository.update_lead(
             db,
             lead_id,
-            user_id,
-            {
-                "status": LeadStatusEnum.RESURRECTED,
-                "resurrection_count": (lead.resurrection_count or 0) + 1,
-                "last_resurrection_date": datetime.utcnow(),
-                "last_resurrection_type": alert_type,
-                "source": LeadSourceEnum.LAZARUS,
-            },
+            update_data,
         )
 
         if not updated_lead:

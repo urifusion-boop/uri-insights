@@ -288,22 +288,32 @@ class LeadFilter:
     @staticmethod
     def filter_by_location(leads: List, target_locations: Optional[List[str]]) -> List:
         """
-        Filter leads by location - strict matching.
+        Filter leads by location - flexible token-based matching.
 
         Args:
             leads: List of LeadCreate objects
-            target_locations: List of location strings to match (e.g., ["Lagos", "Nigeria"])
+            target_locations: List of location strings to match (e.g., ["Lagos, Nigeria"])
 
         Returns:
             Filtered list of leads that match any of the target locations
+
+        Example:
+            - Target: ["Lagos, Nigeria"]
+            - Lead location: "Lagos, Lagos State, Nigeria"
+            - Tokens: ["lagos", "nigeria"] -> ALL found in lead -> MATCH ✅
         """
         if not target_locations or len(target_locations) == 0:
             return leads  # No location filter
 
         filtered_leads = []
 
-        # Normalize target locations for comparison
-        normalized_targets = [loc.lower().strip() for loc in target_locations]
+        # Tokenize target locations: split "Lagos, Nigeria" -> ["lagos", "nigeria"]
+        # This handles cases where lead has "Lagos, Lagos State, Nigeria"
+        target_tokens = set()
+        for loc in target_locations:
+            # Split by comma and normalize
+            tokens = [t.lower().strip() for t in loc.split(',') if t.strip()]
+            target_tokens.update(tokens)
 
         for lead in leads:
             # Check multiple potential location fields
@@ -319,8 +329,8 @@ class LeadFilter:
 
             lead_location_lower = lead_location_text.lower()
 
-            # Check if any target location is mentioned in the lead content
-            if any(target in lead_location_lower for target in normalized_targets):
+            # Check if ALL target tokens are present (handles "Lagos, Lagos State, Nigeria" matching "Lagos, Nigeria")
+            if all(token in lead_location_lower for token in target_tokens):
                 filtered_leads.append(lead)
 
         return filtered_leads
@@ -992,7 +1002,7 @@ class ConversationalLeadJobService:
                         # PRD: Fetch from user onboarding if solution_context not provided
                         if not solution_context or solution_context.strip() == "":
                             print(f"   📥 No solution_context, fetching from user onboarding...")
-                            from app.services.uri_microservices.UriBackendService import UriBackendService
+                            # UriBackendService already imported at top of file
                             user_details = await UriBackendService.get_user_details(user_id)
 
                             if user_details and user_details.get("businessDetails"):
@@ -1183,14 +1193,17 @@ class ConversationalLeadJobService:
 
                     print(f"   ✅ {len(leads_after_location_filter)} leads passed filters (from {len(keyword_leads)} raw)")
 
-                    # Analyze filtered leads (NEW: Use spam-aware method)
-                    if leads_after_location_filter:
+                    # Separate social media vs job board leads for DIFFERENT analysis paths
+                    social_leads_filtered = [l for l in leads_after_location_filter if l.lead_source != LeadSourceEnum.JOB_BOARDS]
+                    job_board_leads_filtered = [l for l in leads_after_location_filter if l.lead_source == LeadSourceEnum.JOB_BOARDS]
+
+                    # Analyze ONLY social media leads with intent analysis (job boards already analyzed)
+                    if social_leads_filtered:
                         keyword_qualified, keyword_intent_filtered = await ConversationalLeadJobService._analyze_and_filter_leads_with_spam(
-                            leads_after_location_filter, category_config, intent_min, relevance_min, final_min
+                            social_leads_filtered, category_config, intent_min, relevance_min, final_min
                         )
                         qualified_leads.extend(keyword_qualified)
-                        print(f"   ✅ {len(keyword_qualified)} qualified from this keyword ({len(keyword_intent_filtered)} filtered by intent)")
-                        print(f"   📈 TOTAL QUALIFIED SO FAR: {len(qualified_leads)}")
+                        print(f"   ✅ {len(keyword_qualified)} qualified social media leads from this keyword ({len(keyword_intent_filtered)} filtered by intent)")
 
                         # === NEW: Save intent-filtered social posts to spam ===
                         if keyword_intent_filtered:
@@ -1210,7 +1223,15 @@ class ConversationalLeadJobService:
                                 )
                             except Exception as spam_error:
                                 print(f"   ⚠️ Error saving intent-filtered posts to spam: {str(spam_error)}")
-                    else:
+
+                    # Job board leads: Already analyzed by Bright Data - add directly to qualified (skip social intent analysis)
+                    if job_board_leads_filtered:
+                        qualified_leads.extend(job_board_leads_filtered)
+                        print(f"   ✅ {len(job_board_leads_filtered)} qualified job board leads (already analyzed by job board AI)")
+
+                    print(f"   📈 TOTAL QUALIFIED SO FAR: {len(qualified_leads)}")
+
+                    if not social_leads_filtered and not job_board_leads_filtered:
                         print(f"   ⚠️ No leads passed filters for this keyword")
 
                 # === NEW: Accumulate filtered job board leads for spam (apply filters first) ===
@@ -1653,6 +1674,40 @@ class ConversationalLeadJobService:
                     stats=stats
                 )
                 print(f"✅ Job {job_id} completed: {message}")
+
+                # Deduct credits for successful Sales Signal scan (7 credits)
+                try:
+                    from app.services.uri_microservices.UriTaskManagerService import UriTaskManagerService
+                    await UriTaskManagerService.deduct_payment(
+                        user_id=user_id,
+                        action_type="SALES_SIGNAL_SCAN",
+                        payment_mode="CREDITS",
+                        quantity=1,
+                        reference=job_id,  # Use job_id as transaction reference
+                        narration=f"Sales Signal scan for form {lead_form.get('form_title', 'Untitled')}"
+                    )
+                    print(f"💳 Deducted 7 credits for Sales Signal scan (user: {user_id})")
+                except Exception as credit_error:
+                    print(f"⚠️ Failed to deduct credits: {str(credit_error)}")
+                    # Don't fail the job if credit deduction fails
+
+                # Deduct credits for each qualified lead found (1 credit per lead)
+                qualified_leads_count = stats.get('new_leads_saved', 0)
+                if qualified_leads_count > 0:
+                    try:
+                        from app.services.uri_microservices.UriTaskManagerService import UriTaskManagerService
+                        await UriTaskManagerService.deduct_payment(
+                            user_id=user_id,
+                            action_type="SALES_SIGNAL_VERIFIED",
+                            payment_mode="CREDITS",
+                            quantity=qualified_leads_count,
+                            reference=f"{job_id}_leads",  # Use job_id with suffix for lead deductions
+                            narration=f"{qualified_leads_count} qualified leads from {lead_form.get('form_title', 'Untitled')}"
+                        )
+                        print(f"💳 Deducted {qualified_leads_count} credits for {qualified_leads_count} qualified sales signals (user: {user_id})")
+                    except Exception as credit_error:
+                        print(f"⚠️ Failed to deduct per-lead credits: {str(credit_error)}")
+                        # Don't fail the job if credit deduction fails
 
                 # Check if this is a recurring monitoring job (ONLY for conversational leads)
                 monitoring_interval_hours = lead_form.get("monitoring_interval_hours", 0)
@@ -2294,16 +2349,17 @@ class ConversationalLeadJobService:
             print(f"💼 Fetching job board signals with query: '{search_query}'")
 
             # Import services and helpers
-            from app.services.ApifyLinkedInJobsService import ApifyLinkedInJobsService
-            from app.services.ApifyJobbermanService import ApifyJobbermanService
-            from app.services.ApifyIndeedService import ApifyIndeedService
+            # OLD: from app.services.ApifyLinkedInJobsService import ApifyLinkedInJobsService  # DEPRECATED - kept for reference
+            # OLD: from app.services.ApifyJobbermanService import ApifyJobbermanService  # DISABLED - Apify broken
+            # OLD: from app.services.ApifyIndeedService import ApifyIndeedService  # DISABLED - Apify broken
+            from app.services.BrightDataLinkedInJobsService import BrightDataLinkedInJobsService  # NEW: Using ONLY LinkedIn via Bright Data
             from app.services.JobSignalAnalysisService import JobSignalAnalysisService
             from app.services.JobBoardParameterHelper import (
                 convert_location_for_job_boards,
                 map_post_age_filter
             )
 
-            # Convert location list to Apify-compatible format
+            # Convert location list to job board compatible format
             location_str, location_scope = convert_location_for_job_boards(location)
 
             # Provide contextual feedback based on scope
@@ -2324,74 +2380,34 @@ class ConversationalLeadJobService:
 
             print(f"   📅 Time filter: {post_age_filter} (LinkedIn: {published_at_linkedin}, Jobberman: {posted_date_jobberman})")
 
-            # Initialize services
-            linkedin_service = ApifyLinkedInJobsService()
-            jobberman_service = ApifyJobbermanService()
-            indeed_service = ApifyIndeedService()
+            # Initialize services - ONLY USING BRIGHT DATA FOR LINKEDIN (Jobberman/Indeed disabled - Apify broken)
+            linkedin_service = BrightDataLinkedInJobsService()
 
-            # PRD: Fetch from LinkedIn Jobs, Jobberman, and Indeed CONCURRENTLY (parallel)
-            # Distribute max_jobs: 50% LinkedIn, 25% Jobberman, 25% Indeed
-            linkedin_max = max(1, int(max_jobs * 0.50))   # 50%
-            jobberman_max = max(1, int(max_jobs * 0.25))  # 25%
-            indeed_max = max(1, int(max_jobs * 0.25))     # 25%
+            print(f"   💼 Fetching {max_jobs} jobs from LinkedIn (Bright Data)")
+            print(f"   ℹ️ Jobberman and Indeed disabled (Apify broken)")
 
-            print(f"   💼 Distributing {max_jobs} jobs: LinkedIn {linkedin_max}, Jobberman {jobberman_max}, Indeed {indeed_max}")
-            print(f"   ⚡ Fetching from all 3 job boards in parallel...")
-
-            # Jobberman ALWAYS uses Lagos (hardcoded default)
-            jobberman_location = "Lagos"  # Always use Lagos regardless of user's location input
-
-            # Fetch from all 3 services concurrently (3x speedup!)
-            results = await asyncio.gather(
-                linkedin_service.fetch_job_postings(
-                    search_query,
-                    max_jobs=linkedin_max,
-                    location=location_str,  # None if worldwide
-                    published_at=published_at_linkedin,
-                    solution_context=solution_context
-                ),
-                jobberman_service.fetch_job_postings(
-                    search_query,
-                    max_jobs=jobberman_max,
-                    location=jobberman_location,  # Always "Lagos"
-                    posted_date=posted_date_jobberman
-                ),
-                indeed_service.fetch_job_postings(
-                    search_query,
-                    max_jobs=indeed_max
-                ),
-                return_exceptions=True  # Don't fail all if one fails
+            # Fetch ONLY from LinkedIn via Bright Data
+            linkedin_result = await linkedin_service.fetch_job_postings(
+                search_query,
+                max_jobs=max_jobs,  # Use full allocation for LinkedIn only
+                location=location_str or "Worldwide",  # Bright Data uses "Worldwide" instead of None
+                published_at=published_at_linkedin,
+                solution_context=solution_context
             )
 
-            # Unpack results
-            linkedin_result = results[0] if not isinstance(results[0], Exception) else {"success": False, "jobs": [], "error": str(results[0])}
-            jobberman_result = results[1] if not isinstance(results[1], Exception) else {"success": False, "jobs": [], "error": str(results[1])}
-            indeed_result = results[2] if not isinstance(results[2], Exception) else {"success": False, "jobs": [], "error": str(results[2])}
+            # Handle errors
+            if isinstance(linkedin_result, Exception):
+                print(f"   ⚠️ LinkedIn error: {str(linkedin_result)}")
+                linkedin_result = {"success": False, "jobs": [], "error": str(linkedin_result)}
 
-            # Log errors if any
-            if isinstance(results[0], Exception):
-                print(f"   ⚠️ LinkedIn error: {str(results[0])}")
-            if isinstance(results[1], Exception):
-                print(f"   ⚠️ Jobberman error: {str(results[1])}")
-            if isinstance(results[2], Exception):
-                print(f"   ⚠️ Indeed error: {str(results[2])}")
-
-            # Collect all jobs with source attribution
+            # Collect jobs with source attribution
             all_jobs = []
             if linkedin_result.get("success"):
                 for job in linkedin_result.get("jobs", []):
                     job["source"] = "LinkedIn Jobs"
                     all_jobs.append(job)
-            if jobberman_result.get("success"):
-                for job in jobberman_result.get("jobs", []):
-                    job["source"] = "Jobberman"
-                    all_jobs.append(job)
-            if indeed_result.get("success"):
-                for job in indeed_result.get("jobs", []):
-                    job["source"] = "Indeed"
-                    all_jobs.append(job)
 
-            print(f"   ✅ Found {len(all_jobs)} total job postings (LinkedIn: {len(linkedin_result.get('jobs', []))}, Jobberman: {len(jobberman_result.get('jobs', []))}, Indeed: {len(indeed_result.get('jobs', []))})")
+            print(f"   ✅ Found {len(all_jobs)} total job postings (LinkedIn: {len(linkedin_result.get('jobs', []))})")
 
             if not all_jobs:
                 print(f"   ⚠️ No jobs found for query '{search_query}'")
@@ -2406,7 +2422,10 @@ class ConversationalLeadJobService:
             print(f"   After deduplication: {len(deduplicated_jobs)} unique jobs")
 
             # FEATURE #2: Client-side keyword pre-filter (before AI analysis)
+            # For job boards: Use search_query as the primary keyword + any additional keywords
             all_filter_keywords = []
+            if search_query:  # Always have the search query as a keyword for job boards
+                all_filter_keywords.append(search_query)
             if keywords:
                 all_filter_keywords.extend(keywords)
             if implied_keywords:
@@ -2415,7 +2434,7 @@ class ConversationalLeadJobService:
             keyword_rejected_jobs = []  # NEW: Track jobs filtered by keyword matching
 
             if all_filter_keywords:
-                print(f"   🔍 Pre-filtering with {len(all_filter_keywords)} keywords before AI analysis")
+                print(f"   🔍 Pre-filtering with {len(all_filter_keywords)} keywords (including search query: '{search_query}') before AI analysis")
                 keyword_filtered_jobs = ConversationalLeadJobService._filter_jobs_by_keyword_relevance(
                     deduplicated_jobs, all_filter_keywords
                 )
@@ -2428,6 +2447,7 @@ class ConversationalLeadJobService:
                 print(f"   ✅ {len(keyword_filtered_jobs)} jobs passed keyword filter → sending to AI")
                 jobs_to_analyze = keyword_filtered_jobs
             else:
+                # This should never happen for job boards since search_query is always provided
                 print(f"   ⚠️ No keywords provided - analyzing all jobs without pre-filtering")
                 jobs_to_analyze = deduplicated_jobs
 

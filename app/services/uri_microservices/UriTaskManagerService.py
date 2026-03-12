@@ -28,7 +28,7 @@ class UriTaskManagerService:
             print("Exception occurred in checking feature limit: ", e)
             log_data = {
                 "userId": user_id,
-                "exceptionDate": DateHelper.utc_now_iso(),
+                "exceptionDate": datetime.utcnow().isoformat() + "Z",
                 "method": "POST",
                 "status": 500,
                 "exception": "".join(
@@ -44,18 +44,23 @@ class UriTaskManagerService:
         user_id: str, url_path: str, count: int
     ):
         if not user_id or not url_path:
-            print("User ID or URL path is missing for updating feature limit")
+            print("❌ [UriTaskManagerService] User ID or URL path is missing for updating feature limit")
             return None
         url = (
             UriTaskManagerService.base_url
             + settings.URI_TASK_MANAGER_UPDATE_FEATURE_LIMIT_SPECIFIC_LIMIT
         )
         request_body = {"userId": user_id, "urlPath": url_path, "count": count}
+        print(f"🔄 [UriTaskManagerService] Calling task-manager: {url}")
+        print(f"📦 [UriTaskManagerService] Request body: {request_body}")
         try:
             result = await UriGatewayService.put(url, request_body)
+            print(f"✅ [UriTaskManagerService] Task-manager response: {result}")
             return result
         except Exception as e:
-            print("Exception occurred in updating specific feature limit: ", e)
+            print(f"❌ [UriTaskManagerService] Exception occurred in updating specific feature limit: {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
     @staticmethod
@@ -119,3 +124,93 @@ class UriTaskManagerService:
         )
 
         return limit_available, current_count
+
+    @staticmethod
+    async def check_payment_balance(
+        user_id: str,
+        action_type: str,
+        payment_mode: str,
+        quantity: int = 1
+    ):
+        """
+        Check if user has sufficient balance (wallet or credits) for a specific action
+
+        Args:
+            user_id: User ID to check
+            action_type: Type of action (e.g., "SALES_SIGNAL_SCAN", "ENRICHMENT_EMAIL", "ENRICHMENT_PHONE")
+            payment_mode: "WALLET" or "CREDITS"
+            quantity: Number of actions (default: 1)
+
+        Returns:
+            Response with balance information and hasSufficientBalance flag
+        """
+        if not user_id or not action_type or not payment_mode:
+            print("Missing required parameters for balance check")
+            return None
+
+        url = UriTaskManagerService.base_url + "/payment-gating/check-balance"
+        params = {
+            "userId": user_id,
+            "actionType": action_type,
+            "paymentMode": payment_mode,
+            "quantity": quantity
+        }
+
+        try:
+            result = await UriGatewayService.get(url, params=params)
+            return result
+        except Exception as e:
+            print(f"❌ Exception occurred in checking balance: {str(e)}")
+            return None
+
+    @staticmethod
+    async def deduct_payment(
+        user_id: str,
+        action_type: str,
+        payment_mode: str,
+        quantity: int = 1,
+        reference: str = None,
+        narration: str = None
+    ):
+        """
+        Deduct payment from user's wallet or credits for a specific action
+
+        Args:
+            user_id: User ID to deduct from
+            action_type: Type of action (e.g., "SALES_SIGNAL_SCAN", "SALES_SIGNAL_VERIFIED", "ENRICHMENT_EMAIL", "ENRICHMENT_PHONE")
+            payment_mode: "WALLET" or "CREDITS"
+            quantity: Number of actions (default: 1)
+            reference: Optional transaction reference
+            narration: Optional transaction description
+
+        Returns:
+            Response from payment gating service
+        """
+        if not user_id or not action_type or not payment_mode:
+            print("Missing required parameters for payment deduction")
+            return None
+
+        url = UriTaskManagerService.base_url + "/payment-gating/deduct"
+
+        request_body = {
+            "userId": user_id,
+            "actionType": action_type,
+            "paymentMode": payment_mode,
+            "quantity": quantity
+        }
+
+        if reference:
+            request_body["reference"] = reference
+
+        if narration:
+            request_body["narration"] = narration
+
+        try:
+            result = await UriGatewayService.post(url, data=request_body)
+            print(f"✅ Payment deduction result: {result}")
+            return result
+        except Exception as e:
+            print(f"❌ Exception occurred in deducting payment: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None

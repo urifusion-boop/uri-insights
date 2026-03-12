@@ -14,6 +14,7 @@ import httpx
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
 from app.repository.LazarusRepository import LazarusRepository
 from app.services.LazarusService import LazarusService
@@ -23,6 +24,7 @@ from app.services.ApifyGoogleSearchService import ApifyGoogleSearchService
 from app.services.ApifyLinkedInJobsService import ApifyLinkedInJobsService
 from app.services.ApifyLinkedInPostScraperService import ApifyLinkedInPostScraperService
 from app.services.XUsersLookupService import XUsersLookupService
+# Note: BrightDataLinkedInPostsService is kept for profile/company enrichment only
 from app.domain.requests.twitter_requests import CurrentUserLookupParams
 from app.domain.schemas.lazarus_schema import (
     FocusContact,
@@ -41,6 +43,118 @@ logger = logging.getLogger(__name__)
 
 class LazarusMonitoringService:
     """Background service for weekly Lazarus scans using Origami Method"""
+
+    # ============ URL NORMALIZATION ============
+    @staticmethod
+    def _normalize_post_url(url: str) -> str:
+        """
+        Normalize post URL by removing tracking parameters that change between requests.
+
+        LinkedIn tracking parameters to remove:
+        - utm_source, utm_medium, utm_campaign (Google Analytics)
+        - rcm (LinkedIn tracking parameter - changes per request)
+        - trk (LinkedIn tracking)
+
+        This ensures the same post is recognized even if fetched multiple times.
+        """
+        if not url:
+            return url
+
+        try:
+            parsed = urlparse(url)
+
+            # Get query parameters
+            query_params = parse_qs(parsed.query)
+
+            # Remove tracking parameters
+            tracking_params = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term',
+                             'rcm', 'trk', 'trackingId', 'refId', 'ref']
+            for param in tracking_params:
+                query_params.pop(param, None)
+
+            # Rebuild query string
+            new_query = urlencode(query_params, doseq=True)
+
+            # Rebuild URL
+            normalized = urlunparse((
+                parsed.scheme,
+                parsed.netloc,
+                parsed.path,
+                parsed.params,
+                new_query,
+                parsed.fragment
+            ))
+
+            return normalized
+
+        except Exception:
+            # If normalization fails, return original URL
+            return url
+
+    # ============ EMAIL NOTIFICATIONS ============
+    @staticmethod
+    async def _send_alert_notification(
+        db: AsyncIOMotorDatabase,
+        user_id: str,
+        alert_id: str,
+        lead_name: str,
+        company: str,
+        signal_type: str,
+        topic: str
+    ):
+        """
+        Send email notification for new Lazarus alert
+        Phase 2: Notification System
+        """
+        try:
+            # Get user's notification preferences
+            from app.repository.LazarusRepository import LazarusRepository
+            slots = await LazarusRepository.get_or_create_slots(db, user_id)
+
+            if not slots.email_notifications_enabled:
+                print(f"📧 Email notifications disabled for user {user_id}")
+                return
+
+            # Get user email
+            from app.services.uri_microservices.UriBackendService import UriBackendService
+            user_details = await UriBackendService.get_user_details(user_id)
+            if not user_details:
+                print(f"⚠️ Could not fetch user details for user {user_id}")
+                return
+
+            # Use notification email if set, otherwise use user's primary email
+            recipient_email = slots.notification_email or user_details.get("email")
+            if not recipient_email:
+                print(f"⚠️ No email found for user {user_id}")
+                return
+
+            # Call uri-backend EmailService via gateway
+            from app.core.config import settings
+            from app.services.uri_microservices.UriGatewayService import UriGatewayService
+
+            email_url = f"{settings.URI_GATEWAY_BASE_API_URL}/uri-backend/email/lazarus-alert"
+            payload = {
+                "userEmail": recipient_email,
+                "leadName": lead_name,
+                "company": company,
+                "signalType": signal_type,
+                "topic": topic,
+                "alertId": alert_id,
+                "userId": user_id
+            }
+
+            print(f"📧 Sending email notification to {recipient_email} for alert {alert_id}")
+            result = await UriGatewayService.post(email_url, payload)
+
+            if result and result.get("status"):
+                print(f"✅ Email notification sent successfully to {recipient_email}")
+            else:
+                print(f"⚠️ Failed to send email notification: {result}")
+
+        except Exception as e:
+            # Don't fail the scan if email sending fails
+            print(f"⚠️ Error sending email notification: {str(e)}")
+            logger.error(f"Error sending email notification: {str(e)}")
 
     # ============ AI PRIORITY SCORING ============
     @staticmethod
@@ -275,6 +389,23 @@ class LazarusMonitoringService:
 
                 total_scanned += 1
 
+            # Deduct Lazarus scan credits for this user's batch (10 credits per contact)
+            if len(user_contacts) > 0:
+                try:
+                    from app.services.uri_microservices.UriTaskManagerService import UriTaskManagerService
+                    await UriTaskManagerService.deduct_payment(
+                        user_id=user_id,
+                        action_type="LAZARUS_SCAN",
+                        payment_mode="CREDITS",
+                        quantity=len(user_contacts),  # 10 credits × number of contacts scanned
+                        reference=f"lazarus_scan_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}",
+                        narration=f"Lazarus scan for {len(user_contacts)} focus contact(s)"
+                    )
+                    print(f"💳 Deducted {len(user_contacts) * 10} credits ({len(user_contacts)} contacts × 10) for user {user_id}")
+                except Exception as credit_error:
+                    print(f"⚠️ Failed to deduct Lazarus scan credits for user {user_id}: {str(credit_error)}")
+                    # Don't fail the scan if credit deduction fails - log and continue
+
         print(f"✅ Focus Contact scan complete: {total_scanned} scanned, {total_alerts} alerts")
         return {
             "scanned": total_scanned,
@@ -362,17 +493,23 @@ class LazarusMonitoringService:
                 return {}
 
             logger.info(f"🔍 Fetching LinkedIn posts for {len(linkedin_urls)} contacts")
+            print(f"🔍 LinkedIn URLs to fetch: {linkedin_urls}")
 
-            # Use ApifyLinkedInPostScraperService to fetch posts
+            # Use Apify LinkedIn Posts Service to fetch posts (more accurate than Bright Data)
+            # Bright Data is reserved for profile/company enrichment only
             linkedin_service = ApifyLinkedInPostScraperService()
+            print(f"🔧 Calling Apify to fetch LinkedIn posts...")
             result = await linkedin_service.fetch_linkedin_posts(
                 linkedin_urls=linkedin_urls,
-                deep_scrape=True,
-                limit_per_source=10  # 10 posts per contact (2-4 weeks of activity)
+                limit_per_source=10,  # 10 posts per contact (2-4 weeks of activity)
+                deep_scrape=True  # Enable detailed scraping
             )
+            print(f"🔧 Apify fetch returned: success={result.get('success')}, total_posts={result.get('total_posts', 0)}")
 
             if not result.get("success"):
-                logger.warning(f"LinkedIn post fetch failed: {result.get('error_message', 'Unknown error')}")
+                error_msg = result.get('error_message', 'Unknown error')
+                logger.warning(f"LinkedIn post fetch failed: {error_msg}")
+                print(f"❌ LinkedIn post fetch failed: {error_msg}")
                 return {}
 
             posts_by_url = result.get("posts_by_url", {})
@@ -437,45 +574,56 @@ class LazarusMonitoringService:
                 # Remove @ if present
                 handle = handle.lstrip('@')
 
-                # Build query to get ALL recent posts from this user
-                query = f"from:{handle}"
-                print(f"   Fetching tweets with query: {query}")
+                # Use Bright Data Twitter enrichment service to fetch tweets
+                print(f"   Fetching tweets for @{handle} using Bright Data...")
 
                 try:
-                    twitter_service = OpenAIApifyTwitterService()
-                    result = await twitter_service.fetch_tweets_with_analysis(
-                        keyword=query,
-                        max_tweets=50,  # Get last 50 tweets
-                        analyze_sentiment=False
+                    from app.services.TwitterEnrichmentService import TwitterEnrichmentService
+                    twitter_service = TwitterEnrichmentService()
+
+                    # Fetch profile with posts (20 posts for scanning)
+                    profile_data = await twitter_service.enrich_profile(
+                        twitter_url_or_handle=handle,
+                        max_posts=20  # Get last 20 tweets for scanning
                     )
 
-                    if result.get("success"):
-                        tweets = result.get("tweets", [])
-                        if tweets:
-                            # Format tweets
-                            formatted_tweets = []
-                            for tweet in tweets:
-                                author = tweet.get("author", {})
-                                formatted_tweets.append({
-                                    "handle": handle,
-                                    "text": tweet.get("text", ""),
-                                    "url": tweet.get("url", ""),
-                                    "created_at": tweet.get("created_at", ""),
-                                    "author": author,
-                                    "likes": tweet.get("likes", 0),
-                                    "retweets": tweet.get("retweets", 0),
-                                    "replies": tweet.get("replies", 0)
-                                })
+                    print(f"[DEBUG] Profile data received: {profile_data is not None}")
+                    if profile_data:
+                        print(f"[DEBUG] Profile data keys: {list(profile_data.keys())}")
+                        print(f"[DEBUG] Posts field: {profile_data.get('posts')}")
+                        print(f"[DEBUG] Posts type: {type(profile_data.get('posts'))}")
 
-                            posts_by_focus_id[contact.focus_id] = formatted_tweets
-                            print(f"✅ Found {len(formatted_tweets)} tweets for {contact.name}")
-                        else:
-                            print(f"ℹ️  No tweets found for {contact.name}")
+                    if profile_data and profile_data.get("posts"):
+                        tweets = profile_data.get("posts", [])
+
+                        # Format tweets to match expected structure
+                        formatted_tweets = []
+                        for tweet in tweets:
+                            formatted_tweets.append({
+                                "handle": handle,
+                                "text": tweet.get("description", ""),
+                                "url": tweet.get("post_url", ""),
+                                "tweet_url": tweet.get("post_url", ""),
+                                "created_at": tweet.get("date_posted", ""),
+                                "author": {
+                                    "username": handle,
+                                    "name": profile_data.get("profile_name", handle)
+                                },
+                                "likes": tweet.get("likes", 0),
+                                "retweets": tweet.get("reposts", 0),
+                                "replies": tweet.get("replies", 0),
+                                "views": tweet.get("views", 0)
+                            })
+
+                        posts_by_focus_id[contact.focus_id] = formatted_tweets
+                        print(f"✅ Found {len(formatted_tweets)} tweets for {contact.name} via Bright Data")
                     else:
-                        print(f"❌ Twitter fetch failed for {contact.name}: {result.get('error_message')}")
+                        print(f"ℹ️  No tweets found for {contact.name}")
 
                 except Exception as e:
                     logger.error(f"Error fetching tweets for {contact.name}: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
                     continue
 
             return posts_by_focus_id
@@ -699,7 +847,7 @@ class LazarusMonitoringService:
                 db, contact, tweets, linkedin_posts, user_signal_preferences
             )
 
-            if signal_analysis:
+            if signal_analysis and signal_analysis.get('signal_detected'):
                 print(f"🎯 SIGNAL DETECTED!")
                 print(f"   Type: {signal_analysis.get('signal_type')}")
                 print(f"   Confidence: {signal_analysis.get('confidence')}")
@@ -884,6 +1032,15 @@ class LazarusMonitoringService:
                     "status": LazarusAlertStatusEnum.NEW,
                     "source_lead_id": contact.source_lead_id,
                 }
+            elif signal_analysis and not signal_analysis.get('signal_detected'):
+                # Signal was analyzed but didn't qualify - return rejection info
+                print(f"❌ NO SIGNAL DETECTED")
+                print(f"   Rejection Reason: {signal_analysis.get('rejection_reason', 'No reason provided')}")
+                return {
+                    "signal_detected": False,
+                    "rejection_reason": signal_analysis.get('rejection_reason'),
+                    "confidence": signal_analysis.get('confidence', 0.0)
+                }
 
         return None
 
@@ -919,10 +1076,18 @@ class LazarusMonitoringService:
         combined_content = "\n\n".join(content_pieces)
 
         # Build AI prompt with user's signal preferences
+        # Handle industry_keywords safely (could be None or empty list)
+        keywords_str = ", ".join(contact.industry_keywords) if contact.industry_keywords else "None specified"
+
+        # Debug logging for keywords
+        print(f"🔑 Industry Keywords for {contact.name}: {keywords_str}")
+        if not contact.industry_keywords:
+            print(f"⚠️  WARNING: No industry keywords set for {contact.name}. Keyword-based alerts will be limited!")
+
         prompt = LazarusPrompt.ANALYZE_BUYING_SIGNALS.value.format(
             contact_name=contact.name,
             current_company=contact.current_company or "Unknown",
-            keywords=", ".join(contact.industry_keywords),
+            keywords=keywords_str,
             signal_types=", ".join(user_signal_preferences),
             tweets=combined_content  # Now includes both Twitter and LinkedIn
         )
@@ -939,14 +1104,35 @@ class LazarusMonitoringService:
 
             result = AIService.extract_ai_result(ai_response)
 
-            # Only return if signal detected with high confidence
+            # Return signal if detected with high confidence
             if result.signal_detected and result.confidence >= 0.7:
                 return {
+                    "signal_detected": True,
                     "signal_type": result.signal_type,
                     "confidence": result.confidence,
                     "evidence": result.evidence,
                     "reason": result.reason,
-                    "triggering_post_index": result.triggering_post_index
+                    "triggering_post_index": result.triggering_post_index,
+                    "rejection_reason": None
+                }
+            else:
+                # Return rejection reason when signal not detected or confidence too low
+                rejection_reason = result.rejection_reason
+                if not rejection_reason and result.signal_detected and result.confidence < 0.7:
+                    # Fallback if AI didn't provide rejection_reason for low confidence
+                    rejection_reason = f"Confidence score {result.confidence:.2f} below threshold (0.70). Weak {result.signal_type or 'signal'} detected but not strong enough."
+                elif not rejection_reason:
+                    # Fallback if AI didn't provide rejection_reason at all
+                    rejection_reason = "No buying signals detected in scanned posts."
+
+                return {
+                    "signal_detected": False,
+                    "signal_type": None,
+                    "confidence": result.confidence,
+                    "evidence": None,
+                    "reason": None,
+                    "triggering_post_index": None,
+                    "rejection_reason": rejection_reason
                 }
 
         except Exception as e:
@@ -1151,10 +1337,65 @@ class LazarusMonitoringService:
             from app.domain.schemas.lazarus_schema import ScannedPost, ScanHistory
 
             if posts:
+                # Deduplicate posts - remove posts we've already scanned
+                # Get previously scanned post URLs from scan_history
+                print(f"🔍 DEBUG: Checking for duplicate posts...")
+                previously_scanned = await db["scan_history"].find(
+                    {
+                        "user_id": contact.user_id,
+                        "source_id": contact.focus_id,
+                        "source_type": LazarusMonitorTypeEnum.FOCUS_CONTACT
+                    },
+                    {"scanned_posts.post_url": 1, "scan_date": 1}
+                ).sort("scan_date", -1).limit(10).to_list(10)  # Check last 10 scans
+
+                print(f"🔍 DEBUG: Found {len(previously_scanned)} previous scans for this contact")
+
+                scanned_urls = set()
+                for scan in previously_scanned:
+                    scan_date = scan.get("scan_date", "Unknown")
+                    posts_in_scan = scan.get("scanned_posts", [])
+                    print(f"🔍 DEBUG: Scan from {scan_date} had {len(posts_in_scan)} posts")
+                    for post in posts_in_scan:
+                        url = post.get("post_url")
+                        if url:
+                            # Normalize URL to remove tracking parameters before adding to set
+                            normalized_url = LazarusMonitoringService._normalize_post_url(url)
+                            scanned_urls.add(normalized_url)
+                            # Show first 2 URLs in full to compare
+                            if len(scanned_urls) <= 2:
+                                print(f"🔍 DEBUG:   - Scanned URL (normalized, len={len(normalized_url)}): {normalized_url}")
+
+                print(f"🔍 DEBUG: Total unique previously scanned URLs: {len(scanned_urls)}")
+
+                # Debug current posts
+                print(f"🔍 DEBUG: Current posts before deduplication: {len(posts)}")
+                for i, p in enumerate(posts[:3]):  # Show first 3
+                    current_url = p.get("url") or p.get("postUrl") or p.get("tweet_url") or p.get("link")
+                    normalized_current = LazarusMonitoringService._normalize_post_url(current_url) if current_url else None
+                    is_duplicate = normalized_current in scanned_urls if normalized_current else False
+                    print(f"🔍 DEBUG:   Post {i+1} URL (normalized, len={len(normalized_current) if normalized_current else 0}): {normalized_current}")
+                    print(f"🔍 DEBUG:   Post {i+1} is_duplicate: {is_duplicate}")
+
+                # Filter out duplicate posts - normalize URLs before comparison
+                original_count = len(posts)
+                posts = [
+                    p for p in posts
+                    if LazarusMonitoringService._normalize_post_url(
+                        p.get("url") or p.get("postUrl") or p.get("tweet_url") or p.get("link")
+                    ) not in scanned_urls
+                ]
+
+                if original_count > len(posts):
+                    print(f"🔄 Filtered out {original_count - len(posts)} duplicate posts (already scanned)")
+
+                if not posts:
+                    print(f"📭 No new posts to analyze (all {original_count} posts were already scanned)")
+
+            if posts:
                 print(f"🤖 Analyzing {len(posts)} posts with AI...")
 
                 # Build scanned_posts array for saving (regardless of signal detection)
-                from app.domain.schemas.lazarus_schema import ScannedPost, ScanHistory
                 scanned_posts_data = []
 
                 for i, post in enumerate(posts[:10]):  # Save up to 10 posts
@@ -1189,6 +1430,9 @@ class LazarusMonitoringService:
 
                 # Save scan history REGARDLESS of signal detection
                 try:
+                    # Determine if signal was detected
+                    signal_detected = analysis_result and analysis_result.get('signal_detected', bool(analysis_result.get('alert_id')))
+
                     scan_history = ScanHistory(
                         user_id=contact.user_id,
                         source_type=LazarusMonitorTypeEnum.FOCUS_CONTACT,
@@ -1198,22 +1442,30 @@ class LazarusMonitoringService:
                         platform="LinkedIn" if platform == "linkedin" else "Twitter",
                         posts_scanned_count=len(scanned_posts_data),
                         scanned_posts=scanned_posts_data,
-                        signal_detected=bool(analysis_result),
+                        signal_detected=signal_detected,
                         alert_id=analysis_result.get('alert_id') if analysis_result else None,
-                        signal_type=analysis_result.get('evidence', {}).get('signal_type') if analysis_result else None,
-                        confidence=analysis_result.get('evidence', {}).get('confidence') if analysis_result else None,
-                        triggering_post_index=analysis_result.get('evidence', {}).get('triggering_post_index') if analysis_result else None,
+                        signal_type=analysis_result.get('evidence', {}).get('signal_type') if analysis_result and analysis_result.get('evidence') else None,
+                        confidence=analysis_result.get('evidence', {}).get('confidence') if analysis_result and analysis_result.get('evidence') else (analysis_result.get('confidence') if analysis_result else None),
+                        triggering_post_index=analysis_result.get('evidence', {}).get('triggering_post_index') if analysis_result and analysis_result.get('evidence') else None,
+                        rejection_reason=analysis_result.get('rejection_reason') if analysis_result and not signal_detected else None,
                     )
 
                     result = await db["scan_history"].insert_one(scan_history.dict(by_alias=True))
                     scan_history_id = str(result.inserted_id)
                     print(f"📋 Saved scan history with {len(scanned_posts_data)} posts (scan_id: {scan_history_id})")
 
+                    # Debug: Show first few URLs being saved
+                    if scanned_posts_data:
+                        print(f"🔍 DEBUG: Saving post URLs to scan_history:")
+                        for i, sp in enumerate(scanned_posts_data[:2]):
+                            url = sp.get('post_url', 'NO URL')
+                            print(f"🔍 DEBUG:   Post {i+1} (len={len(url) if url != 'NO URL' else 0}): {url}")
+
                 except Exception as e:
                     logger.error(f"Failed to save scan history: {str(e)}")
                     print(f"⚠️  Failed to save scan history: {str(e)}")
 
-                if analysis_result:
+                if analysis_result and analysis_result.get('signal_detected', True):
                     # Check for duplicate alerts (same contact, same alert type, same content, within last 7 days)
                     seven_days_ago = datetime.utcnow() - timedelta(days=7)
 
@@ -1269,6 +1521,17 @@ class LazarusMonitoringService:
                             print(f"   Alert Type: {analysis_result.get('alert_type')}")
                             print(f"   Alert Message: {analysis_result.get('alert_message')}")
                             print(f"   Suggested Pitch: {analysis_result.get('suggested_pitch', 'N/A')[:100]}...")
+
+                            # Send email notification if enabled
+                            await LazarusMonitoringService._send_alert_notification(
+                                db=db,
+                                user_id=user_id,
+                                alert_id=analysis_result.get('alert_id'),
+                                lead_name=contact.name,
+                                company=contact.current_company or "Unknown Company",
+                                signal_type=analysis_result.get('evidence', {}).get('signal_type', 'Unknown'),
+                                topic=analysis_result.get('alert_message', '')
+                            )
 
                             # Auto-enrich contact if alert created and not already enriched
                             if contact.linkedin_url and not contact.enriched_at:
@@ -1333,6 +1596,8 @@ class LazarusMonitoringService:
             print("✅ No company monitors due for scanning")
             return {"scanned": 0, "alerts_created": 0}
 
+        # Group monitors by user for credit deduction tracking
+        user_monitor_counts: Dict[str, int] = {}
         total_scanned = 0
         total_alerts = 0
 
@@ -1396,6 +1661,29 @@ class LazarusMonitoringService:
             )
 
             total_scanned += 1
+
+            # Track monitor count per user for credit deduction
+            user_id = monitor.user_id
+            if user_id not in user_monitor_counts:
+                user_monitor_counts[user_id] = 0
+            user_monitor_counts[user_id] += 1
+
+        # Deduct Lazarus scan credits for each user (10 credits per company monitor)
+        for user_id, monitor_count in user_monitor_counts.items():
+            try:
+                from app.services.uri_microservices.UriTaskManagerService import UriTaskManagerService
+                await UriTaskManagerService.deduct_payment(
+                    user_id=user_id,
+                    action_type="LAZARUS_SCAN",
+                    payment_mode="CREDITS",
+                    quantity=monitor_count,  # 10 credits × number of monitors scanned
+                    reference=f"lazarus_company_scan_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}",
+                    narration=f"Lazarus company monitor scan for {monitor_count} company/companies"
+                )
+                print(f"💳 Deducted {monitor_count * 10} credits ({monitor_count} monitors × 10) for user {user_id}")
+            except Exception as credit_error:
+                print(f"⚠️ Failed to deduct Lazarus company scan credits for user {user_id}: {str(credit_error)}")
+                # Don't fail the scan if credit deduction fails - log and continue
 
         print(f"✅ Company Monitor scan complete: {total_scanned} scanned, {total_alerts} alerts")
         return {"scanned": total_scanned, "alerts_created": total_alerts}

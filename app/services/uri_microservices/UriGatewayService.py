@@ -155,3 +155,13 @@ class UriGatewayService:
         return await UriGatewayService._request(
             "PUT", url=url, data=data, params=params, max_retries=max_retries
         )
+
+    @staticmethod
+    async def delete(
+        url: str,
+        params: Optional[dict] = None,
+        max_retries: int = 3,  # Optional argument for retry attempts
+    ):
+        return await UriGatewayService._request(
+            "DELETE", url=url, params=params, max_retries=max_retries
+        )

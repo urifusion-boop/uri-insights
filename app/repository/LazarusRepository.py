@@ -20,6 +20,30 @@ from app.domain.schemas.lazarus_schema import (
 class LazarusRepository:
     """Repository for Lazarus Protocol database operations"""
 
+    # ============ HELPER METHODS ============
+    @staticmethod
+    def _clean_focus_contact_data(doc: Dict[str, Any]) -> Dict[str, Any]:
+        """Clean focus contact data before Pydantic validation
+
+        Transforms skills/languages from [{"title": "X"}] to ["X"] format
+        This handles legacy data from Bright Data enrichment
+        """
+        if doc.get("skills") and isinstance(doc["skills"], list):
+            if len(doc["skills"]) > 0 and isinstance(doc["skills"][0], dict):
+                doc["skills"] = [
+                    skill.get("title", skill) if isinstance(skill, dict) else skill
+                    for skill in doc["skills"]
+                ]
+
+        if doc.get("languages") and isinstance(doc["languages"], list):
+            if len(doc["languages"]) > 0 and isinstance(doc["languages"][0], dict):
+                doc["languages"] = [
+                    lang.get("title", lang) if isinstance(lang, dict) else lang
+                    for lang in doc["languages"]
+                ]
+
+        return doc
+
     # ============ INDEXES ============
     @staticmethod
     async def setup_indexes(db: AsyncIOMotorDatabase):
@@ -76,12 +100,54 @@ class LazarusRepository:
         try:
             result = await db["focus_contacts"].insert_one(contact_data)
             contact_data["_id"] = str(result.inserted_id)
-            return FocusContact(**contact_data)
+            return FocusContact(**LazarusRepository._clean_focus_contact_data(contact_data))
         except pymongo.errors.DuplicateKeyError:
             return None
         except Exception as e:
             print(f"❌ Error creating focus contact: {str(e)}")
             return None
+
+    @staticmethod
+    async def find_duplicate_focus_contact(
+        db: AsyncIOMotorDatabase,
+        user_id: str,
+        linkedin_url: Optional[str],
+        twitter_url: Optional[str]
+    ) -> Optional[FocusContact]:
+        """
+        Find existing focus contact with the same LinkedIn or Twitter URL
+
+        Args:
+            db: Database connection
+            user_id: User ID to check within
+            linkedin_url: LinkedIn profile URL to check
+            twitter_url: Twitter profile URL to check
+
+        Returns:
+            Existing FocusContact if duplicate found, None otherwise
+        """
+        query = {
+            "user_id": user_id,
+            "monitoring_status": {"$ne": LazarusMonitoringStatusEnum.DEAD},
+            "$or": []
+        }
+
+        # Check LinkedIn URL
+        if linkedin_url:
+            query["$or"].append({"linkedin_url": linkedin_url})
+
+        # Check Twitter URL
+        if twitter_url:
+            query["$or"].append({"twitter_url": twitter_url})
+
+        # If no URLs provided, can't check for duplicates
+        if not query["$or"]:
+            return None
+
+        contact = await db["focus_contacts"].find_one(query)
+        if contact:
+            return FocusContact(**LazarusRepository._clean_focus_contact_data(contact))
+        return None
 
     @staticmethod
     async def get_focus_contact_by_id(
@@ -91,7 +157,21 @@ class LazarusRepository:
         contact = await db["focus_contacts"].find_one(
             {"focus_id": focus_id, "user_id": user_id}
         )
-        return FocusContact(**contact) if contact else None
+        if contact:
+            # Fix legacy data: convert dict languages to strings
+            if "languages" in contact and isinstance(contact["languages"], list):
+                fixed_languages = []
+                for lang in contact["languages"]:
+                    if isinstance(lang, dict):
+                        lang_name = lang.get("title") or lang.get("name") or lang.get("language")
+                        if lang_name:
+                            fixed_languages.append(lang_name)
+                    elif isinstance(lang, str):
+                        fixed_languages.append(lang)
+                contact["languages"] = fixed_languages
+
+            return FocusContact(**LazarusRepository._clean_focus_contact_data(contact))
+        return None
 
     @staticmethod
     async def get_focus_contacts_by_user(
@@ -116,7 +196,7 @@ class LazarusRepository:
 
         contacts = []
         async for doc in cursor:
-            contacts.append(FocusContact(**doc))
+            contacts.append(FocusContact(**LazarusRepository._clean_focus_contact_data(doc)))
         return contacts
 
     @staticmethod
@@ -138,7 +218,7 @@ class LazarusRepository:
 
         contacts = []
         async for doc in cursor:
-            contacts.append(FocusContact(**doc))
+            contacts.append(FocusContact(**LazarusRepository._clean_focus_contact_data(doc)))
         return contacts
 
     @staticmethod
@@ -152,7 +232,11 @@ class LazarusRepository:
             {"$set": update_data},
             return_document=pymongo.ReturnDocument.AFTER,
         )
-        return FocusContact(**result) if result else None
+
+        if not result:
+            return None
+
+        return FocusContact(**LazarusRepository._clean_focus_contact_data(result))
 
     @staticmethod
     async def delete_focus_contact(
@@ -549,7 +633,7 @@ class LazarusRepository:
 
             alert_types_stats[alert_type]["total"] += 1
             status = alert.get("status")
-            if status in [LazarusAlertStatusEnum.CONTACTED, LazarusAlertStatusEnum.RESURRECTED]:
+            if status == LazarusAlertStatusEnum.ACTED:
                 alert_types_stats[alert_type]["acted_upon"] += 1
             elif status == LazarusAlertStatusEnum.DISMISSED:
                 alert_types_stats[alert_type]["dismissed"] += 1
@@ -569,9 +653,7 @@ class LazarusRepository:
             week_alerts = [a for a in all_alerts
                           if week_start <= a.get("created_at", datetime.utcnow()) < week_end]
             week_total = len(week_alerts)
-            week_acted = len([a for a in week_alerts if a.get("status") in [
-                LazarusAlertStatusEnum.CONTACTED, LazarusAlertStatusEnum.RESURRECTED
-            ]])
+            week_acted = len([a for a in week_alerts if a.get("status") == LazarusAlertStatusEnum.ACTED])
 
             week_rate = (week_acted / week_total * 100) if week_total > 0 else 0.0
 

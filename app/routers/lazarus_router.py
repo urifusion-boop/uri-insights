@@ -66,6 +66,7 @@ async def add_focus_contact(
             "focus_id": result.get("focus_id"),
             "slots_used": result.get("slots_used"),
             "slots_available": result.get("slots_available"),
+            "contact": jsonable_encoder(result.get("contact")) if result.get("contact") else None,
         },
     )
 
@@ -84,6 +85,14 @@ async def get_focus_contacts(
     contacts = await LazarusRepository.get_focus_contacts_by_user(
         db, user_id, status, skip, limit
     )
+
+    # Debug: Check if twitter_data is present
+    for c in contacts:
+        if c.twitter_handle:
+            logger.info(f"[GET CONTACTS] {c.name} - twitter_handle: {c.twitter_handle}, twitter_data present: {c.twitter_data is not None}")
+            if c.twitter_data:
+                logger.info(f"[GET CONTACTS] twitter_data keys: {list(c.twitter_data.keys())}")
+                logger.info(f"[GET CONTACTS] followers: {c.twitter_data.get('followers')}")
 
     return UriResponse.custom_response(
         message="Focus contacts retrieved successfully",
@@ -238,6 +247,15 @@ async def enrich_focus_contact(
     # Extract enriched data
     profile_data = enrichment_result.get("profile_data", {})
 
+    # Transform skills, languages, etc. from [{"title": "X"}] to ["X"] format
+    skills = profile_data.get("skills", [])
+    if skills and isinstance(skills, list) and len(skills) > 0 and isinstance(skills[0], dict):
+        skills = [skill.get("title", skill) for skill in skills if skill]
+
+    languages = profile_data.get("languages", [])
+    if languages and isinstance(languages, list) and len(languages) > 0 and isinstance(languages[0], dict):
+        languages = [lang.get("title", lang) for lang in languages if lang]
+
     # Update contact with enriched data
     enrichment_update = {
         "email": enrichment_result.get("email"),
@@ -250,8 +268,8 @@ async def enrich_focus_contact(
         "about": profile_data.get("about"),
         "work_experience": profile_data.get("work_experience"),
         "education": profile_data.get("education"),
-        "skills": profile_data.get("skills"),
-        "languages": profile_data.get("languages"),
+        "skills": skills if skills else None,
+        "languages": languages if languages else None,
         "certifications": profile_data.get("certifications"),
         "enriched_at": datetime.utcnow(),
         "enrichment_status": "completed"
@@ -260,6 +278,9 @@ async def enrich_focus_contact(
     # Update current_company if we got it from enrichment
     if profile_data.get("current_company"):
         enrichment_update["current_company"] = profile_data.get("current_company")
+
+    # Remove None values (like auto-enrichment does)
+    enrichment_update = {k: v for k, v in enrichment_update.items() if v is not None}
 
     updated = await LazarusRepository.update_focus_contact(
         db, focus_id, user_id, enrichment_update
@@ -284,6 +305,388 @@ async def enrich_focus_contact(
             "profile_data": profile_data
         }
     )
+
+
+@router.post("/focus-contacts/{focus_id}/enrich-twitter")
+async def enrich_twitter_profile(
+    focus_id: str,
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Manually trigger Twitter profile enrichment for a focus contact
+    Gets profile data + 5 recent posts for enrichment snapshot
+    """
+    from app.services.TwitterEnrichmentService import TwitterEnrichmentService
+    from datetime import datetime
+
+    # Get focus contact
+    contact = await LazarusRepository.get_focus_contact_by_id(db, focus_id, user_id)
+    if not contact:
+        return UriResponse.custom_response("Focus contact not found", 404)
+
+    # Check if Twitter URL or handle exists
+    twitter_identifier = contact.twitter_url or contact.twitter_handle
+    if not twitter_identifier:
+        return UriResponse.custom_response(
+            message="No Twitter URL or handle found for this contact",
+            error_code=400,
+            success=False
+        )
+
+    logger.info(f"🐦 Enriching Twitter profile: {contact.name} ({twitter_identifier})")
+
+    # Update status to pending
+    await LazarusRepository.update_focus_contact(
+        db, focus_id, user_id, {"enrichment_status": "pending"}
+    )
+
+    # Call Twitter Enrichment Service
+    twitter_service = TwitterEnrichmentService()
+    profile_data = await twitter_service.enrich_profile(
+        twitter_url_or_handle=twitter_identifier,
+        max_posts=5  # Just 5 posts for enrichment
+    )
+
+    if not profile_data:
+        # Mark as failed
+        await LazarusRepository.update_focus_contact(
+            db, focus_id, user_id, {
+                "enrichment_status": "failed",
+                "enriched_at": datetime.utcnow()
+            }
+        )
+        return UriResponse.custom_response(
+            message="Twitter enrichment failed. Please check the Twitter handle/URL.",
+            error_code=500,
+            success=False
+        )
+
+    # Transform to FocusContact format
+    enrichment_data = twitter_service.transform_to_focus_contact_data(profile_data)
+
+    # Update contact with enriched data
+    updated = await LazarusRepository.update_focus_contact(
+        db, focus_id, user_id, enrichment_data
+    )
+
+    if not updated:
+        return UriResponse.custom_response("Failed to save Twitter enrichment data", 500)
+
+    logger.info(f"✅ Successfully enriched Twitter profile: {contact.name}")
+    logger.info(f"   👤 Handle: @{enrichment_data.get('twitter_handle')}")
+    logger.info(f"   👥 Followers: {enrichment_data.get('twitter_data', {}).get('followers', 0):,}")
+
+    return UriResponse.custom_response(
+        message="Twitter profile enriched successfully",
+        error_code=200,
+        success=True,
+        data={
+            "twitter_handle": enrichment_data.get("twitter_handle"),
+            "twitter_data": enrichment_data.get("twitter_data")
+        }
+    )
+
+
+@router.post("/company-monitors/{monitor_id}/enrich")
+async def enrich_company_monitor(
+    monitor_id: str,
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Manually trigger LinkedIn company enrichment for a company monitor
+    Extracts company details, employees, followers, funding, etc.
+    """
+    from app.repository.LazarusRepository import LazarusRepository
+    from app.services.BrightDataCompanyEnrichmentService import BrightDataCompanyEnrichmentService
+    from datetime import datetime
+
+    # Get company monitor
+    monitor = await LazarusRepository.get_company_monitor_by_id(db, monitor_id, user_id)
+    if not monitor:
+        return UriResponse.custom_response("Company monitor not found", 404)
+
+    # Check if LinkedIn URL exists
+    if not monitor.linkedin_url:
+        return UriResponse.custom_response(
+            "No LinkedIn URL found for this company. Please add a LinkedIn company URL first.",
+            error_code=400,
+            success=False
+        )
+
+    logger.info(f"🔧 Enriching company monitor: {monitor.company_name} (LinkedIn: {monitor.linkedin_url})")
+
+    # Update status to pending
+    await LazarusRepository.update_company_monitor(
+        db, monitor_id, user_id, {"enrichment_status": "pending"}
+    )
+
+    # Call Bright Data Company Enrichment Service
+    enrichment_service = BrightDataCompanyEnrichmentService()
+    enrichment_result = await enrichment_service.enrich_company(
+        linkedin_url=monitor.linkedin_url,
+        timeout_seconds=90
+    )
+
+    if not enrichment_result.get("success"):
+        # Mark as failed
+        await LazarusRepository.update_company_monitor(
+            db, monitor_id, user_id, {
+                "enrichment_status": "failed",
+                "enriched_at": datetime.utcnow()
+            }
+        )
+        return UriResponse.custom_response(
+            message=f"Enrichment failed: {enrichment_result.get('error_message', 'Unknown error')}",
+            error_code=500,
+            success=False
+        )
+
+    # Update company monitor with enriched data
+    enrichment_update = {
+        "about": enrichment_result.get("about"),
+        "slogan": enrichment_result.get("slogan"),
+        "description": enrichment_result.get("description"),
+        "specialties": enrichment_result.get("specialties", []),
+        "organization_type": enrichment_result.get("organization_type"),
+        "company_size": enrichment_result.get("company_size"),
+        "industries": enrichment_result.get("industries", []),
+        "founded": enrichment_result.get("founded"),
+        "country_code": enrichment_result.get("country_code"),
+        "headquarters": enrichment_result.get("headquarters"),
+        "followers": enrichment_result.get("followers"),
+        "employees": enrichment_result.get("employees"),
+        "logo": enrichment_result.get("logo"),
+        "company_image": enrichment_result.get("company_image"),
+        "enriched_at": datetime.utcnow(),
+        "enrichment_status": "completed"
+    }
+
+    updated = await LazarusRepository.update_company_monitor(
+        db, monitor_id, user_id, enrichment_update
+    )
+
+    if not updated:
+        return UriResponse.custom_response("Failed to save enrichment data", 500)
+
+    logger.info(f"✅ Successfully enriched company: {monitor.company_name}")
+
+    return UriResponse.custom_response(
+        message="Company enriched successfully",
+        error_code=200,
+        success=True,
+        data={
+            "company_name": enrichment_result.get("name"),
+            "about": enrichment_result.get("about"),
+            "employees": enrichment_result.get("employees"),
+            "followers": enrichment_result.get("followers"),
+            "headquarters": enrichment_result.get("headquarters")
+        }
+    )
+
+
+@router.post("/focus-contacts/{focus_id}/reveal-email")
+async def reveal_focus_contact_email(
+    focus_id: str,
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Reveal email for focus contact using Apollo (charges 1 credit)
+    Similar to individual leads reveal functionality
+    """
+    from app.repository.LazarusRepository import LazarusRepository
+    from app.services.ApolloService import ApolloService
+    from app.services.uri_microservices.UriTaskManagerService import UriTaskManagerService
+    from datetime import datetime
+
+    # Get contact
+    contact = await LazarusRepository.get_focus_contact_by_id(db, focus_id, user_id)
+    if not contact:
+        return UriResponse.custom_response("Contact not found", 404)
+
+    # Check if email already revealed
+    if contact.email and contact.email != "PROCESSING" and contact.email != "UNAVAILABLE":
+        return UriResponse.custom_response(
+            message="Email already revealed",
+            error_code=200,
+            success=True,
+            data={"email": contact.email}
+        )
+
+    # Check if LinkedIn URL exists
+    if not contact.linkedin_url:
+        return UriResponse.custom_response(
+            "No LinkedIn URL found for this contact",
+            error_code=400,
+            success=False
+        )
+
+    # Check credits (1 credit for email)
+    try:
+        credit_check = await UriTaskManagerService.check_payment_balance(
+            user_id=user_id,
+            action_type="ENRICHMENT_EMAIL",
+            payment_mode="CREDITS",
+            quantity=1
+        )
+        if not credit_check.get("responseData", {}).get("hasSufficientBalance"):
+            return UriResponse.custom_response(
+                "Insufficient credits for email reveal",
+                error_code=402,
+                success=False
+            )
+    except Exception as e:
+        logger.error(f"Credit check failed: {str(e)}")
+        return UriResponse.custom_response(f"Credit check failed: {str(e)}", 500, success=False)
+
+    # Call Apollo to reveal email
+    try:
+        temp_lead = {"linkedin_url": contact.linkedin_url, "username": contact.name}
+        apollo_result = await ApolloService.enrich_person(temp_lead, reveal_email=True)
+
+        person_data = apollo_result.get("person", {})
+        email = person_data.get("email")
+
+        if not email:
+            email = "UNAVAILABLE"
+
+        # Update contact with email
+        await LazarusRepository.update_focus_contact(
+            db, focus_id, user_id, {"email": email}
+        )
+
+        # Deduct credits
+        await UriTaskManagerService.deduct_payment(
+            user_id=user_id,
+            action_type="ENRICHMENT_EMAIL",
+            payment_mode="CREDITS",
+            quantity=1,
+            reference=f"lazarus_email_reveal_{focus_id}"
+        )
+
+        logger.info(f"✅ Email revealed for {contact.name}: {email}")
+
+        return UriResponse.custom_response(
+            message="Email revealed successfully",
+            error_code=200,
+            success=True,
+            data={"email": email}
+        )
+
+    except Exception as e:
+        logger.error(f"Apollo email reveal failed: {str(e)}")
+        return UriResponse.custom_response(
+            f"Failed to reveal email: {str(e)}",
+            error_code=500,
+            success=False
+        )
+
+
+@router.post("/focus-contacts/{focus_id}/reveal-phone")
+async def reveal_focus_contact_phone(
+    focus_id: str,
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Reveal phone for focus contact using Apollo (charges 7 credits)
+    Similar to individual leads reveal functionality
+    """
+    from app.repository.LazarusRepository import LazarusRepository
+    from app.services.ApolloService import ApolloService
+    from app.services.uri_microservices.UriTaskManagerService import UriTaskManagerService
+    from app.core.config import settings
+    from datetime import datetime
+
+    # Get contact
+    contact = await LazarusRepository.get_focus_contact_by_id(db, focus_id, user_id)
+    if not contact:
+        return UriResponse.custom_response("Contact not found", 404)
+
+    # Check if phone already revealed
+    if contact.phone and contact.phone != "PROCESSING" and contact.phone != "UNAVAILABLE":
+        return UriResponse.custom_response(
+            message="Phone already revealed",
+            error_code=200,
+            success=True,
+            data={"phone": contact.phone}
+        )
+
+    # Check if LinkedIn URL exists
+    if not contact.linkedin_url:
+        return UriResponse.custom_response(
+            "No LinkedIn URL found for this contact",
+            error_code=400,
+            success=False
+        )
+
+    # Check credits (7 credits for phone)
+    try:
+        credit_check = await UriTaskManagerService.check_payment_balance(
+            user_id=user_id,
+            action_type="ENRICHMENT_PHONE",
+            payment_mode="CREDITS",
+            quantity=1
+        )
+        if not credit_check.get("responseData", {}).get("hasSufficientBalance"):
+            return UriResponse.custom_response(
+                "Insufficient credits for phone reveal (7 credits required)",
+                error_code=402,
+                success=False
+            )
+    except Exception as e:
+        logger.error(f"Credit check failed: {str(e)}")
+        return UriResponse.custom_response(f"Credit check failed: {str(e)}", 500, success=False)
+
+    # Set phone to PROCESSING
+    await LazarusRepository.update_focus_contact(
+        db, focus_id, user_id, {"phone": "PROCESSING"}
+    )
+
+    # Call Apollo to reveal phone (async via webhook)
+    try:
+        webhook_url = f"{settings.URI_GATEWAY_BASE_API_URL}/uri-insights/webhooks/apollo-webhook"
+        temp_lead = {"linkedin_url": contact.linkedin_url, "username": contact.name, "focus_id": focus_id}
+        apollo_result = await ApolloService.enrich_person(temp_lead, reveal_phone=True, webhook_url=webhook_url)
+
+        # Extract apollo_id from result and save it to focus contact for webhook lookup
+        apollo_id = apollo_result.get("person", {}).get("id")
+        if apollo_id:
+            await LazarusRepository.update_focus_contact(
+                db, focus_id, user_id, {"apollo_id": apollo_id}
+            )
+            logger.info(f"✅ Saved apollo_id {apollo_id} to focus contact for webhook")
+
+        # Deduct credits
+        await UriTaskManagerService.deduct_payment(
+            user_id=user_id,
+            action_type="ENRICHMENT_PHONE",
+            payment_mode="CREDITS",
+            quantity=1,
+            reference=f"lazarus_phone_reveal_{focus_id}"
+        )
+
+        logger.info(f"✅ Phone reveal request sent for {contact.name} (awaiting webhook)")
+
+        return UriResponse.custom_response(
+            message="Phone reveal in progress (will be available shortly)",
+            error_code=200,
+            success=True,
+            data={"phone": "PROCESSING"}
+        )
+
+    except Exception as e:
+        logger.error(f"Apollo phone reveal failed: {str(e)}")
+        await LazarusRepository.update_focus_contact(
+            db, focus_id, user_id, {"phone": None}
+        )
+        return UriResponse.custom_response(
+            f"Failed to reveal phone: {str(e)}",
+            error_code=500,
+            success=False
+        )
 
 
 @router.get("/focus-contacts/{focus_id}/detail")
@@ -751,6 +1154,67 @@ async def get_user_slots(
     )
 
 
+@router.get("/notification-preferences")
+async def get_notification_preferences(
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Get user's email notification preferences for Lazarus alerts
+    Phase 2: Notification System
+    """
+    from app.repository.LazarusRepository import LazarusRepository
+
+    slots = await LazarusRepository.get_or_create_slots(db, user_id)
+
+    return UriResponse.custom_response(
+        message="Notification preferences retrieved successfully",
+        error_code=200,
+        success=True,
+        data={
+            "email_notifications_enabled": slots.email_notifications_enabled,
+            "notification_email": slots.notification_email
+        }
+    )
+
+
+@router.put("/notification-preferences")
+async def update_notification_preferences(
+    user_id: str = Query(...),
+    email_notifications_enabled: bool = Query(...),
+    notification_email: Optional[str] = Query(None),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Update user's email notification preferences for Lazarus alerts
+    Phase 2: Notification System
+    """
+    from app.repository.LazarusRepository import LazarusRepository
+
+    # Update slots with new preferences
+    update_data = {"email_notifications_enabled": email_notifications_enabled}
+    if notification_email is not None:
+        update_data["notification_email"] = notification_email
+
+    await db["lazarus_slots"].update_one(
+        {"user_id": user_id},
+        {"$set": update_data},
+        upsert=True
+    )
+
+    logger.info(f"📧 Notification preferences updated for user {user_id}: enabled={email_notifications_enabled}, email={notification_email}")
+
+    return UriResponse.custom_response(
+        message="Notification preferences updated successfully",
+        error_code=200,
+        success=True,
+        data={
+            "email_notifications_enabled": email_notifications_enabled,
+            "notification_email": notification_email
+        }
+    )
+
+
 @router.get("/metrics")
 async def get_user_metrics(
     user_id: str = Query(...),
@@ -879,6 +1343,34 @@ async def scan_single_focus_contact(
     db: AsyncIOMotorDatabase = Depends(get_db_dependency),
 ):
     """Scan a single specific focus contact immediately"""
+    # Check credits for Lazarus scan (10 credits per scan)
+    from app.services.uri_microservices.UriTaskManagerService import UriTaskManagerService
+
+    try:
+        credit_check = await UriTaskManagerService.check_payment_balance(
+            user_id=user_id,
+            action_type="LAZARUS_SCAN",
+            payment_mode="CREDITS",
+            quantity=1
+        )
+
+        if credit_check.get("status") and credit_check.get("responseData"):
+            balance_data = credit_check["responseData"]
+            if not balance_data.get("hasSufficientBalance"):
+                return UriResponse.custom_response(
+                    message="Insufficient credits for Lazarus scan. Requires 10 credits.",
+                    error_code=403,
+                    success=False,
+                    data={
+                        "required_credits": balance_data.get("requiredAmount", 10),
+                        "available_credits": balance_data.get("availableBalance", 0),
+                        "limit_exceeded": True
+                    }
+                )
+    except Exception as e:
+        print(f"⚠️ Credit check failed: {str(e)}")
+        # Continue anyway if credit check fails
+
     result = await LazarusMonitoringService.scan_single_focus_contact(db, user_id, focus_id)
 
     if not result.get("success"):
@@ -889,11 +1381,123 @@ async def scan_single_focus_contact(
             data=result,
         )
 
+    # Deduct credits after successful scan (10 credits)
+    try:
+        await UriTaskManagerService.deduct_payment(
+            user_id=user_id,
+            action_type="LAZARUS_SCAN",
+            payment_mode="CREDITS",
+            quantity=1,
+            reference=f"lazarus_focus_scan_{focus_id}"
+        )
+        print(f"💳 Deducted 10 credits for Lazarus scan (user: {user_id}, focus: {focus_id})")
+    except Exception as credit_error:
+        print(f"⚠️ Failed to deduct credits: {str(credit_error)}")
+
     return UriResponse.custom_response(
         message="Focus contact scanned successfully",
         error_code=200,
         success=True,
         data=result,
+    )
+
+
+@router.post("/scan/twitter-activity")
+async def scan_twitter_activity(
+    user_id: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Scan all Twitter focus contacts for new activity
+    Detects new posts since last scan and triggers resurrection alerts
+    """
+    from app.services.TwitterEnrichmentService import TwitterEnrichmentService
+    from datetime import datetime
+
+    # Get all focus contacts with Twitter data
+    contacts = await db["focus_contacts"].find({
+        "user_id": user_id,
+        "twitter_id": {"$exists": True, "$ne": None},
+        "monitoring_status": "ACTIVE"
+    }).to_list(length=None)
+
+    if not contacts:
+        return UriResponse.custom_response(
+            message="No Twitter contacts found to scan",
+            error_code=200,
+            success=True,
+            data={"scanned": 0, "active": 0}
+        )
+
+    logger.info(f"🔍 Scanning {len(contacts)} Twitter contacts for activity...")
+
+    # Build batch request for all contacts
+    twitter_urls = [contact.get("twitter_url") or f"https://x.com/{contact.get('twitter_handle')}" for contact in contacts]
+
+    # Call Twitter Enrichment Service (batch)
+    twitter_service = TwitterEnrichmentService()
+    profiles = await twitter_service.enrich_multiple_profiles(
+        twitter_urls=twitter_urls,
+        max_posts=20  # More posts for activity detection
+    )
+
+    # Process each profile and detect new activity
+    active_contacts = []
+
+    for profile, contact in zip(profiles, contacts):
+        if not profile:
+            continue
+
+        # Get last known post ID from enrichment snapshot
+        last_known_post_id = (
+            contact.get("twitter_data", {})
+            .get("enrichment_snapshot", {})
+            .get("last_post_id")
+        )
+
+        # Detect new activity
+        activity = twitter_service.detect_new_activity(profile, last_known_post_id)
+
+        if activity["has_new_activity"]:
+            # CONTACT IS ACTIVE! New posts detected
+            active_contacts.append({
+                "contact_id": contact["focus_id"],
+                "contact_name": contact["name"],
+                "twitter_handle": contact.get("twitter_handle"),
+                "new_posts_count": activity["new_posts_count"],
+                "latest_post": activity["latest_post"],
+                "activity_detected_at": datetime.utcnow()
+            })
+
+            # Update contact with new activity
+            posts = profile.get("posts", [])
+            await db["focus_contacts"].update_one(
+                {"focus_id": contact["focus_id"]},
+                {
+                    "$set": {
+                        "twitter_data.enrichment_snapshot.last_post_id": posts[0]["post_id"] if posts else None,
+                        "twitter_data.enrichment_snapshot.posts": posts[:5],
+                        "twitter_data.last_scanned": datetime.utcnow(),
+                        "twitter_data.last_activity_detected": datetime.utcnow(),
+                        "twitter_data.new_posts_since_last_scan": activity["new_posts_count"],
+                        "last_scan_date": datetime.utcnow()
+                    }
+                }
+            )
+
+            logger.info(f"🔥 ACTIVITY DETECTED: {contact['name']} (@{contact.get('twitter_handle')}) - {activity['new_posts_count']} new posts")
+
+    logger.info(f"✅ Twitter scan completed: {len(contacts)} scanned, {len(active_contacts)} active")
+
+    return UriResponse.custom_response(
+        message=f"Twitter activity scan completed",
+        error_code=200,
+        success=True,
+        data={
+            "scanned": len(contacts),
+            "active": len(active_contacts),
+            "active_contacts": active_contacts
+        }
     )
 
 
@@ -966,6 +1570,34 @@ async def trigger_auto_detection_scan(
     Manually trigger auto-detection scan for dead leads
     Scans user's leads based on their configured rules
     """
+    # Check credits for Lazarus auto-detection scan (10 credits per scan)
+    from app.services.uri_microservices.UriTaskManagerService import UriTaskManagerService
+
+    try:
+        credit_check = await UriTaskManagerService.check_payment_balance(
+            user_id=user_id,
+            action_type="LAZARUS_SCAN",
+            payment_mode="CREDITS",
+            quantity=1
+        )
+
+        if credit_check.get("status") and credit_check.get("responseData"):
+            balance_data = credit_check["responseData"]
+            if not balance_data.get("hasSufficientBalance"):
+                return UriResponse.custom_response(
+                    message="Insufficient credits for Lazarus auto-detection scan. Requires 10 credits.",
+                    error_code=403,
+                    success=False,
+                    data={
+                        "required_credits": balance_data.get("requiredAmount", 10),
+                        "available_credits": balance_data.get("availableBalance", 0),
+                        "limit_exceeded": True
+                    }
+                )
+    except Exception as e:
+        print(f"⚠️ Credit check failed: {str(e)}")
+        # Continue anyway if credit check fails
+
     from app.services.AutoDeadLeadDetectionService import AutoDeadLeadDetectionService
 
     # Get user's detection rules
@@ -984,6 +1616,19 @@ async def trigger_auto_detection_scan(
 
     # Save to history
     await AutoDeadLeadDetectionService.save_scan_result(db, user_id, scan_result)
+
+    # Deduct credits after successful scan (10 credits)
+    try:
+        await UriTaskManagerService.deduct_payment(
+            user_id=user_id,
+            action_type="LAZARUS_SCAN",
+            payment_mode="CREDITS",
+            quantity=1,
+            reference=f"lazarus_auto_scan_{user_id}"
+        )
+        print(f"💳 Deducted 10 credits for Lazarus auto-detection scan (user: {user_id})")
+    except Exception as credit_error:
+        print(f"⚠️ Failed to deduct credits: {str(credit_error)}")
 
     return UriResponse.custom_response(
         "Auto-detection scan completed successfully",
@@ -1297,6 +1942,109 @@ async def get_scanned_content(
         traceback.print_exc()
         return UriResponse.custom_response(
             message=f"Failed to fetch scanned content: {str(e)}",
+            error_code=500,
+            success=False
+        )
+
+
+@router.get("/rejected-posts")
+async def get_rejected_posts(
+    user_id: str = Query(...),
+    skip: int = Query(0),
+    limit: int = Query(50),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Get posts that were scanned but didn't meet alert criteria
+
+    Returns scan history where signal_detected=False with AI rejection reasons
+    Shows users why certain posts didn't trigger alerts (e.g., promotional content,
+    no pain points, doesn't match keywords, confidence too low)
+
+    Returns:
+    - Rejected scans with human-friendly reasons from AI
+    - Grouped by contact for easy review
+    """
+    from datetime import datetime
+
+    try:
+        # Debug: Check what's in scan_history
+        all_scans = await db["scan_history"].find({
+            "user_id": user_id
+        }).sort("scan_date", -1).limit(5).to_list(5)
+
+        print(f"🔍 DEBUG: Total scans for user: {len(all_scans)}")
+        for scan in all_scans:
+            print(f"🔍 DEBUG:   Scan {scan.get('_id')}: signal_detected={scan.get('signal_detected')}, has_rejection_reason={bool(scan.get('rejection_reason'))}, rejection_reason={scan.get('rejection_reason')[:50] if scan.get('rejection_reason') else 'None'}...")
+
+        # Get scan history where NO signal was detected
+        rejected_scans = await db["scan_history"].find({
+            "user_id": user_id,
+            "signal_detected": False,
+            "rejection_reason": {"$exists": True, "$ne": None}
+        }).sort("scan_date", -1).to_list(None)
+
+        print(f"🔍 DEBUG Rejected Posts: Found {len(rejected_scans)} rejected scans for user {user_id}")
+
+        # Build rejected posts data
+        rejected_groups = []
+
+        for scan in rejected_scans:
+            # Build scanned posts for this scan
+            scanned_posts = []
+
+            for post in scan.get("scanned_posts", []):
+                scanned_posts.append({
+                    "post_id": f"{scan.get('_id')}_{post.get('post_index')}",
+                    "post_url": post.get("post_url"),
+                    "post_text": post.get("post_text"),
+                    "post_platform": post.get("post_platform"),
+                    "post_author": post.get("post_author"),
+                    "post_created_at": post.get("post_created_at"),
+                    "post_likes": post.get("post_likes", 0),
+                    "post_comments": post.get("post_comments", 0),
+                    "post_index": post.get("post_index"),
+                })
+
+            # Build rejected scan group
+            rejected_group = {
+                "scan_id": str(scan.get("_id")),
+                "source_type": scan.get("source_type"),
+                "source_id": scan.get("source_id"),
+                "source_name": scan.get("source_name"),
+                "scan_date": scan.get("scan_date"),
+                "platform": scan.get("platform"),
+                "posts_scanned_count": scan.get("posts_scanned_count", 0),
+                "scanned_posts": scanned_posts,
+                "rejection_reason": scan.get("rejection_reason"),
+                "confidence": scan.get("confidence", 0.0),
+            }
+
+            rejected_groups.append(rejected_group)
+
+        # Pagination
+        total_count = len(rejected_groups)
+        paginated_rejected_groups = rejected_groups[skip : skip + limit]
+
+        return UriResponse.custom_response(
+            message="Rejected posts retrieved successfully",
+            error_code=200,
+            success=True,
+            data={
+                "rejected_scans": paginated_rejected_groups,
+                "total_count": total_count,
+                "skip": skip,
+                "limit": limit,
+                "total_posts": sum(sg.get("posts_scanned_count", 0) for sg in paginated_rejected_groups),
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"❌ Error fetching rejected posts: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return UriResponse.custom_response(
+            message=f"Failed to fetch rejected posts: {str(e)}",
             error_code=500,
             success=False
         )

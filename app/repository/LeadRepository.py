@@ -142,19 +142,24 @@ class LeadRepository:
 
     @staticmethod
     async def update_lead(
-        db: AsyncIOMotorDatabase, lead_id: str, updates: LeadUpdate
+        db: AsyncIOMotorDatabase, lead_id: str, updates: LeadUpdate, user_id: Optional[str] = None
     ) -> Dict[str, Any]:
         updates_data = updates.dict(exclude_unset=True)
         updates_data["last_updated"] = DateHelper.utc_now_iso()
 
+        # Build query with user_id for security if provided
+        query = {"lead_id": lead_id}
+        if user_id:
+            query["assigned_to"] = user_id
+
         result = await db["leads"].update_one(
-            {"lead_id": lead_id}, {"$set": updates_data}
+            query, {"$set": updates_data}
         )
 
         if result.matched_count == 0:
             return UriResponse.get_single_data_response("lead", None)
 
-        updated_lead = await db["leads"].find_one({"lead_id": lead_id})
+        updated_lead = await db["leads"].find_one(query)
         return UriResponse.update_response("lead", Lead(**updated_lead).dict())
 
     @staticmethod
@@ -181,8 +186,13 @@ class LeadRepository:
         return UriResponse.update_response("leads", updated_leads)
 
     @staticmethod
-    async def get_lead_by_id(db: AsyncIOMotorDatabase, lead_id: str) -> Dict[str, Any]:
-        lead = await db["leads"].find_one({"lead_id": lead_id})
+    async def get_lead_by_id(db: AsyncIOMotorDatabase, lead_id: str, user_id: Optional[str] = None) -> Dict[str, Any]:
+        # Build query with user_id for security if provided
+        query = {"lead_id": lead_id}
+        if user_id:
+            query["assigned_to"] = user_id
+
+        lead = await db["leads"].find_one(query)
         return UriResponse.get_single_data_response(
             "lead", Lead(**lead).dict() if lead else None
         )
@@ -197,6 +207,11 @@ class LeadRepository:
     ) -> Dict[str, Any]:
         query: Dict[str, Any] = filters.model_dump(exclude_none=True)
 
+        # 🔍 DEBUG: Log the query being built
+        print(f"\n🔍 [GET_LEADS_BY_FILTERS] Building query from filters:")
+        print(f"   Filters: {filters.model_dump()}")
+        print(f"   Query (before date filter): {query}")
+
         if date_filter:
             start_date, end_date = DateHelper.get_date_range(date_filter)
             query["created_date"] = {
@@ -210,8 +225,11 @@ class LeadRepository:
                 {"is_pre_stored": {"$exists": False}},
             ]
 
+        print(f"   Final query: {query}")
+
         # Count total leads matching the query
         total_leads = await db["leads"].count_documents(query)
+        print(f"   Total leads found: {total_leads}")
 
         # Use aggregation pipeline to join with lead_form_snapshots and populate form_title
         pipeline = [
@@ -246,7 +264,16 @@ class LeadRepository:
 
         leads = await db["leads"].aggregate(pipeline).to_list(length=limit)
 
+        print(f"   Leads retrieved from aggregation: {len(leads)}")
+        if len(leads) > 0:
+            print(f"   First lead sample: {leads[0].get('lead_id', 'no-id')} - {leads[0].get('company_name', 'no-name')}")
+        else:
+            print(f"   ⚠️ No leads returned from aggregation pipeline!")
+
         leads_list = [Lead(**lead).dict() for lead in leads]
+        print(f"   Leads after parsing: {len(leads_list)}")
+        print(f"   📤 Returning response with {len(leads_list)} leads\n")
+
         return UriResponse.get_paged_data_response(
             "leads", leads_list, total_leads, skip + 1, limit
         )

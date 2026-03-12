@@ -91,6 +91,7 @@ from app.services.IntentAnalysisService import (
 )
 from app.domain.enums.lead_enum import IntentCategoryEnum, SentimentTypeEnum
 from app.services.ConversationalLeadJobService import LeadFilter
+from app.services.GoogleMapsService import GoogleMapsService
 
 class LeadService:
     PLATFORM_SCRAPERS: dict[str, LeadDataScraper] = {
@@ -1206,9 +1207,31 @@ class LeadService:
                 lead_form=lead_form, db=db
             )
         elif lead_form_type == LeadFormTypeEnum.ORGANIZATION.value:
-            leads_to_create = await ApolloService.handle_organization_leads_gen(
+            # Check if Location Intelligence is enabled
+            print(f"🔍 [ORG LEADS GENERATION] Checking Location Intelligence for form: {lead_form.get('lead_form_id')}")
+            print(f"🔍 [ORG LEADS GENERATION] Location Intelligence fields in lead_form:")
+            print(f"   - enable_location_intelligence: {lead_form.get('enable_location_intelligence')}")
+            print(f"   - location_zone_center_lat: {lead_form.get('location_zone_center_lat')}")
+            print(f"   - location_zone_center_lng: {lead_form.get('location_zone_center_lng')}")
+            print(f"   - location_zone_radius_km: {lead_form.get('location_zone_radius_km')}")
+            print(f"   - location_zone_name: {lead_form.get('location_zone_name')}")
+            print(f"   - min_trust_score: {lead_form.get('min_trust_score')}")
+
+            # Always use Location Intelligence flow (enriches Apollo with Google Maps)
+            # If Location Intelligence enabled → Use geographic targeting for fallback
+            # If Location Intelligence disabled → Just enrich Apollo leads with location/trust score
+            if lead_form.get('enable_location_intelligence'):
+                print("[ORG LEADS] ✅ 📍 Location Intelligence ENABLED - using geographic targeting")
+            else:
+                print("[ORG LEADS] Location Intelligence DISABLED - but will still enrich Apollo leads with Google Maps location/trust score")
+
+            leads_to_create = await LeadService._generate_location_intelligent_org_leads(
                 lead_form=lead_form, db=db
             )
+        elif lead_form_type == LeadFormTypeEnum.GOOGLE_MAPS.value:
+            # Google Maps leads are handled separately - trigger async generation
+            await LeadService.generate_google_maps_leads(lead_form=lead_form, db=db)
+            return  # Return early since Google Maps handles everything internally
         else:
             raise ValueError(
                 f"Invalid lead form type in lead form {lead_form.get('lead_form_id')}."
@@ -1242,20 +1265,494 @@ class LeadService:
             )
             print("No new leads created, duplicates found.")
             return
-        print(f"Leads created: {leads_count}")
+        print(f"✅ Leads created: {leads_count}")
 
         # Update user feature limit
-        await UriTaskManagerService.update_user_feature_limit_specific_limit(
+        print(f"🔄 [LeadService] Updating feature limit - User: {lead_form.get('user_id', '')}, Previous count: {current_count}, New leads: {leads_count}, Total to set: {leads_count + current_count}")
+        update_result = await UriTaskManagerService.update_user_feature_limit_specific_limit(
             user_id=lead_form.get("user_id", ""),
             url_path=EndpointsEnum.LEAD_GEN.value,
             count=leads_count + current_count,
         )
+        if update_result and update_result.get("status"):
+            print(f"✅ [LeadService] Feature limit updated successfully: {update_result}")
+        else:
+            print(f"❌ [LeadService] Feature limit update FAILED: {update_result}")
 
         # Handle notifications
         await LeadService.send_successful_apollo_leads_gen_notification(
             lead_form, leads_count
         )
         return response
+
+    @staticmethod
+    @LeadHelper.enforce_feature_limit(
+        lambda lead_form: lead_form.get("user_id", ""), EndpointsEnum.LEAD_GEN.value
+    )
+    async def generate_google_maps_leads(lead_form: dict, db: AsyncIOMotorDatabase):
+        """
+        Generate leads from Google Maps/Places API
+
+        Supports both Text Search (natural language) and Nearby Search (precise location)
+
+        Args:
+            lead_form: Lead form configuration with Maps search parameters
+            db: Database connection
+
+        Returns:
+            Response with created leads
+        """
+        print(f"\n{'='*80}")
+        print(f"[GOOGLE MAPS LEADS] Starting lead generation")
+        print(f"[GOOGLE MAPS LEADS] Form: {lead_form.get('form_title', 'Unknown')}")
+        print(f"[GOOGLE MAPS LEADS] User: {lead_form.get('user_id', 'Unknown')}")
+        print(f"{'='*80}\n")
+
+        user_id = lead_form.get("user_id", "")
+        if not user_id:
+            raise Exception(
+                f"No user_id provided for Google Maps leads gen for lead form {lead_form}"
+            )
+
+        # Get current feature limit
+        limit_available, current_count = (
+            await UriTaskManagerService.get_elapsed_leads_limit_and_count(user_id)
+        )
+
+        # Extract search parameters from lead form
+        search_params = {
+            "query": lead_form.get("maps_search_query"),
+            "location": lead_form.get("maps_location"),
+            "latitude": lead_form.get("maps_latitude"),
+            "longitude": lead_form.get("maps_longitude"),
+            "radius_km": lead_form.get("maps_radius_km", 5.0),
+            "business_types": lead_form.get("maps_business_types"),
+            "min_rating": lead_form.get("maps_min_rating"),
+            "exclude_closed": lead_form.get("maps_exclude_closed", True),
+            "max_results": lead_form.get("maps_max_results", 20),
+            "search_mode": lead_form.get("maps_search_mode", "auto")
+        }
+
+        print(f"[GOOGLE MAPS] Search parameters: {search_params}")
+
+        # Call Google Maps Service
+        try:
+            businesses = await GoogleMapsService.search_businesses(**search_params)
+            print(f"[GOOGLE MAPS] Found {len(businesses)} businesses from Google")
+        except Exception as e:
+            print(f"[GOOGLE MAPS] ❌ Search failed: {e}")
+            raise ValueError(f"Google Maps search failed: {str(e)}")
+
+        if not businesses:
+            print("[GOOGLE MAPS] No businesses found with search criteria")
+            return UriResponse.custom_response(
+                message="No businesses found matching your search criteria",
+                data={"businesses_found": 0},
+                error_code=200,
+                success=True
+            )
+
+        # Convert businesses to Lead objects
+        leads_to_create = []
+        for business in businesses:
+            # Merge business data with lead form metadata
+            lead_data = {
+                **business,
+                "assigned_to": user_id,
+                "lead_type": LeadFormTypeEnum.GOOGLE_MAPS,
+                "lead_form_snapshot_id": lead_form.get("lead_form_id"),
+                "lead_status": LeadStatusEnum.NEW,
+                "interest_level": LeadInterestLevelEnum.MEDIUM,
+                "lead_source": LeadSourceEnum.GOOGLE_MAPS
+            }
+
+            try:
+                leads_to_create.append(LeadCreate(**lead_data))
+            except Exception as e:
+                print(f"⚠️ Skipping invalid business: {business.get('company_name')} - {e}")
+
+        if not leads_to_create:
+            print("[GOOGLE MAPS] No valid leads to create after validation")
+            return UriResponse.custom_response(
+                message="No valid businesses found",
+                data={"businesses_found": len(businesses), "valid_leads": 0},
+                error_code=200,
+                success=True
+            )
+
+        print(f"[GOOGLE MAPS] Creating {len(leads_to_create)} leads...")
+
+        # Apply feature limit
+        leads_to_save = (
+            leads_to_create[:limit_available]
+            if limit_available
+            else leads_to_create
+        )
+
+        # Save to database
+        response = await LeadRepository.multiple_create_leads(
+            db=db,
+            leads=leads_to_save,
+        )
+
+        leads_count = len(response.get("responseData", {}).get("leads", []))
+
+        if not leads_count:
+            print("[GOOGLE MAPS] No new leads created (all duplicates)")
+            company_names = [lead.company_name for lead in leads_to_create[:5] if lead.company_name]
+            await LeadService.send_duplicate_maps_leads_notification(lead_form, company_names)
+            return response
+
+        print(f"✅ [GOOGLE MAPS] Created {leads_count} leads")
+
+        # Log details of created leads (like Individual leads does)
+        created_leads = response.get("responseData", {}).get("leads", [])
+        for i, lead in enumerate(created_leads[:5], 1):  # Show first 5
+            print(f"   {i}. {lead.get('company_name', 'Unknown')} - {lead.get('location', 'No location')}")
+        if leads_count > 5:
+            print(f"   ... and {leads_count - 5} more")
+
+        # Update feature limit
+        print(f"🔄 [GOOGLE MAPS] Updating feature limit - User: {user_id}, Previous: {current_count}, New: {leads_count}, Total: {leads_count + current_count}")
+        update_result = await UriTaskManagerService.update_user_feature_limit_specific_limit(
+            user_id=user_id,
+            url_path=EndpointsEnum.LEAD_GEN.value,
+            count=leads_count + current_count,
+        )
+
+        if update_result and update_result.get("status"):
+            print(f"✅ [GOOGLE MAPS] Feature limit updated successfully")
+        else:
+            print(f"❌ [GOOGLE MAPS] Feature limit update FAILED: {update_result}")
+
+        # Send success notification
+        await LeadService.send_successful_maps_leads_notification(lead_form, leads_count)
+
+        print(f"\n[GOOGLE MAPS] ✅ COMPLETED")
+        print(f"{'='*80}\n")
+
+        return response
+
+    @staticmethod
+    def _extract_city_country(formatted_address: Optional[str]) -> Optional[str]:
+        """
+        Extract city and country from Google Maps formatted address.
+
+        Example: "12b Olubunmi Owa St, Lekki Phase I, Lagos 106104, Nigeria" → "Lagos, Nigeria"
+
+        Args:
+            formatted_address: Full address from Google Maps
+
+        Returns:
+            "City, Country" string or None if cannot parse
+        """
+        if not formatted_address:
+            return None
+
+        parts = [p.strip() for p in formatted_address.split(',')]
+
+        if len(parts) >= 3:
+            # Get second-to-last part (usually city with postal code) and last part (country)
+            city_part = parts[-2].split()[0]  # Remove postal code if present
+            country = parts[-1]
+            return f"{city_part}, {country}"
+        elif len(parts) == 2:
+            return formatted_address  # Already in "City, Country" format
+        else:
+            return formatted_address  # Return as-is if cannot parse
+
+    @staticmethod
+    async def _generate_location_intelligent_org_leads(
+        lead_form: dict, db: AsyncIOMotorDatabase
+    ) -> List[LeadCreate]:
+        """
+        Generate organization leads using Location Intelligence (Apollo-first with Google Maps enrichment)
+
+        CORRECT FLOW:
+        1. Try Apollo with user's filters
+        2. If Apollo returns results → Enrich each with location & trust score from Google Maps
+        3. If Apollo returns 0 results → Fallback to Google Maps search
+           - If Location Intelligence enabled (has target zone) → Use nearby search
+           - If Location Intelligence disabled → Use text search with organization_locations
+
+        Returns leads with trust_score (Google rating * 20) and location (city, country).
+        """
+        from app.services.GoogleMapsService import GoogleMapsService
+        from app.services.ApolloService import ApolloService
+
+        print(f"\n{'='*80}")
+        print(f"[LOCATION INTELLIGENCE] Apollo-first with Google Maps enrichment")
+        print(f"[LOCATION INTELLIGENCE] Target Zone: {lead_form.get('location_zone_name', 'Not set')}")
+        print(f"[LOCATION INTELLIGENCE] Radius: {lead_form.get('location_zone_radius_km', 0)}km")
+        print(f"{'='*80}\n")
+
+        # Step 1: Try Apollo first
+        print(f"[LOCATION INTELLIGENCE] 🔍 Step 1: Trying Apollo...")
+        apollo_leads = await ApolloService.handle_organization_leads_gen(lead_form=lead_form, db=db)
+
+        if apollo_leads and len(apollo_leads) > 0:
+            print(f"[LOCATION INTELLIGENCE] ✅ Apollo SUCCESS: Found {len(apollo_leads)} companies")
+            print(f"[LOCATION INTELLIGENCE] 🗺️ Enriching each with Google Maps location & trust score...")
+
+            # Enrich Apollo leads with Google Maps data
+            enriched_leads = []
+            locations_list = lead_form.get("organization_locations", [])
+            location_hint = locations_list[0] if locations_list else None
+
+            for apollo_lead in apollo_leads:
+                lead_dict = apollo_lead.model_dump() if hasattr(apollo_lead, 'model_dump') else apollo_lead.dict()
+                company_name = lead_dict.get('company_name')
+
+                if not company_name:
+                    enriched_leads.append(apollo_lead)
+                    continue
+
+                # Search Google Maps for this company to get location & trust score
+                try:
+                    search_query = f"{company_name} {location_hint}" if location_hint else company_name
+                    print(f"   🔍 Searching Google Maps for: {search_query}")
+
+                    # FIX: Use coordinates from Location Intelligence if available
+                    has_coordinates = (
+                        lead_form.get("location_zone_center_lat") and
+                        lead_form.get("location_zone_center_lng") and
+                        lead_form.get("location_zone_radius_km")
+                    )
+
+                    if has_coordinates:
+                        # Use coordinate-based search for more precise results
+                        google_results = await GoogleMapsService.search_businesses(
+                            query=search_query,
+                            latitude=lead_form["location_zone_center_lat"],
+                            longitude=lead_form["location_zone_center_lng"],
+                            radius_km=lead_form["location_zone_radius_km"],
+                            max_results=1,
+                            search_mode="auto"  # Will use nearby search with coordinates
+                        )
+                        print(f"      📍 Using coordinate-based search within {lead_form['location_zone_radius_km']}km radius")
+                    else:
+                        # Fallback to text search if no coordinates
+                        google_results = await GoogleMapsService.search_businesses(
+                            query=search_query,
+                            max_results=1,
+                            search_mode="text"
+                        )
+
+                    if google_results and len(google_results) > 0:
+                        google_data = google_results[0]
+
+                        # 🔒 VERIFY: Check if Google Maps result matches Apollo company
+                        is_verified = False
+                        verification_method = None
+
+                        # Method 1: Domain verification (most reliable)
+                        apollo_domain = lead_dict.get('primary_domain') or lead_dict.get('website_url', '').replace('http://', '').replace('https://', '').replace('www.', '').split('/')[0]
+                        google_website = google_data.get('website', '').replace('http://', '').replace('https://', '').replace('www.', '').split('/')[0]
+
+                        if apollo_domain and google_website and apollo_domain.lower() == google_website.lower():
+                            is_verified = True
+                            verification_method = "domain_match"
+
+                        # Method 2: Name similarity check (if domain not available)
+                        if not is_verified:
+                            google_name = google_data.get('name', '').lower()
+                            apollo_name = company_name.lower()
+
+                            # Check if names are very similar (exact match or one contains the other)
+                            if google_name == apollo_name or google_name in apollo_name or apollo_name in google_name:
+                                # Additional check: Must be in same country if location hint provided
+                                if location_hint:
+                                    google_address = google_data.get('formatted_address', '').lower()
+                                    if location_hint.lower() in google_address:
+                                        is_verified = True
+                                        verification_method = "name_similarity + location_match"
+                                else:
+                                    is_verified = True
+                                    verification_method = "name_similarity"
+
+                        # Only enrich if verified
+                        if is_verified:
+                            # Calculate trust score
+                            google_rating = google_data.get('google_rating')
+                            trust_score = round(google_rating * 20, 1) if google_rating else None
+
+                            # Extract city, country
+                            location = LeadService._extract_city_country(google_data.get('formatted_address'))
+
+                            # Enrich Apollo data with ONLY location and trust score
+                            lead_dict.update({
+                                "location": location,
+                                "trust_score": trust_score,
+                                "google_rating": google_rating,
+                                "google_reviews_count": google_data.get('google_reviews_count'),
+                                "formatted_address": google_data.get('formatted_address'),
+                                "latitude": google_data.get('latitude'),
+                                "longitude": google_data.get('longitude'),
+                            })
+                            print(f"      ✅ VERIFIED ({verification_method}) & Enriched: Location={location}, Trust Score={trust_score}/100")
+                        else:
+                            print(f"      ⚠️ Google Maps result found but NOT VERIFIED (possible wrong match - skipping enrichment)")
+                            print(f"         Apollo: {company_name} | Google: {google_data.get('name')}")
+                    else:
+                        print(f"      ⚠️ No Google Maps data found")
+
+                except Exception as e:
+                    print(f"      ⚠️ Google Maps enrichment failed: {e}")
+
+                # Add enriched lead
+                try:
+                    enriched_leads.append(LeadCreate(**lead_dict))
+                except Exception as e:
+                    print(f"      ❌ Failed to create lead: {e}")
+
+            print(f"\n[LOCATION INTELLIGENCE] ✅ Enriched {len(enriched_leads)} Apollo leads with Google Maps data")
+            print(f"{'='*80}\n")
+            return enriched_leads
+
+        # Step 2: Apollo returned 0 results - fallback to Google Maps
+        print(f"[LOCATION INTELLIGENCE] ⚠️ Apollo returned 0 results")
+        print(f"[LOCATION INTELLIGENCE] 🗺️ Step 2: Falling back to Google Maps...")
+
+        # Check if Location Intelligence is enabled (has target zone)
+        has_target_zone = (
+            lead_form.get("enable_location_intelligence") and
+            lead_form.get("location_zone_center_lat") and
+            lead_form.get("location_zone_center_lng") and
+            lead_form.get("location_zone_radius_km")
+        )
+
+        # Get search keywords - use the correct field from Apollo organization search
+        keywords_list = lead_form.get("q_organization_keyword_tags", [])
+        keywords = " ".join(keywords_list) if keywords_list else "business"
+
+        google_results = []
+        try:
+            if has_target_zone:
+                # Use nearby search with coordinates
+                print(f"[LOCATION INTELLIGENCE] Using NEARBY search (coordinate-based)")
+                print(f"   Lat: {lead_form['location_zone_center_lat']}, Lng: {lead_form['location_zone_center_lng']}")
+                print(f"   Radius: {lead_form['location_zone_radius_km']}km")
+
+                google_results = await GoogleMapsService.search_businesses(
+                    query=keywords,
+                    latitude=lead_form["location_zone_center_lat"],
+                    longitude=lead_form["location_zone_center_lng"],
+                    radius_km=lead_form["location_zone_radius_km"],
+                    min_rating=lead_form.get("min_trust_score", 0) / 20 if lead_form.get("min_trust_score") else None,  # Convert trust score back to 1-5 rating
+                    exclude_closed=True,
+                    max_results=20,
+                    search_mode="nearby"
+                )
+            else:
+                # Use text search with location name
+                locations_list = lead_form.get("organization_locations", [])
+                location_name = locations_list[0] if locations_list else "Nigeria"
+
+                # Build a more specific search query combining keywords and location
+                # This helps Google Maps return more relevant results
+                specific_query = f"{keywords} in {location_name}"
+
+                print(f"[LOCATION INTELLIGENCE] Using TEXT search (location-based)")
+                print(f"   Location: {location_name}")
+                print(f"   Keywords: {keywords}")
+                print(f"   Specific Query: {specific_query}")
+
+                google_results = await GoogleMapsService.search_businesses(
+                    query=specific_query,
+                    location=location_name,
+                    exclude_closed=True,
+                    max_results=20,
+                    search_mode="text"
+                )
+        except Exception as e:
+            print(f"[LOCATION INTELLIGENCE] ❌ Google Maps search failed: {e}")
+            print(f"{'='*80}\n")
+            return []
+
+        if not google_results:
+            print(f"[LOCATION INTELLIGENCE] ⚠️ Google Maps also returned 0 results")
+            print(f"{'='*80}\n")
+            return []
+
+        print(f"[LOCATION INTELLIGENCE] ✅ Google Maps SUCCESS: Found {len(google_results)} businesses")
+
+        # Step 3: Convert Google Maps results to leads
+        google_leads = []
+        for business in google_results:
+            try:
+                # Calculate URI-branded Trust Score from Google rating (1-5 stars → 20-100 scale)
+                google_rating = business.get('google_rating')
+                trust_score = None
+                if google_rating is not None:
+                    trust_score = round(google_rating * 20, 1)
+
+                # Extract city and country from formatted address
+                location = LeadService._extract_city_country(business.get('formatted_address'))
+
+                lead_data = {
+                    "company_name": business.get('name'),
+                    "website_url": business.get('website'),  # FIX: Changed from 'website' to 'website_url'
+                    "phone": business.get('phone'),
+                    "formatted_address": business.get('formatted_address'),
+                    "location": location,  # City, Country only
+                    "latitude": business.get('latitude'),
+                    "longitude": business.get('longitude'),
+                    "google_rating": google_rating,  # Stored but not displayed
+                    "trust_score": trust_score,  # URI-branded score (20-100)
+                    "google_reviews_count": business.get('google_reviews_count'),
+                    "business_status": business.get('business_status'),
+                    "business_category": business.get('business_category'),
+                    "lead_source": LeadSourceEnum.LAZARUS,
+                    "lead_type": "ORGANIZATION",  # String value instead of enum
+                }
+
+                google_leads.append(LeadCreate(**lead_data))
+                print(f"   ✅ {business.get('name')} - Trust Score: {trust_score}/100, Location: {location}")
+            except Exception as e:
+                print(f"   ⚠️ Skipping invalid business: {business.get('name')} - {e}")
+
+        print(f"\n[LOCATION INTELLIGENCE] ✅ Created {len(google_leads)} organization leads from Google Maps")
+        print(f"{'='*80}\n")
+
+        return google_leads
+
+    @staticmethod
+    async def send_successful_maps_leads_notification(
+        lead_form: dict, leads_count: int
+    ):
+        """Send notification for successful Google Maps lead generation"""
+        user_id = lead_form.get("user_id")
+
+        data_to_send = (
+            await NotificationHelper.build_extended_lead_notification_payload(
+                user_id, LeadFormTypeEnum.GOOGLE_MAPS.value, {"leadsCount": leads_count}
+            )
+        )
+
+        await NotificationService.send_lead_notification(
+            data_to_send,
+            UserNotificationQueueMessageTypeEnum.LEADS_GENERATED_SUCCESSFULLY,
+        )
+
+    @staticmethod
+    async def send_duplicate_maps_leads_notification(
+        lead_form: dict, company_names: List[str]
+    ):
+        """Send notification when Google Maps leads are duplicates"""
+        user_id = lead_form.get("user_id")
+
+        data_to_send = (
+            await NotificationHelper.build_extended_lead_notification_payload(
+                user_id,
+                LeadFormTypeEnum.GOOGLE_MAPS.value,
+                {"leadNames": company_names[:5]}
+            )
+        )
+
+        await NotificationService.send_lead_notification(
+            data_to_send,
+            UserNotificationQueueMessageTypeEnum.LEADS_ALREADY_EXIST,
+        )
 
     @staticmethod
     async def send_successful_apollo_leads_gen_notification(
@@ -1371,11 +1868,15 @@ class LeadService:
         print("\n\nNext: generate_conversational_leads")
         await LeadService.generate_conversational_leads_background_job(db=db)
 
-        print("\n\nNext: generate_apollo_person_leads_background_job")
-        await LeadService.generate_apollo_person_leads_background_job(db=db)
-
-        print("\n\nNext: generate_apollo_organization_leads_background_job")
-        await LeadService.generate_apollo_organization_leads_background_job(db=db)
+        # NOTE: Apollo leads (Individual/Organizational) are now handled by Azure Service Bus queue
+        # with per-user frequency control. The old APScheduler global jobs are deprecated.
+        # See: ApolloLeadJobService.py and LeadFormService.create() for the new architecture.
+        #
+        # print("\n\nNext: generate_apollo_person_leads_background_job")
+        # await LeadService.generate_apollo_person_leads_background_job(db=db)
+        #
+        # print("\n\nNext: generate_apollo_organization_leads_background_job")
+        # await LeadService.generate_apollo_organization_leads_background_job(db=db)
 
         print("Completed all lead generation tasks.")
 

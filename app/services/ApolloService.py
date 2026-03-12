@@ -43,15 +43,29 @@ class ApolloService:
 
     @staticmethod
     async def handle_people_leads_gen(lead_form: dict, db: AsyncIOMotorDatabase):
+        print(f"\n{'='*80}")
+        print(f"[PEOPLE LEADS GEN] Starting lead generation")
+        print(f"[PEOPLE LEADS GEN] Form: {lead_form.get('form_title', 'Unknown')}")
+        print(f"[PEOPLE LEADS GEN] User: {lead_form.get('user_id', 'Unknown')}")
+        print(f"{'='*80}\n")
+
         search_result = await ApolloService.search_people(lead_form=lead_form)
         if not search_result:
             raise ValueError("Apollo leads gen failed.")
 
         await ApolloService.handle_search_result(search_result, lead_form, db)
 
-        return await ApolloService.handle_people_search_result(
+        result = await ApolloService.handle_people_search_result(
             search_result, lead_form.get("user_id", ""), db
         )
+
+        print(f"\n[PEOPLE LEADS] ✅ COMPLETED")
+        print(f"[PEOPLE LEADS] Leads to create: {len(result) if result else 0}")
+        if result and len(result) > 0:
+            sample_names = [f"{r.first_name} {r.last_name}" for r in result[:3]]
+            print(f"[PEOPLE LEADS] Sample lead names: {sample_names}")
+        print(f"{'='*80}\n")
+        return result
 
     @staticmethod
     async def handle_organization_leads_gen(lead_form: dict, db: AsyncIOMotorDatabase):
@@ -262,21 +276,68 @@ class ApolloService:
             return UriResponse.custom_response("Lead not found for enrichment.", 404)
 
         lead_id = lead.get("lead_id", "")
+        user_id = lead.get("assigned_to", "")  # FIX: Lead has 'assigned_to', not 'user_id'
         cache_key = f"email-{ApolloHelper.generate_apollo_lead_cache_key(lead)}"
+
+        print(f"\n{'='*80}")
+        print(f"[EMAIL ENRICHMENT] Starting enrichment request")
+        print(f"[EMAIL ENRICHMENT] Lead ID: {lead_id}")
+        print(f"[EMAIL ENRICHMENT] User ID (assigned_to): {user_id}")
+        print(f"[EMAIL ENRICHMENT] Lead Username: {lead.get('username', 'Unknown')}")
+        print(f"[EMAIL ENRICHMENT] Lead Name: {lead.get('name', 'Unknown')}")
+        print(f"[EMAIL ENRICHMENT] Lead has apollo_id: {bool(lead.get('apollo_id'))}")
+        print(f"[EMAIL ENRICHMENT] Lead has linkedin_url: {bool(lead.get('linkedin_url'))}")
+        print(f"[EMAIL ENRICHMENT] Cache key: {cache_key}")
 
         # Try to get email from cache
         email = await CacheRepository.get_cache(db, cache_key=cache_key)
+        print(f"[EMAIL ENRICHMENT] Email from cache: {email or 'None'}")
+
+        # Check credits before enrichment (1 credit for email)
+        if not email and user_id:
+            try:
+                credit_check = await UriTaskManagerService.check_payment_balance(
+                    user_id=user_id,
+                    action_type="ENRICHMENT_EMAIL",
+                    payment_mode="CREDITS",
+                    quantity=1
+                )
+
+                if credit_check.get("status") and credit_check.get("responseData"):
+                    balance_data = credit_check["responseData"]
+                    if not balance_data.get("hasSufficientBalance"):
+                        print(f"[EMAIL ENRICHMENT] ❌ Insufficient credits")
+                        return UriResponse.custom_response(
+                            message="Insufficient credits for email enrichment. Requires 1 credit.",
+                            error_code=403,
+                            success=False,
+                            data={
+                                "required_credits": balance_data.get("requiredAmount", 1),
+                                "available_credits": balance_data.get("availableBalance", 0),
+                                "limit_exceeded": True
+                            }
+                        )
+                print(f"[EMAIL ENRICHMENT] ✅ Credit check passed")
+            except Exception as e:
+                print(f"[EMAIL ENRICHMENT] ⚠️ Credit check failed: {str(e)}")
+                # Continue anyway for backward compatibility
 
         # Try to enrich if not cached
         if not email:
+            print(f"[EMAIL ENRICHMENT] Calling Apollo API to enrich...")
             response = await ApolloService.enrich_person(lead, reveal_email=True)
-            email = response.get("person", {}).get("email", "")
-            email_status = response.get("person", {}).get("email_status", "")
-            revealed = response.get("person", {}).get("revealed_for_current_team", False)
 
-            print(f"[EMAIL ENRICHMENT] Lead: {lead.get('username', 'Unknown')}")
-            print(f"[EMAIL ENRICHMENT] Apollo Response: {response}")
-            print(f"[EMAIL ENRICHMENT] Extracted Email: {email}")
+            print(f"[EMAIL ENRICHMENT] Apollo API Response Keys: {list(response.keys())}")
+            print(f"[EMAIL ENRICHMENT] Full Response: {response}")
+
+            person_data = response.get("person", {})
+            print(f"[EMAIL ENRICHMENT] Person data keys: {list(person_data.keys()) if person_data else 'None'}")
+
+            email = person_data.get("email", "")
+            email_status = person_data.get("email_status", "")
+            revealed = person_data.get("revealed_for_current_team", False)
+
+            print(f"[EMAIL ENRICHMENT] Extracted Email: '{email}'")
             print(f"[EMAIL ENRICHMENT] Email Status: {email_status}")
             print(f"[EMAIL ENRICHMENT] Revealed for team: {revealed}")
 
@@ -288,11 +349,33 @@ class ApolloService:
         # Normalize payload
         email = email or "UNAVAILABLE"
         print(f"[EMAIL ENRICHMENT] Final Email Value: {email}")
+
+        # Deduct credits after successful enrichment (1 credit for email)
+        if email and email != "UNAVAILABLE" and user_id:
+            try:
+                print(f"[EMAIL ENRICHMENT] 🔄 Attempting to deduct 1 credit for user: {user_id}")
+                deduction_result = await UriTaskManagerService.deduct_payment(
+                    user_id=user_id,
+                    action_type="ENRICHMENT_EMAIL",
+                    payment_mode="CREDITS",
+                    quantity=1,
+                    reference=lead_id,  # FIX: Added missing reference parameter
+                    narration=f"Email enrichment for lead {lead_id}"
+                )
+                print(f"[EMAIL ENRICHMENT] 💳 Deducted 1 credit for email enrichment (user: {user_id})")
+                print(f"[EMAIL ENRICHMENT] 💳 Deduction result: {deduction_result}")
+            except Exception as credit_error:
+                print(f"[EMAIL ENRICHMENT] ⚠️ Failed to deduct credits: {str(credit_error)}")
+                # Don't fail the enrichment if credit deduction fails
+        else:
+            print(f"[EMAIL ENRICHMENT] ❌ Skipping credit deduction - email={email}, user_id={user_id}")
+
+        print(f"{'='*80}\n")
         payload = {"person": {"email": email}} if isinstance(email, str) else email
 
         # Process and persist
         return await ApolloService._process_person_email_enrichment_response(
-            db, lead_id, payload
+            db, lead_id, payload, user_id
         )
 
     @staticmethod
@@ -300,6 +383,7 @@ class ApolloService:
         lead: dict, db: AsyncIOMotorDatabase, webhook_url: Optional[str]
     ):
         lead_id = lead.get("lead_id", "")
+        user_id = lead.get("user_id", "")
 
         # Handle leads that don't have their corresponding apollo_ids
         if not (lead.get("apollo_id")):
@@ -308,7 +392,7 @@ class ApolloService:
             person = response.get("person", {})
             if person:
                 await LeadRepository.update_lead(
-                    db, lead_id, LeadUpdate(apollo_id=person.get("id"))
+                    db, lead_id, LeadUpdate(apollo_id=person.get("id")), user_id
                 )
                 await ApolloRepository.create(db, person)
         else:  # Handle leads that already have an apollo id attached to them
@@ -318,6 +402,36 @@ class ApolloService:
             response = (await ApolloRepository.get_by_id(db, apollo_id)).get(
                 "responseData", {}
             )
+
+        # Check credits before enrichment (7 credits for phone)
+        if not phone and user_id:
+            try:
+                credit_check = await UriTaskManagerService.check_payment_balance(
+                    user_id=user_id,
+                    action_type="ENRICHMENT_PHONE",
+                    payment_mode="CREDITS",
+                    quantity=1
+                )
+
+                if credit_check.get("status") and credit_check.get("responseData"):
+                    balance_data = credit_check["responseData"]
+                    if not balance_data.get("hasSufficientBalance"):
+                        print(f"[PHONE ENRICHMENT] ❌ Insufficient credits")
+                        return UriResponse.custom_response(
+                            message="Insufficient credits for phone enrichment. Requires 7 credits.",
+                            error_code=403,
+                            success=False,
+                            data={
+                                "required_credits": balance_data.get("requiredAmount", 7),
+                                "available_credits": balance_data.get("availableBalance", 0),
+                                "limit_exceeded": True
+                            }
+                        )
+                print(f"[PHONE ENRICHMENT] ✅ Credit check passed")
+            except Exception as e:
+                print(f"[PHONE ENRICHMENT] ⚠️ Credit check failed: {str(e)}")
+                # Continue anyway for backward compatibility
+
         # Trigger apollo webhook process if phone number isn't already in DB
         if not phone:
             print(f"[PHONE ENRICHMENT] Lead: {lead.get('username', 'Unknown')} - No phone in DB, calling Apollo API...")
@@ -326,14 +440,28 @@ class ApolloService:
             )
             print(f"[PHONE ENRICHMENT] Apollo Response: {response}")
             await LeadRepository.update_lead(
-                db, lead_id, LeadUpdate(phone="PROCESSING")
+                db, lead_id, LeadUpdate(phone="PROCESSING"), user_id
             )
             print(f"[PHONE ENRICHMENT] Phone set to PROCESSING (awaiting webhook)")
+
+            # Deduct credits after successful phone enrichment request (7 credits)
+            if user_id:
+                try:
+                    await UriTaskManagerService.deduct_payment(
+                        user_id=user_id,
+                        action_type="ENRICHMENT_PHONE",
+                        payment_mode="CREDITS",
+                        quantity=1
+                    )
+                    print(f"[PHONE ENRICHMENT] 💳 Deducted 7 credits for phone enrichment (user: {user_id})")
+                except Exception as credit_error:
+                    print(f"[PHONE ENRICHMENT] ⚠️ Failed to deduct credits: {str(credit_error)}")
+                    # Don't fail the enrichment if credit deduction fails
         else:
             print(f"[PHONE ENRICHMENT] Lead: {lead.get('username', 'Unknown')} - Phone found in DB: {phone}")
 
         return await ApolloService._process_person_phone_enrichment_response(
-            db, lead_id, phone, response
+            db, lead_id, phone, response, user_id
         )
 
     @staticmethod
@@ -457,6 +585,86 @@ class ApolloService:
             return result
 
     @staticmethod
+    async def auto_enrich_people_after_search(people: List[dict]) -> List[dict]:
+        """
+        Auto-enrich people after search to get full profile data (photo, linkedin_url, name)
+        WITHOUT revealing email/phone (those cost credits and are only revealed when user clicks).
+
+        Args:
+            people (List[dict]): List of people from Apollo search (with apollo_id).
+
+        Returns:
+            List[dict]: List of enriched people with full profile data.
+        """
+        if not people:
+            return []
+
+        print(f"[AUTO ENRICH] Starting auto-enrichment for {len(people)} people")
+
+        # Build enrichment details from search results
+        # We use apollo_id for fastest/most reliable matching
+        details = []
+        for person in people:
+            apollo_id = person.get("id")
+            if apollo_id:
+                details.append({"id": apollo_id})
+            else:
+                # Fallback: use name and organization if no apollo_id
+                first_name = person.get("first_name", "")
+                organization = person.get("organization", {})
+                org_name = organization.get("name", "")
+                if first_name and org_name:
+                    details.append({
+                        "first_name": first_name,
+                        "organization_name": org_name
+                    })
+
+        if not details:
+            print("[AUTO ENRICH] No valid details for enrichment, returning original data")
+            return people
+
+        # Enrich in batches of 10 (Apollo bulk API limit)
+        enriched_people = []
+        batch_size = 10
+
+        for i in range(0, len(details), batch_size):
+            batch = details[i:i + batch_size]
+            print(f"[AUTO ENRICH] Enriching batch {i//batch_size + 1} ({len(batch)} people)")
+
+            try:
+                result = await ApolloService.enrich_people_bulk(
+                    details=batch,
+                    reveal_personal_emails=False,  # Don't reveal email (costs credits)
+                    reveal_phone_number=False,     # Don't reveal phone (costs credits)
+                )
+
+                # Extract enriched people from response
+                matches = result.get("matches", [])
+                print(f"[AUTO ENRICH] Response structure - matches count: {len(matches)}")
+                if matches and len(matches) > 0:
+                    print(f"[AUTO ENRICH] First match keys: {list(matches[0].keys())}")
+
+                for idx, match in enumerate(matches):
+                    print(f"[AUTO ENRICH] Match {idx} keys: {list(match.keys())}")
+                    enriched_person = match.get("person", {})
+                    if not enriched_person:
+                        # Try alternative response structure
+                        enriched_person = match
+
+                    if enriched_person:
+                        enriched_people.append(enriched_person)
+                        print(f"[AUTO ENRICH] ✓ Enriched: {enriched_person.get('name', 'Unknown')} (has {len(enriched_person)} fields)")
+                    else:
+                        print(f"[AUTO ENRICH] ✗ Match {idx} has no person data")
+            except Exception as e:
+                print(f"[AUTO ENRICH] ✗ Batch enrichment failed: {str(e)}")
+                # Fallback: use original data for this batch
+                enriched_people.extend(people[i:i + batch_size])
+
+        print(f"[AUTO ENRICH] Complete. Enriched {len(enriched_people)} people")
+        return enriched_people if enriched_people else people
+
+    @staticmethod
     async def enrich_people_bulk(
         details: List[dict],
         reveal_personal_emails: bool = False,
@@ -485,11 +693,15 @@ class ApolloService:
 
         payload = {"details": details}
         url = ApolloHelper.format_url(url, params)
+        print(f"[ENRICH BULK] URL: {url}")
+        print(f"[ENRICH BULK] Payload: {len(details)} people")
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 url, json=payload, headers=ApolloService.HEADERS
             )
-            return ApolloService._process_response(response)
+            result = ApolloService._process_response(response)
+            print(f"[ENRICH BULK] Response: {response.status_code}, Matches: {len(result.get('matches', []))}")
+            return result
 
     @staticmethod
     @ApolloHelper.cache_result()
@@ -659,38 +871,37 @@ class ApolloService:
 
     @staticmethod
     async def _process_person_email_enrichment_response(
-        db: AsyncIOMotorDatabase, lead_id: str, response: dict
+        db: AsyncIOMotorDatabase, lead_id: str, response: dict, user_id: Optional[str] = None
     ):
         email = response.get("person", {}).get("email", "")
         print(f"[EMAIL SAVE] Lead ID: {lead_id}, Email being saved: {email}")
         if email:
-            updated_lead = (
-                await LeadRepository.update_lead(
-                    db, lead_id, LeadUpdate(lead_email=email)
-                )
-            ).get("responseData", {})
+            # Pass user_id for security - prevents updating other users' leads
+            updated_lead_response = await LeadRepository.update_lead(
+                db, lead_id, LeadUpdate(lead_email=email), user_id
+            )
+            updated_lead = updated_lead_response.get("responseData", {})
             print(f"[EMAIL SAVE] Updated lead with email: {email}")
-            if email != "UNAVAILABLE":
-                await UriTaskManagerService.update_user_feature_limit_specific_limit(
-                    updated_lead.get("assigned_to", ""),
-                    EndpointsEnum.LEAD_ENRICHMENT_EMAIL.value,
-                    0,
-                )
+            # NOTE: Credit deduction already handled in handle_person_email_enrichment_request
+            # Removed duplicate deduction to prevent double charging
+            # Return the updated lead so frontend can display it immediately
+            return updated_lead_response
         return response
 
     @staticmethod
     async def _process_person_phone_enrichment_response(
-        db: AsyncIOMotorDatabase, lead_id: str, phone: Optional[str], response: dict
+        db: AsyncIOMotorDatabase, lead_id: str, phone: Optional[str], response: dict, user_id: Optional[str] = None
     ):
         if phone:
-            updated_lead = (
-                await LeadRepository.update_lead(db, lead_id, LeadUpdate(phone=phone))
-            ).get("responseData", {})
-            await UriTaskManagerService.update_user_feature_limit_specific_limit(
-                updated_lead.get("assigned_to", ""),
-                EndpointsEnum.LEAD_ENRICHMENT_PHONE.value,
-                0,
+            # Pass user_id for security - prevents updating other users' leads
+            updated_lead_response = await LeadRepository.update_lead(
+                db, lead_id, LeadUpdate(phone=phone), user_id
             )
+            updated_lead = updated_lead_response.get("responseData", {})
+            # NOTE: Credit deduction already handled in handle_person_phone_enrichment_request
+            # Removed duplicate deduction to prevent double charging
+            # Return the updated lead so frontend can display it immediately
+            return updated_lead_response
         return response
 
     @staticmethod
@@ -777,22 +988,28 @@ class ApolloService:
 
             print(f"[ORG ENRICHMENT] ✅ Updated lead in database")
 
-            # Update feature limits
+            # Deduct credits using FIFO credit batch system
             if reveal_phone and phone and phone != "UNAVAILABLE":
-                await UriTaskManagerService.update_user_feature_limit_specific_limit(
-                    updated_lead.get("assigned_to", ""),
-                    EndpointsEnum.LEAD_ENRICHMENT_PHONE.value,
-                    0,
+                await UriTaskManagerService.deduct_payment(
+                    user_id=updated_lead.get("assigned_to", ""),
+                    action_type="ENRICHMENT_PHONE",
+                    payment_mode="CREDITS",
+                    quantity=1,
+                    reference=lead_id,
+                    narration=f"Organization phone enrichment for lead {lead_id}"
                 )
-                print(f"[ORG ENRICHMENT] ✅ Updated phone feature limit")
+                print(f"[ORG ENRICHMENT] ✅ Deducted phone credits from batch")
 
             if reveal_email and email and email != "UNAVAILABLE":
-                await UriTaskManagerService.update_user_feature_limit_specific_limit(
-                    updated_lead.get("assigned_to", ""),
-                    EndpointsEnum.LEAD_ENRICHMENT_EMAIL.value,
-                    0,
+                await UriTaskManagerService.deduct_payment(
+                    user_id=updated_lead.get("assigned_to", ""),
+                    action_type="ENRICHMENT_EMAIL",
+                    payment_mode="CREDITS",
+                    quantity=1,
+                    reference=lead_id,
+                    narration=f"Organization email enrichment for lead {lead_id}"
                 )
-                print(f"[ORG ENRICHMENT] ✅ Updated email feature limit")
+                print(f"[ORG ENRICHMENT] ✅ Deducted email credits from batch")
         else:
             print(f"[ORG ENRICHMENT] ⚠️ No data to update")
 
@@ -804,19 +1021,39 @@ class ApolloService:
     ):
         if not lead_form:
             return
-        pagination_data = search_result.get("pagination", {})
-        total_entries = pagination_data.get("total_entries", 0)
-        total_pages = pagination_data.get("total_pages", 0)
-        page = lead_form.get("page", 0)
-        lead_form_id = lead_form.get("lead_form_id", "")
+
         lead_form_type = lead_form.get("form_type", "")
         user_id = lead_form.get("user_id", "")
-        if total_entries == 0:
-            print("Apollo search turn up empty.")
-            await ApolloService.handle_empty_search_result(
-                user_id, lead_form_type=lead_form_type
-            )
-        elif (page + 1) >= total_pages:
+        lead_form_id = lead_form.get("lead_form_id", "")
+        page = lead_form.get("page", 0)
+
+        # Check ACTUAL data array, not just pagination metadata
+        # Pagination metadata can be stale/cached/incorrect, but the actual data is the source of truth
+        actual_data = search_result.get("people", []) if lead_form_type == "PERSON" else search_result.get("organizations", [])
+
+        print(f"\n{'='*80}")
+        print(f"[SEARCH RESULT HANDLER] Processing search results")
+        print(f"[SEARCH RESULT HANDLER] Form type: {lead_form_type}")
+        print(f"[SEARCH RESULT HANDLER] Form title: {lead_form.get('form_title', 'Unknown')}")
+        print(f"[SEARCH RESULT HANDLER] User ID: {user_id}")
+        print(f"[SEARCH RESULT HANDLER] Page: {page}")
+        print(f"[SEARCH RESULT HANDLER] Actual data count: {len(actual_data)}")
+        print(f"[SEARCH RESULT HANDLER] Pagination metadata: {search_result.get('pagination', {})}")
+        print(f"{'='*80}\n")
+
+        if len(actual_data) == 0:
+            print(f"⚠️ [EMPTY RESULT] Sending 'All Caught Up' email to user {user_id}")
+            print(f"⚠️ [EMPTY RESULT] This means NO leads were found by Apollo API")
+            await ApolloService.handle_empty_search_result(user_id, lead_form_type=lead_form_type)
+            return
+
+        # Handle pagination advancement
+        pagination_data = search_result.get("pagination", {})
+        total_pages = pagination_data.get("total_pages", 0)
+
+        print(f"[SEARCH RESULT] Page {page + 1}/{total_pages}, Data count: {len(actual_data)}")
+
+        if (page + 1) >= total_pages:
             print("Pagination limit reached for Apollo search")
             await ApolloService.handle_pagination_end_result(db, lead_form=lead_form)
         else:
@@ -877,6 +1114,12 @@ class ApolloService:
         if not people or not user_id:
             return None
 
+        # Auto-enrich people to get full profile data (photo, linkedin_url, name)
+        # WITHOUT revealing email/phone (those are only revealed when user clicks)
+        print(f"[PEOPLE RESULT] Auto-enriching {len(people)} people to get full profile data...")
+        enriched_people = await ApolloService.auto_enrich_people_after_search(people)
+        print(f"[PEOPLE RESULT] Enrichment complete. Using enriched data for lead creation.")
+
         latest_lead_form_snapshot: LeadFormSnapshot = (
             await ApolloService.get_latest_lead_form_snapshot(
                 db, user_id=user_id, form_type=LeadFormTypeEnum.PERSON
@@ -885,8 +1128,8 @@ class ApolloService:
 
         tasks = []
 
-        for person in people:
-            lead_to_create_dict = LeadHelper.extract_apollo_person_lead(person)
+        for enriched_person in enriched_people:
+            lead_to_create_dict = LeadHelper.extract_apollo_person_lead(enriched_person)
             lead_to_create_dict["assigned_to"] = user_id
             lead_to_create_dict["lead_form_snapshot_id"] = (
                 latest_lead_form_snapshot.lead_form_snapshot_id
@@ -900,13 +1143,13 @@ class ApolloService:
             )
 
             # Safely remove employment_history if it exists (may not be present in new API)
-            person.pop("employment_history", None)
+            enriched_person.pop("employment_history", None)
             tasks.append(
-                ApolloService.perform_ai_lead_enrichment(lead_to_create_dict, person)
+                ApolloService.perform_ai_lead_enrichment(lead_to_create_dict, enriched_person)
             )
 
         leads_to_create = await asyncio.gather(*tasks)
-        await ApolloRepository.create_multiple(db, people)
+        await ApolloRepository.create_multiple(db, enriched_people)
 
         return leads_to_create
 
@@ -1025,22 +1268,31 @@ class ApolloService:
         if not apollo_id:
             raise ValueError("Apollo ID is required")
 
+        # Get processing leads AND focus contacts
         leads = await ApolloService._get_processing_leads(db, apollo_id)
-        if not leads:
-            raise ValueError("Leads not found for phone number enrichment")
+        focus_contacts = await ApolloService._get_processing_focus_contacts(db, apollo_id)
+
+        if not leads and not focus_contacts:
+            raise ValueError("No leads or focus contacts found for phone number enrichment")
 
         phone = await ApolloService._extract_phone_number(data)
 
         if phone:
             print(
-                "Phone number found, updating leads, apollo records and feature limits."
+                f"Phone number found: {phone}, updating {len(leads)} leads and {len(focus_contacts)} focus contacts."
             )
             await ApolloService._update_apollo_record(db, apollo_id, phone)
-            await ApolloService._update_leads_with_phone(db, leads, phone)
+            if leads:
+                await ApolloService._update_leads_with_phone(db, leads, phone)
+            if focus_contacts:
+                await ApolloService._update_focus_contacts_with_phone(db, focus_contacts, phone)
         else:
-            print("Phone number not found, updating leads with 'UNAVAILABLE'.")
-            await ApolloService._mark_leads_unavailable(db, leads)
+            print("Phone number not found, updating with 'UNAVAILABLE'.")
             await ApolloService._update_apollo_record(db, apollo_id, "UNAVAILABLE")
+            if leads:
+                await ApolloService._mark_leads_unavailable(db, leads)
+            if focus_contacts:
+                await ApolloService._mark_focus_contacts_unavailable(db, focus_contacts)
 
     @staticmethod
     async def _get_processing_leads(db: AsyncIOMotorDatabase, apollo_id: str) -> list:
@@ -1085,10 +1337,13 @@ class ApolloService:
                 db, lead_id, updates=LeadUpdate(phone=phone)
             )
 
-            await UriTaskManagerService.update_user_feature_limit_specific_limit(
-                assigned_to,
-                EndpointsEnum.LEAD_ENRICHMENT_PHONE.value,
-                0,
+            await UriTaskManagerService.deduct_payment(
+                user_id=assigned_to,
+                action_type="ENRICHMENT_PHONE",
+                payment_mode="CREDITS",
+                quantity=1,
+                reference=lead_id,
+                narration=f"Phone enrichment for lead {lead_id}"
             )
         else:
             # Update all leads concurrently
@@ -1099,12 +1354,15 @@ class ApolloService:
                 for lead in leads
             ]
 
-            # Update all user limits concurrently
+            # Deduct credits for all leads concurrently
             feature_tasks = [
-                UriTaskManagerService.update_user_feature_limit_specific_limit(
-                    lead.get("assigned_to"),
-                    EndpointsEnum.LEAD_ENRICHMENT_PHONE.value,
-                    0,
+                UriTaskManagerService.deduct_payment(
+                    user_id=lead.get("assigned_to"),
+                    action_type="ENRICHMENT_PHONE",
+                    payment_mode="CREDITS",
+                    quantity=1,
+                    reference=lead.get("lead_id"),
+                    narration=f"Phone enrichment for lead {lead.get('lead_id')}"
                 )
                 for lead in leads
             ]
@@ -1126,3 +1384,47 @@ class ApolloService:
                 for lead in leads
             ]
             await asyncio.gather(*update_tasks)
+
+    # ============ FOCUS CONTACT WEBHOOK METHODS ============
+    @staticmethod
+    async def _get_processing_focus_contacts(db: AsyncIOMotorDatabase, apollo_id: str) -> list:
+        """Get all focus contacts with phone=PROCESSING and matching apollo_id"""
+        cursor = db["focus_contacts"].find({"apollo_id": apollo_id, "phone": "PROCESSING"})
+        contacts = []
+        async for doc in cursor:
+            contacts.append(doc)
+        return contacts
+
+    @staticmethod
+    async def _update_focus_contacts_with_phone(db: AsyncIOMotorDatabase, focus_contacts: list, phone: str):
+        """Update focus contacts with revealed phone number"""
+        from app.repository.LazarusRepository import LazarusRepository
+
+        update_tasks = [
+            LazarusRepository.update_focus_contact(
+                db,
+                contact.get("focus_id"),
+                contact.get("user_id"),
+                {"phone": phone}
+            )
+            for contact in focus_contacts
+        ]
+        await asyncio.gather(*update_tasks)
+        print(f"✅ Updated {len(focus_contacts)} focus contacts with phone: {phone}")
+
+    @staticmethod
+    async def _mark_focus_contacts_unavailable(db: AsyncIOMotorDatabase, focus_contacts: list):
+        """Mark focus contacts phone as UNAVAILABLE"""
+        from app.repository.LazarusRepository import LazarusRepository
+
+        update_tasks = [
+            LazarusRepository.update_focus_contact(
+                db,
+                contact.get("focus_id"),
+                contact.get("user_id"),
+                {"phone": "UNAVAILABLE"}
+            )
+            for contact in focus_contacts
+        ]
+        await asyncio.gather(*update_tasks)
+        print(f"✅ Marked {len(focus_contacts)} focus contacts phone as UNAVAILABLE")

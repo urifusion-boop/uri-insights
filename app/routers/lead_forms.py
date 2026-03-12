@@ -8,7 +8,9 @@ from app.domain.enums.leadform_enum import LeadFormTypeEnum
 from app.domain.schemas.leadform_schema import (
     BusinessLeadFormUpdate,
     ConversationalLeadFormUpdate,
+    GoogleMapsLeadFormUpdate,
     LeadFormCreate,
+    LeadFormUpdateBase,
     OrganizationLeadFormUpdate,
     PersonLeadFormUpdate,
 )
@@ -18,6 +20,7 @@ from app.domain.requests.leadform_requests import (
     AutoPopulationQuery,
     BusinessSearchFormInput,
     ConversationalSearchFormInput,
+    GoogleMapsSearchFormInput,
     LeadFormFilterQuery,
     PersonSearchFormInput,
     OrganizationSearchFormInput,
@@ -37,11 +40,18 @@ async def create_person_search_lead_form(
     db: AsyncIOMotorDatabase = Depends(get_db_dependency),
     _: dict = Depends(enforce_feature_limit),
 ):
-    payload = LeadFormCreate(**data.dict())
-    result = await LeadFormService.create(db, payload, background_tasks)
-    return UriResponse.get_status_response(
-        response=jsonable_encoder(result), status_code=result["responseCode"]
-    )
+    try:
+        payload = LeadFormCreate(**data.dict())
+        result = await LeadFormService.create(db, payload, background_tasks)
+        return UriResponse.get_status_response(
+            response=jsonable_encoder(result), status_code=result["responseCode"]
+        )
+    except Exception as e:
+        print(f"\n❌ ERROR creating person search lead form:")
+        print(f"   Error type: {type(e).__name__}")
+        print(f"   Error message: {str(e)}")
+        print(f"   Received data: {data.dict() if hasattr(data, 'dict') else 'Unable to serialize'}")
+        raise
 
 
 @router.post("/organization-search/create")
@@ -70,6 +80,84 @@ async def create_business_lead_form(
     return UriResponse.get_status_response(
         response=jsonable_encoder(result), status_code=result["responseCode"]
     )
+
+
+@router.post("/google-maps-search/create")
+async def create_google_maps_lead_form(
+    data: GoogleMapsSearchFormInput,
+    background_tasks: BackgroundTasks,
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Create a Google Maps lead form for local business discovery
+
+    Supports both Text Search (natural language) and Nearby Search (precise location)
+    """
+    try:
+        payload = LeadFormCreate(**data.model_dump())
+        result = await LeadFormService.create(db, payload, background_tasks)
+        return UriResponse.get_status_response(
+            response=jsonable_encoder(result), status_code=result["responseCode"]
+        )
+    except Exception as e:
+        print(f"\n❌ ERROR creating Google Maps lead form:")
+        print(f"   Error: {str(e)}")
+        return UriResponse.error_response(
+            message=f"Failed to create Google Maps lead form: {str(e)}",
+            error_code=500
+        )
+
+
+@router.post("/google-maps-search/generate")
+async def generate_google_maps_leads(
+    lead_form_id: str,
+    user_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    """
+    Generate leads from Google Maps/Places API
+
+    Uses intelligent API selection (Text Search or Nearby Search) based on form parameters
+    """
+    try:
+        print(f"\n🗺️ [API] Google Maps lead generation request:")
+        print(f"   Lead Form ID: {lead_form_id}")
+        print(f"   User ID: {user_id}")
+
+        # Get lead form
+        lead_form = await LeadFormRepository.get_by_id(db, lead_form_id)
+
+        if not lead_form:
+            return UriResponse.error_response(
+                message="Lead form not found",
+                error_code=404
+            )
+
+        if lead_form.get("form_type") != LeadFormTypeEnum.GOOGLE_MAPS.value:
+            return UriResponse.error_response(
+                message="Invalid form type. Must be GOOGLE_MAPS.",
+                error_code=400
+            )
+
+        # Import here to avoid circular dependency
+        from app.services.LeadService import LeadService
+
+        # Generate leads
+        result = await LeadService.generate_google_maps_leads(lead_form, db)
+
+        return result
+
+    except Exception as e:
+        print(f"\n❌ ERROR generating Google Maps leads:")
+        print(f"   Error type: {type(e).__name__}")
+        print(f"   Error message: {str(e)}")
+        import traceback
+        traceback.print_exc()
+
+        return UriResponse.error_response(
+            message=f"Failed to generate Google Maps leads: {str(e)}",
+            error_code=500
+        )
 
 
 @router.post("/conversation-search/create")
@@ -149,6 +237,33 @@ async def fetch_conversational_leads(
             },
             status_code=403
         )
+
+    # Check credits for Sales Signal scan (7 credits per scan)
+    from app.services.uri_microservices.UriTaskManagerService import UriTaskManagerService
+
+    try:
+        credit_check = await UriTaskManagerService.check_payment_balance(
+            user_id=user_id,
+            action_type="SALES_SIGNAL_SCAN",
+            payment_mode="CREDITS",
+            quantity=1
+        )
+
+        if credit_check.get("status") and credit_check.get("responseData"):
+            balance_data = credit_check["responseData"]
+            if not balance_data.get("hasSufficientBalance"):
+                return UriResponse.get_status_response(
+                    response={
+                        "message": "Insufficient credits for sales signal scan. Requires 7 credits.",
+                        "required_credits": balance_data.get("requiredAmount", 7),
+                        "available_credits": balance_data.get("availableBalance", 0),
+                        "limit_exceeded": True
+                    },
+                    status_code=403
+                )
+    except Exception as e:
+        print(f"⚠️ Credit check failed: {str(e)}")
+        # Continue anyway if credit check fails (for backward compatibility)
 
     # Create job tracking document
     try:
@@ -520,6 +635,16 @@ async def update_organization_lead_form(
     db: AsyncIOMotorDatabase = Depends(get_db_dependency),
     _: dict = Depends(enforce_feature_limit),
 ):
+    # 🔍 LOG: Received update request
+    print(f"📥 [FORM UPDATE API] Received update for form: {lead_form_id}")
+    print(f"🔍 [FORM UPDATE API] Location Intelligence data in request:")
+    print(f"   - enable_location_intelligence: {getattr(data, 'enable_location_intelligence', None)}")
+    print(f"   - location_zone_center_lat: {getattr(data, 'location_zone_center_lat', None)}")
+    print(f"   - location_zone_center_lng: {getattr(data, 'location_zone_center_lng', None)}")
+    print(f"   - location_zone_radius_km: {getattr(data, 'location_zone_radius_km', None)}")
+    print(f"   - location_zone_name: {getattr(data, 'location_zone_name', None)}")
+    print(f"   - min_trust_score: {getattr(data, 'min_trust_score', None)}")
+
     result = await LeadFormService.update_apollo_lead_forms(
         db, data, lead_form_id, background_tasks
     )
@@ -552,6 +677,21 @@ async def update_business_lead_form(
     _: dict = Depends(enforce_feature_limit),
 ):
     result = await LeadFormService.update_business_lead_form(
+        db, lead_form_id, data, background_tasks
+    )
+    return UriResponse.get_status_response(
+        response=jsonable_encoder(result), status_code=result["responseCode"]
+    )
+
+
+@router.put("/google-maps-search/update")
+async def update_google_maps_lead_form(
+    lead_form_id: str,
+    data: GoogleMapsLeadFormUpdate,
+    background_tasks: BackgroundTasks,
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+):
+    result = await LeadFormService.update_google_maps_lead_form(
         db, lead_form_id, data, background_tasks
     )
     return UriResponse.get_status_response(

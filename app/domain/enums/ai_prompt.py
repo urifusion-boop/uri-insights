@@ -514,46 +514,366 @@ class LeadFormAssistantPrompt(Enum):
 
 class LeadFormAutoPopulateEnum(Enum):
     PERSON_FORM_PROMPT = """
-        You are an expert lead generation analyst. A user has provided a brief description of the kind of professionals they want to reach out to.
+        You are an expert lead generation analyst specialized in person-based lead discovery. A user has described the type of professionals they want to find using Apollo's search platform.
 
-        Based on the user's preferences below, extract structured lead search parameters specifically for *person-based lead discovery* using the Apollo platform.
-
-        ### User Preferences:
-        {data}
-
-        Return a JSON object with the following structure. Only populate fields relevant to a PERSON form:
-        {{
-            "form_title": "<string>",
-            "person_titles": ["<string>", "..."],
-            "include_similar_titles": true,
-            "person_locations": ["<city>", "<state>", "..."],
-            "person_seniorities": ["<C-Level>", "<Manager>", "..."],
-            "organization_num_employees_ranges": ["1,10", "11,50"],
-            "q_organization_domains_list": ["<company1.com>", "..."],
-            "contact_email_status": ["verified", "guessed"],
-        }}
-        The JSON object above inly serves as an example, always return an object that meets the requirement of the user preferences.
-    """
-
-    ORGANIZATION_FORM_PROMPT = """
-        You are an intelligent B2B marketing assistant. A user has described their ideal customer or market segment.
-
-        Based on the user's description, extract structured parameters to populate an Apollo ORGANIZATION lead form.
+        Your job is to extract COMPLETE search parameters that capture:
+        1. **Job titles/roles** (what they do)
+        2. **Industry/sector context** (what field they work in)
+        3. **Geographic location** (where they are)
+        4. **Company characteristics** (size, type, domain)
+        5. **Seniority level** (their position in org hierarchy)
 
         ### User Input:
         {data}
 
-        Return a JSON object focused on ORGANIZATION search:
+        ### Critical Instructions:
+
+        1. **Extract Industry/Domain Context**:
+           - Identify the INDUSTRY or SECTOR mentioned (e.g., "real estate", "fintech", "healthcare", "e-commerce", "SaaS")
+           - Add industry keywords to BOTH `q_keywords` AND form_title
+           - Examples:
+             * "Real estate founders" → q_keywords: "real estate"
+             * "Tech startup CTOs" → q_keywords: "technology OR software OR SaaS"
+             * "Healthcare executives" → q_keywords: "healthcare OR medical OR hospital"
+
+        2. **Person Titles**:
+           - Extract job titles/roles (e.g., "Founder", "CEO", "CTO", "VP Sales")
+           - Be specific if user is specific, broad if user is broad
+           - Examples:
+             * "Real estate founders" → ["Founder", "Co-Founder", "Owner"]
+             * "Sales leaders in fintech" → ["VP Sales", "Sales Director", "Head of Sales"]
+
+        3. **Include Similar Titles**:
+           - Set to `true` by default to catch variations
+           - Set to `false` only if user wants EXACT titles only
+
+        4. **Locations**:
+           - Extract cities, states, or countries mentioned
+           - Format: ["City, State", "City, Country", "Country"]
+           - Examples: ["Lagos, Nigeria"], ["San Francisco, California"], ["United Kingdom"]
+
+        5. **Seniorities**:
+           - Map to Apollo seniority levels: "C-Level", "VP", "Director", "Manager", "Senior", "Entry"
+           - Examples:
+             * "Executives" → ["C-Level", "VP"]
+             * "Founders" → ["C-Level"]
+             * "Managers" → ["Manager", "Senior"]
+
+        6. **Company Size** (organization_num_employees_ranges):
+           - Only include if mentioned or strongly implied
+           - Format: ["1,10", "11,50", "51,200", "201,500", "501,1000", "1001,10000", "10001+"]
+           - Examples:
+             * "startup founders" → ["1,10", "11,50", "51,200"]
+             * "enterprise executives" → ["1001,10000", "10001+"]
+
+        7. **q_keywords** (MOST IMPORTANT - REQUIRED):
+           - This is THE KEY FIELD that filters by industry/company type/stage
+           - ALWAYS include this field when ANY industry, sector, or company type is mentioned
+           - Must contain BOTH:
+             a) Industry/sector keywords (e.g., "tech", "healthcare", "fintech")
+             b) Company type/stage keywords (e.g., "startup", "enterprise", "SME", "scale-up")
+           - Use OR to combine related terms
+           - Examples:
+             * "Tech startups" → "technology OR tech OR software OR IT OR startup OR early stage"
+             * "Real estate companies" → "real estate OR property OR housing OR construction OR real estate development"
+             * "Fintech scale-ups" → "fintech OR financial services OR banking OR payments OR scale-up OR growth stage"
+             * "Enterprise SaaS" → "SaaS OR software OR technology OR cloud OR enterprise"
+             * "Healthcare startups" → "healthcare OR medical OR hospital OR health services OR startup OR early stage"
+
+        ### Output Format:
+        Return ONLY a valid JSON object:
         {{
-            "form_title": "<string>",
-            "organization_locations": ["<string>", "..."],
-            "organization_not_locations": ["<string>", "..."],
-            "organization_num_employees_ranges": ["1,10", "11,50"],
-            "technology_uids": ["<CRM>", "<SaaS platform>", "..."],
-            "q_organization_name": "<optional name>"
-            "q_organization_keyword_tags": ["<string>", "..."],
+            "form_title": "<descriptive title including industry and role>",
+            "person_titles": ["<title1>", "<title2>", "..."],
+            "include_similar_titles": true,
+            "person_locations": ["<location1>", "..."],
+            "person_seniorities": ["<seniority1>", "..."],
+            "organization_num_employees_ranges": ["<range1>", "..."],
+            "q_keywords": "<industry keywords with OR operators>",
+            "contact_email_status": ["verified"]
         }}
-        The JSON object above only serves as an example, always return an object that meets the requirement of the user preferences.
+
+        ### Examples:
+
+        **Input:** "Real estate founders in Lagos, Nigeria"
+        **Output:**
+        {{
+            "form_title": "Real Estate Founders in Lagos, Nigeria",
+            "person_titles": ["Founder", "Co-Founder", "Owner", "CEO"],
+            "include_similar_titles": true,
+            "person_locations": ["Lagos, Nigeria"],
+            "person_seniorities": ["C-Level"],
+            "organization_num_employees_ranges": ["1,10", "11,50", "51,200"],
+            "q_keywords": "real estate OR property OR housing OR construction OR real estate development",
+            "contact_email_status": ["verified"]
+        }}
+
+        **Input:** "Tech startup CTOs in Berlin working in fintech"
+        **Output:**
+        {{
+            "form_title": "Fintech Startup CTOs in Berlin",
+            "person_titles": ["CTO", "Chief Technology Officer", "VP Engineering"],
+            "include_similar_titles": true,
+            "person_locations": ["Berlin, Germany"],
+            "person_seniorities": ["C-Level", "VP"],
+            "organization_num_employees_ranges": ["1,10", "11,50", "51,200"],
+            "q_keywords": "fintech OR financial technology OR payments OR banking OR financial services OR startup OR early stage",
+            "contact_email_status": ["verified"]
+        }}
+
+        **Input:** "Find me startups in Tech space in Nigeria"
+        **Output:**
+        {{
+            "form_title": "Tech Startups in Nigeria",
+            "person_titles": ["Founder", "Co-Founder", "CEO", "CTO"],
+            "include_similar_titles": true,
+            "person_locations": ["Nigeria"],
+            "person_seniorities": ["C-Level"],
+            "organization_num_employees_ranges": ["1,10", "11,50", "51,200"],
+            "q_keywords": "technology OR tech OR software OR IT OR information technology OR startup OR early stage",
+            "contact_email_status": ["verified"]
+        }}
+
+        **Input:** "Healthcare executives in the US"
+        **Output:**
+        {{
+            "form_title": "Healthcare Executives in United States",
+            "person_titles": ["CEO", "COO", "CFO", "President", "Vice President"],
+            "include_similar_titles": true,
+            "person_locations": ["United States"],
+            "person_seniorities": ["C-Level", "VP"],
+            "q_keywords": "healthcare OR medical OR hospital OR clinic OR health services OR pharmaceutical",
+            "contact_email_status": ["verified"]
+        }}
+
+        ### Important Rules:
+        - ALWAYS include `q_keywords` when an industry/sector OR company type is mentioned or implied
+        - `q_keywords` MUST contain BOTH industry AND company type/stage when both are mentioned
+          * "Tech startups" → Include BOTH "tech/software/IT" AND "startup/early stage"
+          * "Enterprise SaaS" → Include BOTH "SaaS/software/cloud" AND "enterprise"
+          * "Fintech scale-ups" → Include BOTH "fintech/financial services" AND "scale-up/growth stage"
+        - Use OR operators in `q_keywords` to catch variations
+        - Set `include_similar_titles` to true unless user wants exact matches only
+        - Only include fields that are relevant to the user's input
+        - Default `contact_email_status` to ["verified"] for best quality leads
+    """
+
+    ORGANIZATION_FORM_PROMPT = """
+        You are an intelligent B2B marketing assistant specialized in organization-based lead discovery. A user has described their ideal target companies using Apollo's search platform.
+
+        Your job is to extract COMPLETE search parameters that capture:
+        1. **Industry/sector** (what type of companies)
+        2. **Company size** (employee count, revenue)
+        3. **Geographic location** (where they operate)
+        4. **Technology stack** (what tools they use)
+        5. **Company characteristics** (keywords, tags, attributes)
+
+        ### User Input:
+        {data}
+
+        ### Critical Instructions:
+
+        1. **Extract Industry/Sector Keywords** (q_organization_keyword_tags):
+           - This is THE MOST IMPORTANT FIELD for filtering by industry AND company type/stage
+           - Identify ALL relevant industry/sector terms PLUS company type/stage
+           - Must include BOTH:
+             a) Industry/sector keywords (e.g., "fintech", "healthcare", "SaaS")
+             b) Company type/stage keywords (e.g., "startup", "enterprise", "SME", "scale-up")
+           - Include variations, synonyms, and related terms to maximize search coverage
+           - Examples:
+             * "Real estate companies" → ["real estate", "property", "housing", "construction", "property management"]
+             * "Fintech startups" → ["fintech", "financial technology", "payments", "banking", "financial services", "startup", "early stage"]
+             * "Healthcare providers" → ["healthcare", "medical", "hospital", "clinic", "health services"]
+             * "Tech startups" → ["technology", "tech", "software", "IT", "startup", "early stage", "seed stage"]
+             * "Enterprise SaaS" → ["SaaS", "software", "cloud", "technology", "enterprise", "B2B"]
+             * "Coworking spaces" → ["coworking", "co-working", "shared workspace", "flexible workspace", "office space", "business center"]
+             * "Small businesses" → ["small business", "SME", "small enterprise", "local business"]
+             * "FMCG" → ["FMCG", "fast moving consumer goods", "consumer goods", "consumer products", "food and beverage", "personal care", "household products"]
+             * "Manufacturing" → ["manufacturing", "industrial", "production", "factory", "fabrication", "assembly"]
+             * "Restaurants" → ["restaurant", "dining", "food service", "eatery", "food and beverage", "hospitality"]
+             * "Schools" → ["school", "education", "educational institution", "academy", "learning center"]
+
+        2. **Company Locations** (organization_locations):
+           - Extract cities, states, regions, or countries
+           - Format: ["City, Country"] or ["State, Country"] or ["Country"]
+           - **CRITICAL LOCATION RULES**:
+             * If ONLY a city name is mentioned that is commonly found in Nigeria (Lagos, Abuja, Port Harcourt, Ibadan, Kano, Ife, Benin, Enugu, etc.), ALWAYS append ", Nigeria"
+             * If ONLY a state name is mentioned (Ogun, Lagos State, Rivers, Kano, etc.), ALWAYS append ", Nigeria"
+             * For US states (California, Texas, New York, etc.), ALWAYS append ", United States"
+             * For other international cities without country, keep as-is if globally unique (e.g., Paris, London, Tokyo)
+           - Examples:
+             * "Lagos" → ["Lagos, Nigeria"]
+             * "Ogun state" → ["Ogun State, Nigeria"]
+             * "Abuja" → ["Abuja, Nigeria"]
+             * "Ife" → ["Ife, Nigeria"]
+             * "California" → ["California, United States"]
+             * "United Kingdom" → ["United Kingdom"]
+
+        3. **Company Size** (organization_num_employees_ranges):
+           - Extract or infer from descriptors like "startup", "enterprise", "SMB"
+           - Format: ["1,10", "11,50", "51,200", "201,500", "501,1000", "1001,10000", "10001+"]
+           - Examples:
+             * "startups" → ["1,10", "11,50", "51,200"]
+             * "mid-market" → ["201,500", "501,1000"]
+             * "enterprise" → ["1001,10000", "10001+"]
+             * "SMB" or "small business" → ["1,10", "11,50", "51,200"]
+
+        4. **Revenue Range** (revenue_range_min, revenue_range_max):
+           - Only if explicitly mentioned
+           - Values in millions (USD)
+           - Examples:
+             * "$1M-$10M ARR" → revenue_range_min: 1, revenue_range_max: 10
+             * "At least $5M revenue" → revenue_range_min: 5
+
+        5. **Technology Stack** (technology_uids):
+           - Extract specific tools/platforms mentioned
+           - Examples: ["Salesforce", "HubSpot", "Stripe", "AWS", "Shopify"]
+
+        6. **Exclude Locations** (organization_not_locations):
+           - Only if user explicitly excludes certain locations
+           - Format same as organization_locations
+
+        7. **Specific Company Name** (q_organization_name):
+           - Only if user mentions a specific company name to search for
+
+        ### Output Format:
+        Return ONLY a valid JSON object:
+        {{
+            "form_title": "<descriptive title including industry and criteria>",
+            "organization_locations": ["<location1>", "..."],
+            "organization_not_locations": ["<excluded location>", "..."],
+            "organization_num_employees_ranges": ["<range1>", "..."],
+            "revenue_range_min": <number or null>,
+            "revenue_range_max": <number or null>,
+            "technology_uids": ["<tech1>", "..."],
+            "q_organization_keyword_tags": ["<keyword1>", "<keyword2>", "..."],
+            "q_organization_name": "<company name or null>"
+        }}
+
+        ### Examples:
+
+        **Input:** "Real estate companies in Lagos, Nigeria"
+        **Output:**
+        {{
+            "form_title": "Real Estate Companies in Lagos, Nigeria",
+            "organization_locations": ["Lagos, Nigeria"],
+            "organization_num_employees_ranges": ["1,10", "11,50", "51,200", "201,500"],
+            "q_organization_keyword_tags": ["real estate", "property", "housing", "construction", "property management", "real estate development"]
+        }}
+
+        **Input:** "Fintech startups in San Francisco with at least $5M revenue"
+        **Output:**
+        {{
+            "form_title": "Fintech Startups in San Francisco ($5M+ Revenue)",
+            "organization_locations": ["San Francisco, California"],
+            "organization_num_employees_ranges": ["1,10", "11,50", "51,200"],
+            "revenue_range_min": 5,
+            "q_organization_keyword_tags": ["fintech", "financial technology", "payments", "banking", "financial services", "payment processing", "startup", "early stage"]
+        }}
+
+        **Input:** "Tech startups in Nigeria"
+        **Output:**
+        {{
+            "form_title": "Tech Startups in Nigeria",
+            "organization_locations": ["Nigeria"],
+            "organization_num_employees_ranges": ["1,10", "11,50", "51,200"],
+            "q_organization_keyword_tags": ["technology", "tech", "software", "IT", "information technology", "startup", "early stage", "seed stage"]
+        }}
+
+        **Input:** "Mid-market SaaS companies using Salesforce"
+        **Output:**
+        {{
+            "form_title": "Mid-Market SaaS Companies Using Salesforce",
+            "organization_num_employees_ranges": ["201,500", "501,1000"],
+            "technology_uids": ["Salesforce"],
+            "q_organization_keyword_tags": ["SaaS", "software", "cloud", "technology", "software as a service", "mid-market", "growth stage"]
+        }}
+
+        **Input:** "Healthcare providers in the US, excluding California"
+        **Output:**
+        {{
+            "form_title": "Healthcare Providers in US (Excluding California)",
+            "organization_locations": ["United States"],
+            "organization_not_locations": ["California, United States"],
+            "q_organization_keyword_tags": ["healthcare", "medical", "hospital", "clinic", "health services", "medical services"]
+        }}
+
+        **Input:** "E-commerce companies in Europe"
+        **Output:**
+        {{
+            "form_title": "E-commerce Companies in Europe",
+            "organization_locations": ["United Kingdom", "Germany", "France", "Netherlands", "Spain", "Italy"],
+            "q_organization_keyword_tags": ["e-commerce", "ecommerce", "online retail", "retail", "online shopping", "marketplace"]
+        }}
+
+        **Input:** "Find coworking spaces in Lagos"
+        **Output:**
+        {{
+            "form_title": "Coworking Spaces in Lagos, Nigeria",
+            "organization_locations": ["Lagos, Nigeria"],
+            "q_organization_keyword_tags": ["coworking", "co-working", "coworking space", "shared workspace", "flexible workspace", "office space", "business center"]
+        }}
+
+        **Input:** "Find small businesses in Lagos"
+        **Output:**
+        {{
+            "form_title": "Small Businesses in Lagos, Nigeria",
+            "organization_locations": ["Lagos, Nigeria"],
+            "organization_num_employees_ranges": ["1,10", "11,50"],
+            "q_organization_keyword_tags": ["small business", "SME", "small enterprise", "local business"]
+        }}
+
+        **Input:** "Find FMCGs in Lagos"
+        **Output:**
+        {{
+            "form_title": "FMCG Companies in Lagos, Nigeria",
+            "organization_locations": ["Lagos, Nigeria"],
+            "q_organization_keyword_tags": ["FMCG", "fast moving consumer goods", "consumer goods", "consumer products", "food and beverage", "personal care", "household products", "packaged goods"]
+        }}
+
+        **Input:** "Find manufacturing companies in Ogun state"
+        **Output:**
+        {{
+            "form_title": "Manufacturing Companies in Ogun State, Nigeria",
+            "organization_locations": ["Ogun State, Nigeria"],
+            "q_organization_keyword_tags": ["manufacturing", "industrial", "production", "factory", "fabrication", "assembly"]
+        }}
+
+        **Input:** "Find restaurants in Abuja"
+        **Output:**
+        {{
+            "form_title": "Restaurants in Abuja, Nigeria",
+            "organization_locations": ["Abuja, Nigeria"],
+            "q_organization_keyword_tags": ["restaurant", "dining", "food service", "eatery", "food and beverage", "hospitality"]
+        }}
+
+        **Input:** "Find secondary schools in Ife"
+        **Output:**
+        {{
+            "form_title": "Secondary Schools in Ife, Nigeria",
+            "organization_locations": ["Ife, Nigeria"],
+            "q_organization_keyword_tags": ["secondary school", "high school", "education", "school", "educational institution", "private school", "boarding school"]
+        }}
+
+        ### Important Rules:
+        - ALWAYS include `q_organization_keyword_tags` with industry/sector AND company type/stage keywords
+        - `q_organization_keyword_tags` MUST contain BOTH industry AND company type when both are mentioned
+          * "Tech startups" → Include BOTH "tech/software/IT" AND "startup/early stage"
+          * "Enterprise SaaS" → Include BOTH "SaaS/software/cloud" AND "enterprise"
+          * "Fintech scale-ups" → Include BOTH "fintech/financial services" AND "scale-up/growth stage"
+        - Include multiple variations and related terms in keyword tags for better search coverage
+        - **LOCATION DEFAULTS**: When user mentions only a city/state name commonly found in Nigeria (Lagos, Abuja, Ogun, Ife, Port Harcourt, Ibadan, Kano, etc.) WITHOUT specifying a country, ALWAYS default to Nigeria
+          * "Lagos" → "Lagos, Nigeria"
+          * "Ogun state" → "Ogun State, Nigeria"
+          * "Ife" → "Ife, Nigeria"
+        - **STATE REQUIREMENT**: When user mentions only a state name (e.g., "Ogun state", "California"), ALWAYS append the country
+          * "Ogun state" → "Ogun State, Nigeria"
+          * "California" → "California, United States"
+        - For ambiguous international cities (e.g., "Paris", "London"), keep as-is unless context suggests otherwise
+        - Only include fields that are relevant to the user's input
+        - When user says "startups" or "small business", include appropriate employee ranges: ["1,10", "11,50", "51,200"]
+        - When user says "enterprise", use larger employee ranges: ["1001,10000", "10001+"]
+        - Use descriptive form titles that capture the search criteria
     """
 
     CONVERSATIONAL_FORM_PROMPT = """
@@ -623,6 +943,72 @@ class LeadFormAutoPopulateEnum(Enum):
         """ + AUTOPOPULATE_EXAMPLES + """
 
         Return a JSON object that accurately reflects the user's intent and will help find their ideal leads.
+    """
+
+    GOOGLE_MAPS_FORM_PROMPT = """
+        You are an expert local business discovery assistant. A user has provided a description of the types of local businesses or locations they want to find using Google Maps.
+
+        Based on the user's input, extract structured parameters for a Google Maps/Places API search.
+
+        ### User Input:
+        {data}
+
+        Return a JSON object optimized for Google Maps search:
+        {{
+            "form_title": "<string>",
+            "maps_search_mode": "text",
+            // Usually "text" for natural language, "nearby" for precise location + radius, "auto" to let system decide
+            "maps_search_query": "<string>",
+            // Natural language query like "coffee shops", "restaurants", "gyms"
+            "maps_location": "<string>",
+            // City, neighborhood, or address like "Lagos, Nigeria", "Manhattan, NY"
+            "maps_latitude": <number or null>,
+            // Only if user provides exact coordinates
+            "maps_longitude": <number or null>,
+            // Only if user provides exact coordinates
+            "maps_radius_km": <number>,
+            // Search radius in kilometers (e.g., 5, 10, 20)
+            "maps_business_types": ["<type>", "..."],
+            // Google Places types: restaurant, cafe, gym, store, bank, etc.
+            "maps_min_rating": <number>,
+            // Minimum Google rating (0-5). Default 3.0 for quality results
+            "maps_exclude_closed": true,
+            // Usually true to only get active businesses
+            "maps_max_results": <number>
+            // How many businesses to find (10-50 recommended)
+        }}
+
+        ### Examples:
+
+        Input: "Find coffee shops in Ikeja, Lagos"
+        Output:
+        {{
+            "form_title": "Coffee Shops in Ikeja",
+            "maps_search_mode": "text",
+            "maps_search_query": "coffee shops",
+            "maps_location": "Ikeja, Lagos, Nigeria",
+            "maps_radius_km": 5,
+            "maps_business_types": ["cafe", "coffee_shop"],
+            "maps_min_rating": 3.5,
+            "maps_exclude_closed": true,
+            "maps_max_results": 20
+        }}
+
+        Input: "I need gyms and fitness centers within 10km of Victoria Island with good ratings"
+        Output:
+        {{
+            "form_title": "Gyms in Victoria Island",
+            "maps_search_mode": "text",
+            "maps_search_query": "gyms and fitness centers",
+            "maps_location": "Victoria Island, Lagos, Nigeria",
+            "maps_radius_km": 10,
+            "maps_business_types": ["gym", "fitness_center"],
+            "maps_min_rating": 4.0,
+            "maps_exclude_closed": true,
+            "maps_max_results": 30
+        }}
+
+        Return only the JSON object that accurately reflects the user's search intent.
     """
 
 
@@ -913,26 +1299,78 @@ Match exact terms, synonyms, and contextual relevance:
 Task:
 Analyze the posts and determine if ANY of the specified signal types are present.
 
-MULTI-FACTOR ANALYSIS CHECKLIST:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-1. ✅ Does content mention industry keywords or related terms?
-2. ✅ Are there career changes, promotions, or new responsibilities?
-3. ✅ Are there funding announcements, hiring, or expansion news?
-4. ✅ Does it express pain points/frustration relevant to keywords?
-5. ✅ Is person asking for recommendations in keyword domain?
-6. ✅ Is there indication of budget/buying authority?
-7. ✅ Look for EXACT trigger phrases (see detection rules below)
-8. ✅ Is this INBOUND (seeking help) vs OUTBOUND (promoting)?
+⚠️⚠️⚠️ CRITICAL: DEEP CONTEXTUAL ANALYSIS REQUIRED ⚠️⚠️⚠️
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-IMPORTANT DETECTION RULES:
-- For "promoted": Look for words like "promoted", "new title", "new position", "VP", "Director", "Head of"
-- For "changed_jobs": Look for "joining", "new role at", "excited to announce", "day 1 at"
-- For "raised_funds": Look for "$", "raised", "funding", "Series A/B/C", "investment", "capital"
-- For "hiring": Look for "we're hiring", "join our team", "open positions", "looking for"
-- For "expansion": Look for "expanding", "opening", "new office", "scaling", "growing to"
-- For "pain": Look for negative emotions: "frustrated", "slow", "broken", "wasting time", "annoying"
-- For "competitor_complaint": Look for competitor names + negative words
-- For "switch": Look for "alternative", "recommendations", "switching from", "looking for"
+YOU MUST READ THE **ENTIRE** POST FROM START TO FINISH BEFORE MAKING ANY DECISION.
+
+❌ DO NOT just scan for trigger words and assume
+❌ DO NOT base decision on one sentence out of context
+❌ DO NOT detect "pain" if the full post shows it's resolved/positive
+❌ DO NOT detect "switch" if person is recommending TO others (not seeking FOR themselves)
+
+✅ YOU MUST analyze the FULL context:
+   1. Read the complete post - every sentence matters
+   2. Understand the overall sentiment and direction (INBOUND vs OUTBOUND)
+   3. Consider what comes BEFORE and AFTER trigger words
+   4. Verify the person is actually experiencing the pain/need, not just mentioning it
+
+CONTEXTUAL ANALYSIS EXAMPLES:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Example 1 - FALSE POSITIVE (Read Full Context):
+❌ WRONG: "I see 'frustrated' → DETECT pain"
+✅ CORRECT Analysis:
+   Post: "I used to be frustrated with slow CRMs, but after switching to HubSpot, everything is smooth!"
+   Trigger word: "frustrated" (appears in post)
+   Full context: Past tense pain that's ALREADY RESOLVED
+   Decision: REJECT - No current pain, this is a success story/testimonial
+
+Example 2 - MISSING CONTEXT (Read Entire Post):
+❌ WRONG: "I see 'switch to' → DETECT switch signal"
+✅ CORRECT Analysis:
+   Post: "If you're still using spreadsheets for CRM, you should switch to a proper platform. We made the switch 2 years ago and never looked back!"
+   Trigger phrase: "switch to" (appears in post)
+   Full context: Person is RECOMMENDING others switch (OUTBOUND), not seeking to switch themselves
+   Decision: REJECT - Promotional advice, not buyer intent
+
+Example 3 - PARTIAL SENTENCE TRAP:
+❌ WRONG: "I see 'slow' and 'CRM' → DETECT pain"
+✅ CORRECT Analysis:
+   Post: "Just helped a client move from their slow CRM to Salesforce. Impressive results!"
+   Trigger words: "slow" + "CRM" (both appear)
+   Full context: Consultant talking about CLIENT'S problem (3rd party), not their own
+   Decision: REJECT - Not expressing personal pain, talking about others
+
+Example 4 - GENUINE SIGNAL (Correct Detection):
+✅ CORRECT Analysis:
+   Post: "Our CRM is painfully slow. Takes 5 minutes to load a contact. Evaluating alternatives - anyone have recommendations?"
+   Trigger words: "slow", "alternatives", "recommendations"
+   Full context: Person expressing CURRENT pain + ACTIVELY seeking solutions (INBOUND)
+   Decision: DETECT "switch" - High confidence (0.95)
+
+MULTI-FACTOR ANALYSIS CHECKLIST (Apply AFTER Reading Full Post):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. ✅ Read ENTIRE post first - understand full context
+2. ✅ Verify person is expressing THEIR OWN need (not talking about clients/others)
+3. ✅ Check if pain/need is CURRENT (not past/resolved)
+4. ✅ Confirm direction: INBOUND (seeking help) vs OUTBOUND (giving advice)
+5. ✅ Ensure keywords appear in context of genuine need, not promotional mention
+6. ✅ Verify career changes are NEW announcements (not historical)
+7. ✅ Check funding/hiring/expansion are CURRENT events (not old news)
+8. ✅ Confirm switch signals show ACTIVE evaluation (not recommendations to others)
+
+TRIGGER PHRASE DETECTION (Only After Full Context Check):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- "promoted": NEW promotion announcement (not historical: "when I was promoted 3 years ago")
+- "changed_jobs": RECENT job change (not "I changed jobs last year and...")
+- "raised_funds": CURRENT funding announcement (not "we raised funds in 2020")
+- "hiring": ACTIVE hiring (not "we were hiring but filled the roles")
+- "expansion": ONGOING expansion (not "we expanded last quarter")
+- "pain": CURRENT frustration THEY are experiencing (not resolved/past/others' pain)
+- "competitor_complaint": THEIR dissatisfaction (not reporting what others say)
+- "switch": ACTIVELY seeking alternatives FOR THEMSELVES (not advising others)
 
 Return a JSON object with:
 {{
@@ -941,7 +1379,8 @@ Return a JSON object with:
     "confidence": 0.0 to 1.0,
     "evidence": "exact quote from post that triggered detection",
     "reason": "brief explanation of why this is a buying signal",
-    "triggering_post_index": index of the post that triggered this signal (0 for Twitter Post 1, 1 for Twitter Post 2, etc.). Use the post number from the input.
+    "triggering_post_index": index of the post that triggered this signal (0 for Twitter Post 1, 1 for Twitter Post 2, etc.). Use the post number from the input,
+    "rejection_reason": "REQUIRED when signal_detected=false: Human-friendly explanation of why posts didn't qualify (e.g., 'Posts are promotional content, not buying signals', 'No career changes or pain points detected', 'Posts don't relate to target keywords: CRM, sales automation')"
 }}
 
 CRITICAL: You MUST provide the "triggering_post_index" field. Look at which post contains the signal:
@@ -950,6 +1389,18 @@ CRITICAL: You MUST provide the "triggering_post_index" field. Look at which post
 - LinkedIn Post 1 → index for first LinkedIn (count Twitter posts first)
 - LinkedIn Post 2 → next index after first LinkedIn
 Example: If you have 3 Twitter posts and 2 LinkedIn posts, and the signal is in "LinkedIn Post 2", the index should be 4 (0,1,2 for Twitter, 3 for LinkedIn Post 1, 4 for LinkedIn Post 2).
+
+REJECTION REASON EXAMPLES (when signal_detected=false):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ Good: "All posts are promotional/marketing content recommending products to others. No genuine buyer intent detected."
+✅ Good: "Posts contain general industry updates but no career changes, pain points, or switch signals."
+✅ Good: "Content doesn't match target keywords (CRM, sales automation). Posts discuss project management instead."
+✅ Good: "Confidence score 0.65 - below 0.70 threshold. Weak pain signal detected but not strong enough."
+✅ Good: "Posts are endorsements and testimonials (OUTBOUND). Person is promoting, not seeking solutions."
+
+❌ Bad: "No signal"
+❌ Bad: "Doesn't match"
+❌ Bad: "Low confidence"
 
 Only return TRUE if you have high confidence (>0.7) that this is a genuine buying signal.
 """

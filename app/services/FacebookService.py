@@ -245,6 +245,11 @@ class FacebookService:
         previous: Optional[str] = None,
         next: Optional[str] = None,
     ):
+        print(f"🔍 [FacebookInsights] Fetching insights for entity_id: {entity_id}")
+        print(f"📊 [FacebookInsights] Metrics requested: {metrics}")
+        print(f"⏱️  [FacebookInsights] Period: {period}")
+        print(f"🔑 [FacebookInsights] Access token (first 20 chars): {access_token[:20] if access_token else 'None'}...")
+
         if not access_token:
             access_token = settings.META_SYSTEM_TOKEN
 
@@ -269,17 +274,26 @@ class FacebookService:
         # Manually append the access_token at the end
         full_url = f"{base_url}?{query_string}&access_token={access_token}"
 
+        print(f"🌐 [FacebookInsights] Calling Facebook Graph API: {base_url}?{query_string}&access_token=***")
+
         response = requests.get(full_url)
 
+        print(f"📡 [FacebookInsights] Response status: {response.status_code}")
+
         if response.status_code != HTTPStatus.OK:
+            error_data = response.json()
+            print(f"❌ [FacebookInsights] Facebook API Error:")
+            print(f"   Status: {response.status_code}")
+            print(f"   Error: {error_data}")
             return UriResponse.get_single_data_response(
                 "insights",
                 None,
-                response.json().get("error", {}).get("message", ""),
+                error_data.get("error", {}).get("message", ""),
                 code=response.status_code,
             )
 
         result = response.json()
+        print(f"✅ [FacebookInsights] Successfully fetched insights data")
 
         return UriResponse.get_single_data_response("insights", result)
 

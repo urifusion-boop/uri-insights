@@ -13,6 +13,7 @@ class LeadSourceEnum(str, Enum):
     NAIRALAND = "Nairaland"
     JOB_BOARDS = "Job Boards"
     LAZARUS = "Lazarus"
+    GOOGLE_MAPS = "Google Maps"
     OTHER = "Other"
 
 

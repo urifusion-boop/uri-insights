@@ -21,6 +21,7 @@ from app.domain.responses.uri_response import UriResponse
 from app.domain.schemas.leadform_schema import (
     BusinessLeadFormUpdate,
     ConversationalLeadFormUpdate,
+    GoogleMapsLeadFormUpdate,
     LeadFormCreate,
     OrganizationLeadFormUpdate,
     PersonLeadFormUpdate,
@@ -67,11 +68,55 @@ class LeadFormService:
         if lead_form.form_type in non_apollo_form_types:
             return create_response
 
-        lead_form = create_response.get("responseData", {})
+        lead_form_data = create_response.get("responseData", {})
+        monitoring_interval_hours = lead_form_data.get("monitoring_interval_hours", 0)
 
-        if background_tasks:
+        # Queue-based architecture: Queue Apollo jobs to Azure Service Bus for recurring monitoring
+        # BackgroundTasks: For one-time jobs (monitoring_interval_hours = 0)
+        if monitoring_interval_hours and monitoring_interval_hours > 0:
+            # RECURRING JOB: Queue to Azure Service Bus with re-queuing logic
+            print(f"📤 Queueing recurring Apollo job (every {monitoring_interval_hours}h) to Azure Service Bus")
+
+            from app.services.azure.producers.LeadGenerationProducer import LeadGenerationProducer
+            from app.repository.LeadGenerationJobRepository import LeadGenerationJobRepository
+            from app.domain.enums.queue_message_type_enum import LeadGenerationQueueMessageTypeEnum
+
+            # Create job tracking record
+            job_id = await LeadGenerationJobRepository.create_job(
+                db=db,
+                lead_form_id=lead_form_data.get("lead_form_id"),
+                user_id=lead_form_data.get("user_id"),
+                status="queued",
+                progress=0,
+                message=f"Queued recurring Apollo job (every {monitoring_interval_hours}h)"
+            )
+
+            # Add job_id to lead_form for worker tracking
+            lead_form_with_job = {**lead_form_data, "job_id": job_id}
+
+            # Determine message type based on form type
+            form_type = lead_form_data.get("form_type")
+            if form_type == "PERSON":
+                message_type = LeadGenerationQueueMessageTypeEnum.APOLLO_PERSON_LEAD_GENERATION.value
+            elif form_type == "ORGANIZATION":
+                message_type = LeadGenerationQueueMessageTypeEnum.APOLLO_ORGANIZATION_LEAD_GENERATION.value
+            else:
+                raise ValueError(f"Invalid form_type for Apollo: {form_type}")
+
+            # Queue immediately (no delay for first execution)
+            await LeadGenerationProducer.send_lead_generation_job(
+                lead_form_id=lead_form_data.get("lead_form_id"),
+                user_id=lead_form_data.get("user_id"),
+                lead_form=lead_form_with_job,
+                message_type=message_type
+            )
+
+            print(f"✅ Recurring Apollo job {job_id} queued successfully")
+        elif background_tasks:
+            # ONE-TIME JOB: Use BackgroundTasks for immediate execution
+            print(f"🔄 Triggering one-time Apollo job via BackgroundTasks")
             background_tasks.add_task(
-                LeadService.trigger_apollo_leads_generation, lead_form, db
+                LeadService.trigger_apollo_leads_generation, lead_form_data, db
             )
 
         return create_response
@@ -149,6 +194,16 @@ class LeadFormService:
         lead_form_id: str,
         background_tasks: BackgroundTasks,
     ):
+        # 🔍 LOG: Service layer received update
+        print(f"📝 [FORM UPDATE SERVICE] Processing update for form: {lead_form_id}")
+        print(f"🔍 [FORM UPDATE SERVICE] Location Intelligence in update_data:")
+        print(f"   - enable_location_intelligence: {getattr(update_data, 'enable_location_intelligence', None)}")
+        print(f"   - location_zone_center_lat: {getattr(update_data, 'location_zone_center_lat', None)}")
+        print(f"   - location_zone_center_lng: {getattr(update_data, 'location_zone_center_lng', None)}")
+        print(f"   - location_zone_radius_km: {getattr(update_data, 'location_zone_radius_km', None)}")
+        print(f"   - location_zone_name: {getattr(update_data, 'location_zone_name', None)}")
+        print(f"   - min_trust_score: {getattr(update_data, 'min_trust_score', None)}")
+
         if update_data.per_page and update_data.per_page == 0:
             return UriResponse.custom_response(
                 "You cannot generate 0 leads per page.", 400
@@ -160,6 +215,18 @@ class LeadFormService:
         update_data.disabled = False
         update_data.disabled_reason = None
         update_response = await LeadFormRepository.update(db, update_data, lead_form_id)
+
+        # 🔍 LOG: Check what was saved to database
+        if update_response.get("status"):
+            saved_form = update_response.get("responseData", {})
+            print(f"✅ [FORM UPDATE SERVICE] Form saved successfully")
+            print(f"🔍 [FORM UPDATE SERVICE] Location Intelligence in saved form:")
+            print(f"   - enable_location_intelligence: {saved_form.get('enable_location_intelligence')}")
+            print(f"   - location_zone_center_lat: {saved_form.get('location_zone_center_lat')}")
+            print(f"   - location_zone_center_lng: {saved_form.get('location_zone_center_lng')}")
+            print(f"   - location_zone_radius_km: {saved_form.get('location_zone_radius_km')}")
+            print(f"   - location_zone_name: {saved_form.get('location_zone_name')}")
+            print(f"   - min_trust_score: {saved_form.get('min_trust_score')}")
 
         if update_response.get("status"):
             lead_form = update_response.get("responseData", {})
@@ -228,6 +295,34 @@ class LeadFormService:
         return updated_form
 
     @staticmethod
+    async def update_google_maps_lead_form(
+        db: AsyncIOMotorDatabase,
+        lead_form_id: str,
+        updates: GoogleMapsLeadFormUpdate,
+        background_tasks: BackgroundTasks,
+    ):
+        update_data = updates.dict(exclude_none=True)
+
+        await db[LeadFormRepository.COLLECTION_NAME].update_one(
+            {"lead_form_id": lead_form_id}, {"$set": update_data}
+        )
+
+        updated_form = await LeadFormRepository.get_by_id(db, lead_form_id)
+
+        if updated_form.get("status"):
+            form_data = updated_form.get("responseData")
+            # Trigger Google Maps lead generation in background (same as create flow)
+            from app.services.LeadService import LeadService
+            print("[GOOGLE MAPS UPDATE] ✅ Triggering background lead generation")
+            background_tasks.add_task(
+                LeadService.trigger_apollo_leads_generation,
+                form_data,
+                db
+            )
+
+        return updated_form
+
+    @staticmethod
     async def get_by_filters(filters: dict, db: AsyncIOMotorDatabase):
         user_lead_forms = (await LeadFormRepository.get_by_filters(db, filters)).get(
             "responseData", []
@@ -281,6 +376,12 @@ class LeadFormService:
         ai_model = AIService.build_ai_model([AIService.construct_user_prompt(prompt)])
 
         ai_response = await AIService.structured_chat_completion(ai_model, result_model)
+
+        # Check if AI service returned an error
+        if isinstance(ai_response, dict) and "error" in ai_response:
+            return UriResponse.custom_response(
+                ai_response["error"], 503, False  # 503 Service Unavailable
+            )
 
         extracted_response = LeadFormHelper.process_auto_generated_inputs(
             AIService.extract_ai_result(ai_response)

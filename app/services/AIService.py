@@ -43,13 +43,40 @@ class AIService:
 
     @staticmethod
     async def chat_completion(request: ChatModel):
-        completion = client.chat.completions.create(
-            model=request.model,
-            messages=[message.dict() for message in request.messages],
-            temperature=request.temperature,
-        )
-        print("Chat Completion Response: ", completion)
-        return completion
+        try:
+            completion = client.chat.completions.create(
+                model=request.model,
+                messages=[message.dict() for message in request.messages],
+                temperature=request.temperature,
+            )
+            print("Chat Completion Response: ", completion)
+            return completion
+        except Exception as e:
+            error_message = str(e)
+
+            # Handle rate limit errors (429)
+            if "RateLimitError" in str(type(e)) or "429" in error_message:
+                print("⚠️ OpenAI rate limit exceeded - quota exhausted")
+                return {"error": "AI service is temporarily unavailable. Please try again later or contact support."}
+
+            # Handle insufficient quota errors
+            if "insufficient_quota" in error_message:
+                print("⚠️ OpenAI quota insufficient - credits exhausted")
+                return {"error": "AI service is temporarily unavailable due to quota limits. Please contact support."}
+
+            # Handle authentication errors
+            if "authentication" in error_message.lower() or "401" in error_message:
+                print("⚠️ OpenAI authentication error - invalid API key")
+                return {"error": "AI service configuration error. Please contact support."}
+
+            # Handle timeout errors
+            if "timeout" in error_message.lower() or "timed out" in error_message.lower():
+                print("⚠️ OpenAI request timed out")
+                return {"error": "AI service request timed out. Please try again."}
+
+            # Log unexpected errors
+            print(f"⚠️ Unexpected OpenAI error in chat_completion: {error_message}")
+            raise e
 
     @staticmethod
     async def structured_chat_completion(
@@ -71,8 +98,35 @@ class AIService:
             )
 
         except Exception as e:
-            if "LengthFinishReasonError" in str(e):
+            # Handle specific OpenAI errors gracefully
+            error_message = str(e)
+
+            if "LengthFinishReasonError" in error_message:
+                print("⚠️ OpenAI response truncated due to length limit")
                 return {"error": "Response was truncated due to length limit."}
+
+            # Handle rate limit errors (429)
+            if "RateLimitError" in str(type(e)) or "429" in error_message:
+                print("⚠️ OpenAI rate limit exceeded - quota exhausted")
+                return {"error": "AI service is temporarily unavailable. Please try again later or contact support."}
+
+            # Handle insufficient quota errors
+            if "insufficient_quota" in error_message:
+                print("⚠️ OpenAI quota insufficient - credits exhausted")
+                return {"error": "AI service is temporarily unavailable due to quota limits. Please contact support."}
+
+            # Handle authentication errors
+            if "authentication" in error_message.lower() or "401" in error_message:
+                print("⚠️ OpenAI authentication error - invalid API key")
+                return {"error": "AI service configuration error. Please contact support."}
+
+            # Handle timeout errors
+            if "timeout" in error_message.lower() or "timed out" in error_message.lower():
+                print("⚠️ OpenAI request timed out")
+                return {"error": "AI service request timed out. Please try again."}
+
+            # Log unexpected errors but don't crash
+            print(f"⚠️ Unexpected OpenAI error: {error_message}")
             raise e
 
         return completion

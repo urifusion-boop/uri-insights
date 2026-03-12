@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 import json
 from http import HTTPStatus
 import time
+from urllib import response
 from fastapi.responses import JSONResponse
 import requests
 from app.core.helpers.account_tracking_helper import AccountTrackingHelper
@@ -75,7 +76,7 @@ class InstagramService:
         db: AsyncIOMotorDatabase,
         account_limits: dict,
     ):
-        url = f"https://graph.facebook.com/{settings.INSTAGRAM_API_VERSION}/me/accounts?fields=id,access_token,name,picture,username,instagram_business_account%7Bid,username,biography,profile_picture_url%7D&access_token={access_token}"
+        url = f"https://graph.facebook.com/{settings.INSTAGRAM_API_VERSION}/me/accounts?fields=id,access_token,name,picture,username,followers_count,fan_count,instagram_business_account%7Bid,username,biography,profile_picture_url,followers_count%7D&access_token={access_token}"
 
         instagram_limit = account_limits.get("instagram_limit", 0)
         facebook_limit = account_limits.get("facebook_limit", 0)
@@ -95,6 +96,31 @@ class InstagramService:
 
         pages_data = response.json().get("data", [])
         if not pages_data:
+            # No Facebook Pages found — fall back to saving the user's personal Facebook profile
+            me_url = f"https://graph.facebook.com/{settings.INSTAGRAM_API_VERSION}/me?fields=id,name,picture&access_token={access_token}"
+            try:
+                me_response = requests.get(me_url)
+                if me_response.status_code == HTTPStatus.OK:
+                    me_data = me_response.json()
+                    personal_influencer = influencer_schema.InfluencerCreate(
+                        user_id=user_id,
+                        social_name=me_data.get("name", ""),
+                        profile_pic=me_data.get("picture", {}).get("data", {}).get("url", ""),
+                        account_type=AccountTypeEnum.PROFESSIONAL,
+                        social_user_id=me_data.get("id", ""),
+                        social_username=me_data.get("name", ""),
+                        social_platform="FACEBOOK",
+                        connected=True,
+                        token=access_token,
+                    )
+                    save_result = await InfluencerRepository.create_or_update_influencer(db, personal_influencer)
+                    if save_result.get("success"):
+                        await FeatureLimitService.sync_specific_feature_limit_for_user(
+                            db, user_id, EndpointsEnum.SAVE_FACEBOOK_ACCOUNTS.value, "FACEBOOK"
+                        )
+                    return await InfluencerRepository.get_influencers_by_filter(db, user_id)
+            except Exception as e:
+                print(f"Error saving personal Facebook account: {e}")
             return UriResponse.get_single_data_response("instagram account", None)
 
         # Save Facebook user pages
@@ -107,13 +133,13 @@ class InstagramService:
         influencers: List[influencer_schema.InfluencerCreate] = []
 
         count = 0
-        while count < total_accounts_limit and count < len(pages_data):
+        while count < len(pages_data):
             page = pages_data[count]
             # Handle Instagram business accounts
             instagram_business_account = page.get("instagram_business_account")
 
             if instagram_business_account and (
-                instagram_count < min(total_accounts_limit, instagram_limit)
+                instagram_count < instagram_limit
             ):
                 influencers.append(
                     influencer_schema.InfluencerCreate(
@@ -128,6 +154,8 @@ class InstagramService:
                         social_platform="INSTAGRAM",
                         connected=True,
                         token=access_token,
+                        meta_access_token=access_token,
+                        followers=instagram_business_account.get("followers_count"),
                     )
                 )
                 instagram_count += 1
@@ -136,7 +164,6 @@ class InstagramService:
             if (
                 page.get("id")
                 and (facebook_count < facebook_limit)
-                and ((instagram_count + facebook_count) < total_accounts_limit)
             ):
                 influencers.append(
                     influencer_schema.InfluencerCreate(
@@ -152,14 +179,13 @@ class InstagramService:
                         social_platform="FACEBOOK",
                         connected=True,
                         token=page.get("access_token", ""),
+                        followers=page.get("followers_count") or page.get("fan_count"),
                     )
                 )
                 facebook_count += 1
 
-            if (
-                (facebook_count >= facebook_limit)
-                and (instagram_count >= instagram_limit)
-            ) or (instagram_count + facebook_count) >= total_accounts_limit:
+            # Stop if we've reached the total limit or both individual limits
+            if (instagram_count + facebook_count) >= total_accounts_limit:
                 break
 
             count += 1
@@ -179,7 +205,8 @@ class InstagramService:
                 else:
                     platform = influencer.social_platform
                     if platform:
-                        endpoint = platform_to_endpoint.get(platform.value, "")
+                        platform_key = platform.value if hasattr(platform, 'value') else platform
+                        endpoint = platform_to_endpoint.get(platform_key, "")
                         await FeatureLimitService.sync_specific_feature_limit_for_user(
                             db,
                             user_id,
@@ -198,10 +225,21 @@ class InstagramService:
         after: Optional[str] = None,
         limit: int = 24,
     ):
+        """
+        Fetch Instagram Business Discovery data using a *user* access token by calling:
+        GET /me/accounts?fields=...instagram_business_account{...media{...}}...
+
+        Fixes:
+        - Avoids `business_account` being referenced before assignment.
+        - Removes duplicated business_account lookup blocks.
+        - Ensures paging `next_url` is a string URL (not `{}`).
+        - Returns proper error responses when Graph returns non-200.
+        """
+
         # Base URL for Instagram business account details with media records
         url = InstagramService._set_auth_business_discovery_params(
-            access_token, before, after, limit
-        )
+        access_token, before, after, limit
+    )
 
         # Generate a cache key based on the URL
         cache_key = CacheHelper.generate_cache_key(url)
@@ -214,86 +252,93 @@ class InstagramService:
 
         # Make the initial request to the API
         response = requests.get(url)
-
         response_data = response.json()
 
+        # If Graph returned an error, bubble it up properly
         if response.status_code != HTTPStatus.OK:
-            print("API Error:", response_data)  # Log error details
-            return UriResponse.get_single_data_response(
-                "business", None, response_data.get("message", "")
-            )
+            print("API Error:", response_data)
+            return UriResponse.custom_response(
+            message="Facebook Graph error while fetching /me/accounts",
+            error_code=response.status_code,
+            success=False,
+            data=response_data,
+        )
 
-        # Extract the Instagram business account information
+        # Extract pages data
         data_response = response_data.get("data", [])
+        if not data_response:
+            return UriResponse.error_response(
+            "No Facebook Pages/Instagram business accounts found for this access token."
+        )
 
-        if data_response:
-            business_account = next(
-                (
-                    item
-                    for item in data_response
-                    if item.get("instagram_business_account", {}).get("username", None)
-                    == username
-                ),
-                None,
+        # Find the page whose instagram_business_account.username matches the requested username
+        page_match = next(
+        (
+            item
+            for item in data_response
+            if (item.get("instagram_business_account") or {}).get("username") == username
+        ),
+        None,
+    )
+
+        # Pull out the instagram business account object
+        business_account = (page_match or {}).get("instagram_business_account") or {}
+        if not business_account:
+            return UriResponse.error_response(
+            "This IG account is not linked to any Page accessible by this token (or it’s not a professional account)."
             )
 
-            business_account = (business_account or {}).get(
-                "instagram_business_account", {}
-            )
+        # Media + paging
+        media_obj = business_account.get("media") or {}
+        media_data = media_obj.get("data") or []
 
-            if not business_account:
-                return UriResponse.error_response(
-                    "This account is not a professional account"
-                )
-        media_data = (business_account or {}).get("media", {}).get("data", [])
+        paging_info = media_obj.get("paging") or {}
+        after_cursor = (paging_info.get("cursors") or {}).get("after")
+        next_url = paging_info.get("next")  # should be a URL string if present
 
-        # Check if there is more data (pagination)
-        paging_info = (business_account or {}).get("media", {}).get("paging", {})
-        after_cursor = paging_info.get("cursors", {}).get("after")
-        next_url = paging_info.get("next", {})
-
-        # If there is an after cursor, make a second request to fetch the next batch
+        # If there is an after cursor and next URL, fetch the next batch
         if after_cursor and next_url:
             next_response = requests.get(next_url)
             next_response_data = next_response.json()
-            # print(next_response_data)
 
-            if len(next_response_data["data"]) > 1:
-                # Append the next set of media records
-                next_media_data = next_response_data["data"]
+        if next_response.status_code == HTTPStatus.OK:
+            next_media_data = next_response_data.get("data") or []
+            if next_media_data:
                 media_data.extend(next_media_data)
 
-                # Replace the paging
-                (business_account or {})["media"]["paging"] = next_response_data[
-                    "paging"
-                ]
+            # Replace paging with the newest paging
+            if "media" not in business_account:
+                business_account["media"] = {}
+            business_account["media"]["paging"] = next_response_data.get("paging")
+        else:
+            print("Next page API Error:", next_response_data)
 
+        # Fetch influencer record (optional) and trigger embedding
         influencer_data = (
-            (
-                await InfluencerRepository.get_influencers_by_filter(
-                    db=db, social_username=username, access_token=access_token
-                )
+        (
+            await InfluencerRepository.get_influencers_by_filter(
+                db=db, social_username=username, access_token=access_token
             )
-            .get("responseData", {})
-            .get("data", [])
         )
+        .get("responseData", {})
+        .get("data", [])
+    )
 
         if influencer_data:
             await AccountTrackingHelper.trigger_account_tracking_post_embedding_process(
-                db, influencer_data[0], media_data, PostPlatformEnum.INSTAGRAM
-            )
-        # Return the merged media records and the business account details
-        (business_account or {})["media"][
-            "data"
-        ] = media_data  # Updated media data with pagination
-        (business_account or {})["cache_key"] = cache_key
+            db, influencer_data[0], media_data, PostPlatformEnum.INSTAGRAM
+        )
 
-        # Cache the fresh response with the provided TTL
-        if business_account:
-            await CacheRepository.set_cache(
-                db, cache_key, business_account, ttl=timedelta(hours=2)
-            )
-        # print("Business Account : ", business_account)
+        # Return merged media + cache key
+        if "media" not in business_account:
+            business_account["media"] = {}
+
+        business_account["media"]["data"] = media_data
+        business_account["cache_key"] = cache_key
+
+        # Cache the fresh response
+        await CacheRepository.set_cache(db, cache_key, business_account, ttl=timedelta(hours=2))
+
         return UriResponse.get_single_data_response("business", business_account)
 
     @staticmethod
@@ -385,6 +430,10 @@ class InstagramService:
         username: str,
         access_token: Optional[str] = None,
     ):
+        import os
+        if os.getenv("LOCAL_DEV_MODE", "").lower() in ["true", "1", "yes"]:
+            print(f"🔧 LOCAL DEV: Bypassing subscription validation for Instagram business discovery")
+            # Continue with normal flow - no subscription check needed
         try:
             if access_token and username:
                 # TO DO: Add comment sentiments before returning data
@@ -719,15 +768,17 @@ class InstagramService:
 
         # Handle non-OK responses
         if response.status_code != HTTPStatus.OK:
+            # Return empty array for 404 (insufficient data) instead of error
+            print(f"ℹ️  [Instagram Demographics] Insufficient engagement data for account {ig_user_id} (requires 100+ engagements)")
             return UriResponse.get_single_data_response(
-                "demography insight", None, code=response.status_code
+                "demography insight", []
             )
 
         # Return the resulting data
         result = response.json()
 
         return UriResponse.get_single_data_response(
-            "demography insight", result["data"]
+            "demography insight", result.get("data", [])
         )
 
     @staticmethod
@@ -742,9 +793,26 @@ class InstagramService:
         response = requests.get(url)
 
         if response.status_code != HTTPStatus.OK:
-            return UriResponse.get_single_data_response(
-                "media", None, code=response.status_code
-            )
+            # Return empty data for 404 (no tags/mentions) instead of error
+            print(f"ℹ️  [Instagram Tags] No tags/mentions found for account {ig_user_id}")
+            return {
+                "status": True,
+                "responseCode": 200,
+                "responseMessage": "No tags/mentions found for this account",
+                "responseData": {
+                    "posts": [],
+                    "overall_sentiment": {
+                        "total_feedback": 0,
+                        "positive_score": 0,
+                        "neutral_score": 0,
+                        "negative_score": 0,
+                        "sentiment_distribution": {"positive": 0, "neutral": 0, "negative": 0},
+                        "top_positive": None,
+                        "top_negative": None,
+                    },
+                    "paging": {},
+                },
+            }
 
         result = response.json()
 
@@ -896,13 +964,17 @@ class InstagramService:
         print("Stories Response : ", response.json())
 
         if response.status_code != HTTPStatus.OK:
-            return UriResponse.get_single_data_response(
-                "stories", None, code=response.status_code
-            )
+            # Return empty array for 404 (no stories) instead of error
+            print(f"ℹ️  [Instagram Stories] No stories available for account {ig_user_id}")
+            return UriResponse.get_single_data_response("stories", [])
 
         result = response.json()
+        stories_data = result.get("data", [])
 
-        return UriResponse.get_single_data_response("stories", result["data"])
+        if not stories_data:
+            print(f"ℹ️  [Instagram Stories] Account {ig_user_id} has no active stories")
+
+        return UriResponse.get_single_data_response("stories", stories_data)
 
     @staticmethod
     async def fetch_business_media(

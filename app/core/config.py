@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str
     GOOGLE_API_KEY: str
     GOOGLE_CUSTOM_SEARCH_ENGINE_API_KEY: str
+    GOOGLE_PLACES_API_KEY: str = ""  # Google Places API for Maps business discovery (optional until enabled)
     URI_SEARCH_ENGINE_ID: str
     META_API_KEY: str
     META_APP_ID: str
@@ -81,6 +82,9 @@ class Settings(BaseSettings):
     APIFY_API_TOKEN: str = ""
     APIFY_API_TOKEN_BACKUP: str = ""  # Backup token for failover
     APIFY_TIMEOUT_SECONDS: int = 60   # Timeout before switching to backup
+
+    # Bright Data Configuration
+    BRIGHTDATA_API_TOKEN: Optional[str] = None  # Bright Data API token for SDK
 
     # LinkedIn Scraping Configuration
     LINKEDIN_SESSION_COOKIE: Optional[str] = None  # li_at session cookie for authenticated scraping

@@ -4,6 +4,7 @@ from app.domain.enums.leadform_enum import (
 )
 from app.domain.schemas.leadform_schema import (
     ConversationalLeadFormUpdate,
+    GoogleMapsLeadFormUpdate,
     LeadFormUpdateBase,
     OrganizationLeadFormUpdate,
     PersonLeadFormUpdate,
@@ -15,12 +16,14 @@ class LeadFormHelper:
         LeadFormTypeEnum.ORGANIZATION: LeadFormAutoPopulateEnum.ORGANIZATION_FORM_PROMPT.value,
         LeadFormTypeEnum.PERSON: LeadFormAutoPopulateEnum.PERSON_FORM_PROMPT.value,
         LeadFormTypeEnum.CONVERSATIONAL: LeadFormAutoPopulateEnum.CONVERSATIONAL_FORM_PROMPT.value,
+        LeadFormTypeEnum.GOOGLE_MAPS: LeadFormAutoPopulateEnum.GOOGLE_MAPS_FORM_PROMPT.value,
     }
 
     FORM_TYPE_TO_RESULT_MODEL_MAP = {
         LeadFormTypeEnum.ORGANIZATION: OrganizationLeadFormUpdate,
         LeadFormTypeEnum.PERSON: PersonLeadFormUpdate,
         LeadFormTypeEnum.CONVERSATIONAL: ConversationalLeadFormUpdate,
+        LeadFormTypeEnum.GOOGLE_MAPS: GoogleMapsLeadFormUpdate,
     }
 
     DEFAULT_ERR_MESSAGE = "Invalid form type provided for auto population."

@@ -101,6 +101,10 @@ class FocusContact(BaseModel):
     twitter_url: Optional[str] = None
     current_company: Optional[str] = None
 
+    # Twitter-specific fields
+    twitter_handle: Optional[str] = None  # "@elonmusk"
+    twitter_id: Optional[str] = None  # Stable Twitter ID for monitoring
+
     # Bio tracking for job changes
     last_bio_text: Optional[str] = None
     last_bio_hash: Optional[str] = None  # MD5 hash for comparison
@@ -124,6 +128,25 @@ class FocusContact(BaseModel):
     certifications: Optional[List[Dict[str, Any]]] = None  # Certifications
     enriched_at: Optional[datetime] = None  # When enrichment was performed
     enrichment_status: Optional[str] = None  # "pending", "completed", "failed"
+
+    # Twitter enrichment data
+    twitter_data: Optional[Dict[str, Any]] = None  # {
+    #     "followers": 0,
+    #     "following": 0,
+    #     "verified": False,
+    #     "posts_count": 0,
+    #     "joined_date": None,
+    #     "banner_image": None,
+    #     "website": None,
+    #     "enrichment_snapshot": {
+    #         "last_post_id": None,  # Track last known post
+    #         "posts": [],  # 5 recent posts for display
+    #         "enriched_at": None
+    #     },
+    #     "last_scanned": None,
+    #     "last_activity_detected": None,
+    #     "new_posts_since_last_scan": 0
+    # }
 
     # Monitoring state
     monitoring_status: LazarusMonitoringStatusEnum = LazarusMonitoringStatusEnum.ACTIVE
@@ -168,9 +191,27 @@ class CompanyMonitor(BaseModel):
     # Identity
     company_name: str
     website_url: Optional[str] = None
+    linkedin_url: Optional[str] = None  # LinkedIn company page URL
     domain: Optional[str] = None  # Extracted from website_url
     location: Optional[str] = None  # e.g., "Lagos, Nigeria" or "Remote"
     country_code: Optional[str] = None  # e.g., "ng", "us", "uk" - for Google Search
+
+    # Enrichment data (from LinkedIn Companies API)
+    logo: Optional[str] = None
+    company_image: Optional[str] = None
+    about: Optional[str] = None
+    slogan: Optional[str] = None
+    description: Optional[str] = None
+    specialties: Optional[List[str]] = None
+    organization_type: Optional[str] = None
+    company_size: Optional[str] = None
+    industries: Optional[List[str]] = None
+    founded: Optional[int] = None
+    headquarters: Optional[str] = None
+    followers: Optional[int] = None
+    employees: Optional[int] = None
+    enriched_at: Optional[datetime] = None
+    enrichment_status: Optional[str] = None  # "pending", "completed", "failed"
 
     # Homepage tracking for pivots
     last_homepage_hash: Optional[str] = None  # MD5 hash
@@ -254,6 +295,9 @@ class ScanHistory(BaseModel):
     signal_type: Optional[str] = None  # "promoted", "changed_jobs", "pain_point", etc.
     confidence: Optional[float] = None  # 0.0 to 1.0
     triggering_post_index: Optional[int] = None  # Which post triggered the alert
+
+    # Rejection reason (when signal_detected = False)
+    rejection_reason: Optional[str] = None  # Human-friendly explanation from AI why posts didn't qualify
 
     # Timestamps
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -373,6 +417,10 @@ class LazarusSlots(BaseModel):
     focus_contacts_count: int = 0
     company_monitors_count: int = 0
 
+    # Email Notifications (Phase 2: Notification System)
+    email_notifications_enabled: bool = True  # Default: enabled
+    notification_email: Optional[str] = None  # If different from user email, otherwise use user.email
+
     # Tracking
     last_updated: datetime = Field(default_factory=datetime.utcnow)
 
@@ -402,6 +450,7 @@ class CompanyMonitorCreate(BaseModel):
     """Create a new company monitor"""
     company_name: str
     website_url: Optional[str] = None
+    linkedin_url: Optional[str] = None  # LinkedIn company page URL
     location: Optional[str] = None  # e.g., "Lagos, Nigeria" or "Remote"
     country_code: Optional[str] = None  # e.g., "ng", "us", "uk"
     last_homepage_content: Optional[str] = None
@@ -544,6 +593,7 @@ class BuyingSignalAnalysis(BaseModel):
     evidence: Optional[str] = None
     reason: Optional[str] = None
     triggering_post_index: int = 0  # REQUIRED: Which post triggered the signal (0-indexed, e.g., "Twitter Post 1" = 0, "Twitter Post 2" = 1, "LinkedIn Post 1" = first LinkedIn index)
+    rejection_reason: Optional[str] = None  # REQUIRED when signal_detected=False: Human-friendly explanation of why posts didn't qualify
 
 
 class KeywordExtractionResult(BaseModel):

@@ -77,19 +77,16 @@ jobs:
           command_timeout: 15m # Command execution timeout
           script: |
             sudo su - uriprod -c "
-            if [ ! -d /home/uriprod/uri-insight ]; then
-              mkdir -p /home/uriprod/uri-insight;
-            fi
             cd /home/uriprod/uri-insight
 
-            # Copy docker-compose file from tmp to working directory
-            cp /tmp/docker-compose.prod.yml /home/uriprod/uri-insight/docker-compose.prod.yml
+            # Copy docker-compose file from tmp
+            cp /tmp/docker-compose.prod.yml /home/uriprod/uri-insight/docker-compose.yml
 
             echo '${{ secrets.DOCKER_PASSWORD }}' | docker login -u '${{ secrets.DOCKER_USERNAME }}' --password-stdin
-            docker-compose -f docker-compose.prod.yml down
-            docker-compose -f docker-compose.prod.yml pull
-            docker-compose -f docker-compose.prod.yml up -d --scale uri-insight.worker=10
+            docker-compose down
+            docker-compose pull
+            docker-compose up -d --scale uri-insight-prod.worker=10
 
-            # Cleanup redundant image
+            # Cleanup redundant images
             docker image prune -f
             "

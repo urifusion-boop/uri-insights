@@ -46,8 +46,8 @@ class ScoringThresholds(BaseModel):
 
 class LeadFormBase(BaseModel):
     lead_form_id: str = Field(default_factory=lambda: str(ObjectId()))
-    form_type: LeadFormTypeEnum
-    form_title: str
+    form_type: Optional[LeadFormTypeEnum] = None  # Made optional to handle corrupted forms
+    form_title: Optional[str] = None  # Made optional to handle corrupted forms
     user_id: str
     is_default: Optional[bool] = False  # Multi-form support: Mark one form as default per user per type
     disabled: bool = False
@@ -80,6 +80,7 @@ class LeadFormBase(BaseModel):
     revenue_range_min: Optional[int] = None
     revenue_range_max: Optional[int] = None
     technology_uids: Optional[List[str]] = None
+    currently_using_any_of_technology_uids: Optional[List[str]] = None
     q_organization_keyword_tags: Optional[List[str]] = None
     q_organization_name: Optional[str] = None
 
@@ -118,6 +119,32 @@ class LeadFormBase(BaseModel):
     # AI Next Steps fields
     lead_generation_goal: Optional[str] = None  # User's business goal/reason for generating leads (e.g., "I want to sell gadgets to programmers")
 
+    # Google Maps Search Configuration
+    maps_search_mode: Optional[str] = None  # "text", "nearby", "auto" - which API to use
+
+    # Text Search fields (natural language queries)
+    maps_search_query: Optional[str] = None  # e.g., "small businesses in Ogba"
+    maps_location: Optional[str] = None  # e.g., "Ogba, Lagos, Nigeria"
+
+    # Nearby Search fields (precise location-based)
+    maps_latitude: Optional[float] = None  # Latitude for precise search
+    maps_longitude: Optional[float] = None  # Longitude for precise search
+    maps_radius_km: Optional[float] = None  # Search radius in kilometers
+
+    # Common Google Maps filters
+    maps_business_types: Optional[List[str]] = None  # e.g., ["restaurant", "cafe", "store"]
+    maps_min_rating: Optional[float] = None  # Minimum Google rating (0-5)
+    maps_exclude_closed: Optional[bool] = None  # Exclude closed businesses
+    maps_max_results: Optional[int] = None  # Maximum number of results to return
+
+    # Location Intelligence fields (URI-branded geographic targeting for Organization forms)
+    enable_location_intelligence: Optional[bool] = False
+    location_zone_center_lat: Optional[float] = None
+    location_zone_center_lng: Optional[float] = None
+    location_zone_radius_km: Optional[float] = None
+    location_zone_name: Optional[str] = None
+    min_trust_score: Optional[float] = None
+
     # Pagination
     page: Optional[int] = 1
     per_page: Optional[int] = 10
@@ -132,7 +159,12 @@ class LeadFormBase(BaseModel):
 
 
 class LeadFormCreate(LeadFormBase):
-    pass
+    # Override to make these required for creation
+    form_type: LeadFormTypeEnum
+    form_title: str
+
+    class Config:
+        extra = "forbid"
 
 
 class LeadFormUpdateBase(BaseModel):
@@ -174,8 +206,17 @@ class OrganizationLeadFormUpdate(LeadFormUpdateBase, ApolloFormsFields):
     revenue_range_min: Optional[int] = None
     revenue_range_max: Optional[int] = None
     technology_uids: Optional[List[str]] = None
+    currently_using_any_of_technology_uids: Optional[List[str]] = None
     q_organization_keyword_tags: Optional[List[str]] = None
     q_organization_name: Optional[str] = None
+
+    # Location Intelligence fields (URI-branded geographic targeting)
+    enable_location_intelligence: Optional[bool] = False
+    location_zone_center_lat: Optional[float] = None
+    location_zone_center_lng: Optional[float] = None
+    location_zone_radius_km: Optional[float] = None
+    location_zone_name: Optional[str] = None  # Display name: "Ogba, Lagos"
+    min_trust_score: Optional[float] = None  # Minimum trust score filter (0-5)
 
 
 class BizConvLeadFormUpdateBase(LeadFormUpdateBase):
@@ -221,6 +262,21 @@ class ConversationalLeadFormUpdate(BizConvLeadFormUpdateBase):
     # Job Boards fields
     solution_context: Optional[str] = None  # What problem does user's product/service solve?
     job_keywords: Optional[List[str]] = None  # AI-generated job role keywords (PRD Section 5)
+
+
+class GoogleMapsLeadFormUpdate(LeadFormUpdateBase):
+    # Google Maps Search fields
+    maps_search_mode: Optional[str] = None  # "auto", "text", "nearby"
+    maps_search_query: Optional[str] = None  # Natural language query for Text Search
+    maps_location: Optional[str] = None  # Location name for Text Search
+    maps_latitude: Optional[float] = None  # Latitude for Nearby Search
+    maps_longitude: Optional[float] = None  # Longitude for Nearby Search
+    maps_radius_km: Optional[float] = None  # Search radius in kilometers
+    maps_business_types: Optional[List[str]] = None  # Filter by business types
+    maps_min_rating: Optional[float] = None  # Minimum Google rating (0-5)
+    maps_exclude_closed: Optional[bool] = None  # Exclude closed businesses
+    maps_max_results: Optional[int] = None  # Maximum results to return
+    monitoring_interval_hours: Optional[int] = None  # How often to check for new businesses
 
 
 class LeadForm(LeadFormBase):
