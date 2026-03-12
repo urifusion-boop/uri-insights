@@ -60,13 +60,13 @@ jobs:
       - uses: actions/checkout@v4
 
       # Copy docker-compose file to VM
-      - name: Copy docker-compose.yml to VM
+      - name: Copy docker-compose.dev.yml to VM
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.VM_IP_DEV }}
           username: uridev
           key: ${{ secrets.SSH_PRIVATE_KEY_DEV }}
-          source: "./docker-compose.yml"
+          source: "./docker-compose.dev.yml"
           target: "~/uri-insights/"
           strip_components: 0
 
@@ -86,9 +86,9 @@ jobs:
             fi
             cd ~/uri-insights
             echo '${{ secrets.DOCKER_PASSWORD }}' | docker login -u '${{ secrets.DOCKER_USERNAME }}' --password-stdin
-            docker-compose down
-            docker-compose pull
-            docker-compose up -d --scale uri-insight-prod.worker=5
+            docker-compose -f docker-compose.dev.yml down
+            docker-compose -f docker-compose.dev.yml pull
+            docker-compose -f docker-compose.dev.yml up -d
 
             # Cleanup redundant image
             docker image prune -f
