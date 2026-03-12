@@ -447,10 +447,11 @@ class FacebookService:
         # Handle the API response
         if response.status_code != HTTPStatus.OK:
             return {
-                "error": response.json()
+                "status": False,
+                "responseCode": response.status_code,
+                "responseMessage": response.json()
                 .get("error", {})
                 .get("message", "An error occurred"),
-                "status": response.status_code,
             }
 
         return UriResponse.get_single_data_response("reels", response.json())

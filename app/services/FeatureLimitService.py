@@ -1,4 +1,5 @@
 from typing import Callable, Dict, Optional
+from app.core.config import settings
 from app.domain.enums.endpoints_enum import EndpointsEnum
 from app.repository.InfluencerRepository import InfluencerRepository
 from app.repository.TrackerRepository import TrackerRepository
@@ -20,6 +21,9 @@ class FeatureLimitService:
         endpoint: str,
         social_platform: Optional[str] = None,
     ):
+        if settings.BYPASS_FEATURE_LIMIT_CHECK:
+            return None
+
         update_functions: Dict[str, Callable] = {
             "account_tracking": FeatureLimitService._sync_account_tracking_limit,
             EndpointsEnum.KEYWORD_TRACKIING.value: lambda **kwargs: FeatureLimitService._sync_tracker_limit(

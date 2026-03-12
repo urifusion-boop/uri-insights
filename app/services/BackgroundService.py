@@ -124,6 +124,17 @@ class BackgroundService:
             replace_existing=False,
         )
 
+        from app.agents.social_media_manager.services.auto_content_service import AutoContentService
+        scheduler.add_job(
+            AutoContentService.run_scheduled_auto_generation,
+            trigger="cron",
+            hour=9,
+            minute=0,
+            kwargs={"db": db},
+            id="auto_content_generation",
+            replace_existing=True,
+        )
+
         # Lazarus Auto-Detection: Scan for dead leads daily at 2 AM
         scheduler.add_job(
             func=BackgroundService.run_auto_dead_lead_detection,

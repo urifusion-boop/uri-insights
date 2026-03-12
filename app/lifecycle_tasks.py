@@ -17,13 +17,13 @@ async def start_service_bus_consumers():
 
 
 async def run_db_startup_tasks():
-    # Create vector index for embeddings collection
     db: AsyncIOMotorDatabase = get_db()
-    await EmbeddingRepository.create_vector_index(db)
-    # Create indexes for search history
-    await LeadSearchHistoryRepository.setup_indexes(db)
-    # Create indexes for lead generation jobs (for polling)
-    await LeadGenerationJobRepository.ensure_indexes(db)
+    try:
+        await EmbeddingRepository.create_vector_index(db)
+        await LeadSearchHistoryRepository.setup_indexes(db)
+        await LeadGenerationJobRepository.ensure_indexes(db)
+    except Exception as e:
+        print(f"[startup] DB startup tasks failed (non-fatal): {e}")
     # await LeadRepository.update_conv_to_biz_leads(db)
     # await LeadFormRepository.change_conversational_lead_forms_to_business_lead_forms(db)
     # await LeadRepository.delete_duplicate_leads(get_db())

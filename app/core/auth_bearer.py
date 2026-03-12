@@ -43,6 +43,11 @@ class JWTBearer(HTTPBearer):
             return None
 
     async def validate_subscription(self, payload: dict):
+        from app.core.config import settings
+        if settings.BYPASS_SUBSCRIPTION_CHECK:
+            print("   ✅ BYPASS_SUBSCRIPTION_CHECK=True — skipping subscription validation")
+            return
+
         # Access the claims from the payload
         claims = payload.get("claims", {})
         user_id = claims.get("userId")
