@@ -195,10 +195,10 @@ class UriResponse:
             }
 
     @staticmethod
-    def error_response(message: str):
+    def error_response(message: str, code: int = HTTP_500_INTERNAL_SERVER_ERROR):
         return {
             "status": False,
-            "responseCode": HTTP_500_INTERNAL_SERVER_ERROR,
+            "responseCode": code,
             "responseMessage": message,
         }
 

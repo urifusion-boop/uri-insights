@@ -12,6 +12,7 @@ from app.database import get_db
 from app.core.config import settings
 from app.database import connect_to_mongo
 from app.core.sentry_config import initialize_sentry
+from app.agents.social_media_manager.routers.complete_social_manager import router as social_media_router
 
 # Initialize Sentry first before anything else
 initialize_sentry()
@@ -267,6 +268,12 @@ app.include_router(
     prefix="/x-insights",
     tags=["X Insights"],
     dependencies=[Depends(JWTBearer(validate_subscription=True))],
+)
+app.include_router(
+    social_media_router,
+    prefix="/social-media",
+    tags=["Social Media Manager"],
+   # dependencies=[Depends(JWTBearer(validate_subscription=True))],
 )
 
 app.include_router(
