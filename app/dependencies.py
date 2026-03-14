@@ -1,6 +1,7 @@
 from typing import Generator
 
 from fastapi import HTTPException, Request
+from app.core.config import settings
 from app.core.helpers.middleware_helper import MiddlewareHelper
 from app.database import get_db
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -33,6 +34,12 @@ async def enforce_feature_limit(request: Request):
     print("\nURL Path after formatting:", url_path)
     if not url_path:
         return
+
+    if settings.BYPASS_FEATURE_LIMIT_CHECK:
+        print("   ✅ BYPASS_FEATURE_LIMIT_CHECK=True — skipping feature limit check")
+        if FeatureLimitMiddleware.should_mutate_payload(url_path):
+            return {"instagram_limit": 999, "facebook_limit": 999, "accounts_limit": 999}
+        return None
 
     result = await FeatureLimitMiddleware.verify_feature_limit(
         user_id=user_id, url_path=url_path

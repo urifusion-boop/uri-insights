@@ -35,7 +35,7 @@ class FacebookHelper:
             ]
 
         result_dict = {
-            "message": payload.get("content"),
+            "message": payload.get("message") or payload.get("content"),
             "published": True,
             # "scheduled_publish_time": payload.get("start_time"),
             "attached_media": attached_media,

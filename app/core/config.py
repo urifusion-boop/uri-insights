@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     URI_SEARCH_ENGINE_ID: str
     META_API_KEY: str
     META_APP_ID: str
+    META_APP_SECRET: str = ""   # Facebook app secret — required for OAuth token exchange
     META_SYSTEM_TOKEN: str
     AUTHJWT_SECRET_KEY: str
     INSTAGRAM_API_VERSION: str
@@ -91,6 +92,18 @@ class Settings(BaseSettings):
 
     # Gemini Configuration (for LLM fallback)
     GEMINI_API_KEY: Optional[str] = None
+
+    # Outstand Configuration
+    OUTSTAND_API_KEY: Optional[str] = None
+
+    # imgBB — free image hosting for Outstand media URLs
+    # Get a free key at https://api.imgbb.com/
+    IMGBB_API_KEY: Optional[str] = None
+
+    # Local dev flags
+    LOCAL_DEV_MODE: bool = False
+    BYPASS_SUBSCRIPTION_CHECK: bool = False
+    BYPASS_FEATURE_LIMIT_CHECK: bool = False
 
     class Config:
         env_file = ".env"
