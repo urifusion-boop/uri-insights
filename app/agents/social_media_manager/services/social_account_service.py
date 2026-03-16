@@ -33,6 +33,8 @@ class SocialAccountService:
         auth_urls: Dict[str, str] = {}
         unsupported: List[str] = []
 
+        failed: List[Dict[str, str]] = []
+
         for platform in platforms:
             network = PLATFORM_TO_NETWORK.get(platform.lower())
             if not network:
@@ -47,13 +49,29 @@ class SocialAccountService:
                 )
                 auth_urls[platform.lower()] = url
             except Exception as e:
-                print(f"Failed to get auth URL for {platform}: {e}")
+                err_str = str(e)
+                print(f"Failed to get auth URL for {platform}: {err_str}")
+                # Surface Outstand credential/config errors clearly
+                if "401" in err_str:
+                    return UriResponse.error_response(
+                        f"Outstand API key is invalid or not configured. "
+                        f"Check OUTSTAND_API_KEY in your environment and ensure the "
+                        f"'{network}' network is registered via setup_outstand_networks.py.",
+                        code=401,
+                    )
+                if "404" in err_str:
+                    return UriResponse.error_response(
+                        f"The '{network}' network is not configured in Outstand. "
+                        f"Run setup_outstand_networks.py to register it first.",
+                        code=404,
+                    )
+                failed.append({"platform": platform, "error": err_str})
 
         if not auth_urls:
+            failure_detail = f" Failures: {failed}" if failed else ""
             return UriResponse.error_response(
-                f"Could not generate auth URLs. "
-                f"Unsupported platforms: {unsupported}. "
-                f"Supported: {sorted(SUPPORTED_PLATFORMS)}",
+                f"Could not generate auth URLs for any requested platform.{failure_detail} "
+                f"Unsupported: {unsupported}. Supported: {sorted(SUPPORTED_PLATFORMS)}",
                 code=400,
             )
 
@@ -62,6 +80,7 @@ class SocialAccountService:
             "auth_urls": auth_urls,
             "platforms": list(auth_urls.keys()),
             "unsupported_platforms": unsupported,
+            "failed_platforms": failed,
             "instructions": (
                 "Open each auth_url for the user to authorise. "
                 "After authorisation, Outstand will redirect to the callback URL. "
