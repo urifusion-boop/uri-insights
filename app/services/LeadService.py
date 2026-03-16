@@ -46,6 +46,7 @@ from app.domain.scrapers.lead_scrapers.TwitterLeadDataScraper import (
     TwitterLeadDataScraper,
 )
 from app.middlewares.FeatureLimitMiddleware import FeatureLimitExceeded
+from app.services.QueryClassificationService import QueryClassificationService, QueryRouteType
 from app.repository.CacheRepository import CacheRepository
 from app.repository.LeadFormRepository import LeadFormRepository
 from app.repository.LeadRepository import LeadRepository
@@ -1207,27 +1208,70 @@ class LeadService:
                 lead_form=lead_form, db=db
             )
         elif lead_form_type == LeadFormTypeEnum.ORGANIZATION.value:
-            # Check if Location Intelligence is enabled
-            print(f"🔍 [ORG LEADS GENERATION] Checking Location Intelligence for form: {lead_form.get('lead_form_id')}")
-            print(f"🔍 [ORG LEADS GENERATION] Location Intelligence fields in lead_form:")
-            print(f"   - enable_location_intelligence: {lead_form.get('enable_location_intelligence')}")
-            print(f"   - location_zone_center_lat: {lead_form.get('location_zone_center_lat')}")
-            print(f"   - location_zone_center_lng: {lead_form.get('location_zone_center_lng')}")
-            print(f"   - location_zone_radius_km: {lead_form.get('location_zone_radius_km')}")
-            print(f"   - location_zone_name: {lead_form.get('location_zone_name')}")
-            print(f"   - min_trust_score: {lead_form.get('min_trust_score')}")
+            # Step 1: Classify the query to determine routing strategy
+            organization_keywords = lead_form.get('q_organization_keyword_tags', [])
+            organization_locations = lead_form.get('organization_locations', [])
 
-            # Always use Location Intelligence flow (enriches Apollo with Google Maps)
-            # If Location Intelligence enabled → Use geographic targeting for fallback
-            # If Location Intelligence disabled → Just enrich Apollo leads with location/trust score
-            if lead_form.get('enable_location_intelligence'):
-                print("[ORG LEADS] ✅ 📍 Location Intelligence ENABLED - using geographic targeting")
-            else:
-                print("[ORG LEADS] Location Intelligence DISABLED - but will still enrich Apollo leads with Google Maps location/trust score")
+            # Build query string from keywords and locations
+            query_parts = []
+            if organization_keywords:
+                query_parts.extend(organization_keywords)
+            if organization_locations:
+                query_parts.extend(organization_locations)
+            user_prompt = " ".join(query_parts)
 
-            leads_to_create = await LeadService._generate_location_intelligent_org_leads(
-                lead_form=lead_form, db=db
+            print(f"\n{'='*80}")
+            print(f"🔍 [QUERY CLASSIFICATION] Analyzing query: '{user_prompt}'")
+
+            classification = QueryClassificationService.classify_query(
+                user_prompt=user_prompt,
+                organization_keywords=organization_keywords,
+                organization_locations=organization_locations
             )
+
+            print(f"📊 [QUERY CLASSIFICATION] Result:")
+            print(f"   - Route Type: {classification.route_type}")
+            print(f"   - Business Category: {classification.business_category}")
+            print(f"   - Location: {classification.location}")
+            print(f"   - Matched Keywords: {classification.matched_keywords}")
+            print(f"   - Confidence: {classification.confidence}")
+            print(f"{'='*80}\n")
+
+            # Step 2: Route based on classification
+            if classification.route_type == QueryRouteType.STRUCTURED:
+                # STRUCTURED queries → Apollo ONLY (no Google Maps)
+                print("[ORG LEADS] 🏢 STRUCTURED query detected → Using Apollo ONLY")
+                leads_to_create = await ApolloService.handle_organization_leads_gen(
+                    lead_form=lead_form, db=db
+                )
+            elif classification.route_type == QueryRouteType.LOCAL:
+                # LOCAL queries → Google Maps ONLY
+                print("[ORG LEADS] 📍 LOCAL query detected → Using Google Maps ONLY")
+                # Trigger Google Maps search directly
+                await LeadService.generate_google_maps_leads(lead_form=lead_form, db=db)
+                return  # Return early since Google Maps handles everything internally
+            else:
+                # HYBRID queries → Apollo-first with Google Maps enrichment
+                print("[ORG LEADS] 🔄 HYBRID query detected → Using Apollo-first with Google Maps enrichment")
+
+                # Check if Location Intelligence is enabled
+                print(f"🔍 [ORG LEADS GENERATION] Checking Location Intelligence for form: {lead_form.get('lead_form_id')}")
+                print(f"🔍 [ORG LEADS GENERATION] Location Intelligence fields in lead_form:")
+                print(f"   - enable_location_intelligence: {lead_form.get('enable_location_intelligence')}")
+                print(f"   - location_zone_center_lat: {lead_form.get('location_zone_center_lat')}")
+                print(f"   - location_zone_center_lng: {lead_form.get('location_zone_center_lng')}")
+                print(f"   - location_zone_radius_km: {lead_form.get('location_zone_radius_km')}")
+                print(f"   - location_zone_name: {lead_form.get('location_zone_name')}")
+                print(f"   - min_trust_score: {lead_form.get('min_trust_score')}")
+
+                if lead_form.get('enable_location_intelligence'):
+                    print("[ORG LEADS] ✅ 📍 Location Intelligence ENABLED - using geographic targeting")
+                else:
+                    print("[ORG LEADS] Location Intelligence DISABLED - but will still enrich Apollo leads with Google Maps location/trust score")
+
+                leads_to_create = await LeadService._generate_location_intelligent_org_leads(
+                    lead_form=lead_form, db=db, classification=classification
+                )
         elif lead_form_type == LeadFormTypeEnum.GOOGLE_MAPS.value:
             # Google Maps leads are handled separately - trigger async generation
             await LeadService.generate_google_maps_leads(lead_form=lead_form, db=db)
@@ -1463,17 +1507,22 @@ class LeadService:
 
     @staticmethod
     async def _generate_location_intelligent_org_leads(
-        lead_form: dict, db: AsyncIOMotorDatabase
+        lead_form: dict, db: AsyncIOMotorDatabase, classification = None
     ) -> List[LeadCreate]:
         """
         Generate organization leads using Location Intelligence (Apollo-first with Google Maps enrichment)
 
-        CORRECT FLOW:
+        HYBRID QUERY FLOW (used for hospitals, schools, banks, etc.):
         1. Try Apollo with user's filters
         2. If Apollo returns results → Enrich each with location & trust score from Google Maps
         3. If Apollo returns 0 results → Fallback to Google Maps search
            - If Location Intelligence enabled (has target zone) → Use nearby search
            - If Location Intelligence disabled → Use text search with organization_locations
+
+        Args:
+            lead_form: Lead form configuration
+            db: Database connection
+            classification: QueryClassificationResult from classification service (for HYBRID queries)
 
         Returns leads with trust_score (Google rating * 20) and location (city, country).
         """
