@@ -120,6 +120,7 @@ class ApprovalWorkflowService:
                     if schedule_option == "schedule":
                         update_data["scheduled_date"] = scheduled_datetime or (datetime.utcnow() + timedelta(hours=1))
                         update_data["status"] = "scheduled"
+                        update_data["user_id"] = user_id  # Ensure user_id is on the draft for the scheduler
                     elif schedule_option == "immediate":
                         # Mark for immediate publishing
                         update_data["status"] = "ready_to_publish"
@@ -429,9 +430,16 @@ class ApprovalWorkflowService:
             
             for draft in scheduled_content:
                 try:
-                    # Derive user_id from the linked content request
-                    request_doc = await db["content_requests"].find_one({"id": draft.get("request_id")})
-                    draft_user_id = request_doc["user_id"] if request_doc else None
+                    # Use user_id stored directly on the draft
+                    draft_user_id = draft.get("user_id")
+                    if not draft_user_id:
+                        # Fallback: derive from linked content request
+                        request_doc = await db["content_requests"].find_one({"id": draft.get("request_id")})
+                        draft_user_id = request_doc["user_id"] if request_doc else None
+
+                    if not draft_user_id:
+                        errors.append({"draft_id": draft["id"], "error": "Cannot determine user_id for draft"})
+                        continue
 
                     connections_cursor = db["social_connections"].find({
                         "user_id": draft_user_id,
@@ -441,6 +449,41 @@ class ApprovalWorkflowService:
                     conn_list = await connections_cursor.to_list(length=1)
                     connection = conn_list[0] if conn_list else None
 
+                    # Outstand live-lookup fallback (same as _trigger_immediate_publishing)
+                    if not connection:
+                        try:
+                            from app.agents.social_media_manager.services.outstand_service import OutstandService, PLATFORM_TO_NETWORK
+                            outstand = OutstandService()
+                            network = PLATFORM_TO_NETWORK.get(draft["platform"], draft["platform"])
+                            live_result = await outstand.list_accounts(tenant_id=draft_user_id, network=network)
+                            live_accounts = live_result.get("data", [])
+                            if live_accounts:
+                                acc = live_accounts[0]
+                                connection = {
+                                    "user_id": draft_user_id,
+                                    "platform": draft["platform"],
+                                    "outstand_account_id": acc.get("id"),
+                                    "connected_via": "outstand",
+                                    "connection_status": "active",
+                                }
+                                doc = {
+                                    "user_id": draft_user_id,
+                                    "platform": network,
+                                    "outstand_account_id": acc.get("id"),
+                                    "username": acc.get("username"),
+                                    "account_name": acc.get("nickname") or acc.get("username"),
+                                    "connection_status": "active",
+                                    "connected_via": "outstand",
+                                    "connected_at": datetime.utcnow(),
+                                    "updated_at": datetime.utcnow(),
+                                }
+                                await db["social_connections"].replace_one(
+                                    {"user_id": draft_user_id, "platform": network, "outstand_account_id": acc.get("id")},
+                                    doc, upsert=True,
+                                )
+                        except Exception as e:
+                            print(f"❌ Outstand fallback lookup failed for scheduled post: {e}")
+
                     if not connection:
                         errors.append({
                             "draft_id": draft["id"],
@@ -448,6 +491,7 @@ class ApprovalWorkflowService:
                         })
                         continue
 
+                    print(f"🕐 Publishing scheduled post | draft_id={draft['id']} platform={draft['platform']} user_id={draft_user_id}")
                     publish_result = await ApprovalWorkflowService._publish_to_platform(
                         platform=draft["platform"],
                         draft=draft,
@@ -746,12 +790,19 @@ class ApprovalWorkflowService:
                     print(f"⚠️ Instagram post skipped — Instagram API requires an image. Generate content with 'include_images: true' to post on Instagram.")
                     return {"success": False, "error": "Instagram requires an image. Re-generate this post with 'include_images: true' enabled."}
 
-                print(f"📤 Publishing via Outstand | account_id={connection.get('outstand_account_id')} platform={platform} has_image={bool(media_urls)}")
+                # For X/Twitter threads, pass the individual tweets so each becomes
+                # its own Outstand container (native thread support).
+                tweets = None
+                if platform in ("twitter", "x") and draft.get("is_twitter_thread") and draft.get("tweets"):
+                    tweets = draft["tweets"]
+
+                print(f"📤 Publishing via Outstand | account_id={connection.get('outstand_account_id')} platform={platform} has_image={bool(media_urls)} thread={bool(tweets and len(tweets) > 1)}")
                 result = await outstand.publish_post(
                     outstand_account_ids=[connection["outstand_account_id"]],
                     content=content,
                     scheduled_at=scheduled_at,
                     media_urls=media_urls,
+                    tweets=tweets,
                 )
                 print(f"📬 Outstand publish response: {result}")
 

@@ -33,7 +33,9 @@ class BrandProfileService:
             "brand_name": data.get("brand_name", ""),
             "industry": data.get("industry", ""),
             "website": data.get("website", ""),
+            "tagline": data.get("tagline", ""),
             "product_description": data.get("product_description", ""),
+            "key_products_services": data.get("key_products_services", []),
             # ── Identity ─────────────────────────────────────────
             "logo_url": data.get("logo_url"),
             "brand_colors": data.get("brand_colors", []),
@@ -107,16 +109,17 @@ class BrandProfileService:
         """
         Convert a stored brand profile document into the brand_context dict
         consumed by ContentGenerationService and ImageContentService.
+        Every content-relevant onboarding field is included here.
         """
         if not profile:
             return {}
 
-        # Build a natural voice description from the personality quiz + derived voice
+        # ── Voice — synthesize from personality quiz + derived_voice ──────────
         voice_parts: List[str] = []
         if profile.get("derived_voice"):
             voice_parts.append(profile["derived_voice"])
 
-        quiz = profile.get("personality_quiz", {})
+        quiz = profile.get("personality_quiz") or {}
         if quiz.get("formality"):
             voice_parts.append("formal" if quiz["formality"] == "formal" else "casual")
         if quiz.get("energy"):
@@ -128,33 +131,56 @@ class BrandProfileService:
 
         brand_voice = ", ".join(voice_parts) if voice_parts else ""
 
-        # Build target audience string
+        # ── Target audience — detailed description ────────────────────────────
         audience_parts: List[str] = []
         if profile.get("audience_age_range"):
-            audience_parts.append(profile["audience_age_range"])
+            audience_parts.append(f"age {profile['audience_age_range']}")
         if profile.get("primary_goal"):
             audience_parts.append(f"goal: {profile['primary_goal']}")
         if profile.get("region"):
             audience_parts.append(f"market: {profile['region']}")
         target_audience = " | ".join(audience_parts) if audience_parts else ""
 
+        # ── Key dates — format as readable list for the AI ────────────────────
+        key_dates_str = ""
+        key_dates = profile.get("key_dates") or []
+        if key_dates:
+            date_items = [
+                f"{d.get('label', '')} ({d.get('date', '')})" if isinstance(d, dict) else str(d)
+                for d in key_dates[:5]
+            ]
+            key_dates_str = ", ".join(d for d in date_items if d.strip())
+
         return {
-            "brand_name": profile.get("brand_name", ""),
-            "industry": profile.get("industry", ""),
+            # ── Core identity ─────────────────────────────────────────────────
+            "brand_name":           profile.get("brand_name", ""),
+            "industry":             profile.get("industry", ""),
+            "website":              profile.get("website", ""),
+            "tagline":              profile.get("tagline", ""),
             "business_description": profile.get("product_description", ""),
-            "brand_voice": brand_voice,
-            "voice_sample": profile.get("voice_sample", ""),
-            "target_audience": target_audience,
-            "brand_colors": profile.get("brand_colors", []),
-            "content_pillars": profile.get("content_pillars", []),
-            "preferred_formats": profile.get("preferred_formats", []),
-            "guardrails": profile.get("guardrails", {}),
-            "cta_styles": profile.get("cta_styles", []),
-            "default_link": profile.get("default_link", ""),
-            "competitor_handles": [h for h in profile.get("competitor_handles", []) if h],
-            "platform_tones": profile.get("platform_tones", {}),
+            "key_products_services": [p for p in (profile.get("key_products_services") or []) if p],
+            "logo_url":             profile.get("logo_url"),
+            "brand_colors":         profile.get("brand_colors") or [],
+            # ── Voice & tone ─────────────────────────────────────────────────
+            "brand_voice":          brand_voice,
+            "voice_sample":         profile.get("voice_sample", ""),
+            "platform_tones":       profile.get("platform_tones") or {},
             "same_tone_everywhere": profile.get("same_tone_everywhere", True),
-            "languages": profile.get("languages", []),
-            "region": profile.get("region", ""),
-            "posting_cadence": profile.get("posting_cadence", ""),
+            # ── Audience ─────────────────────────────────────────────────────
+            "target_audience":      target_audience,
+            "audience_age_range":   profile.get("audience_age_range", ""),
+            "primary_goal":         profile.get("primary_goal", ""),
+            "target_platforms":     profile.get("target_platforms") or [],
+            "region":               profile.get("region", ""),
+            "languages":            profile.get("languages") or [],
+            # ── Content strategy ─────────────────────────────────────────────
+            "content_pillars":      profile.get("content_pillars") or [],
+            "preferred_formats":    profile.get("preferred_formats") or [],
+            "guardrails":           profile.get("guardrails") or {},
+            "cta_styles":           profile.get("cta_styles") or [],
+            "default_link":         profile.get("default_link", ""),
+            # ── Competitive & scheduling context ─────────────────────────────
+            "competitor_handles":   [h for h in (profile.get("competitor_handles") or []) if h],
+            "key_dates":            key_dates_str,
+            "posting_cadence":      profile.get("posting_cadence", ""),
         }

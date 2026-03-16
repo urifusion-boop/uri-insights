@@ -64,14 +64,12 @@ async def main():
     # ── Credentials from .env ─────────────────────────────────────────────────
     meta_app_id     = os.getenv("META_APP_ID", "").strip("'")
     meta_app_secret = os.getenv("META_APP_SECRET", "").strip("'")
-
-    # ── Add other platform credentials below when you have them ──────────────
-    # linkedin_client_id     = ""   # from developer.linkedin.com
-    # linkedin_client_secret = ""
-    # tiktok_client_key      = ""   # from developers.tiktok.com
-    # tiktok_client_secret   = ""
-    # x_client_id            = ""   # from developer.twitter.com (OAuth 2.0)
-    # x_client_secret        = ""
+    linkedin_client_id     = os.getenv("LINKEDIN_CLIENT_ID", "").strip("'")
+    linkedin_client_secret = os.getenv("LINKEDIN_CLIENT_SECRET", "").strip("'")
+    x_client_id            = os.getenv("X_CLIENT_ID", "").strip("'")
+    x_client_secret        = os.getenv("X_CLIENT_SECRET", "").strip("'")
+    # tiktok_client_key    = os.getenv("TIKTOK_CLIENT_KEY", "").strip("'")
+    # tiktok_client_secret = os.getenv("TIKTOK_CLIENT_SECRET", "").strip("'")
 
     async with httpx.AsyncClient(timeout=30) as client:
 
@@ -87,16 +85,21 @@ async def main():
         else:
             print("\n[INSTAGRAM] Skipped — META_APP_ID or META_APP_SECRET missing")
 
-        # Uncomment these once you have the credentials:
+        # LinkedIn
+        if linkedin_client_id and linkedin_client_secret:
+            await configure_network(client, "linkedin", linkedin_client_id, linkedin_client_secret)
+        else:
+            print("\n[LINKEDIN] Skipped — LINKEDIN_CLIENT_ID or LINKEDIN_CLIENT_SECRET missing in .env")
 
-        # if linkedin_client_id and linkedin_client_secret:
-        #     await configure_network(client, "linkedin", linkedin_client_id, linkedin_client_secret)
+        # X (Twitter) — OAuth 2.0 credentials from developer.twitter.com
+        if x_client_id and x_client_secret:
+            await configure_network(client, "x", x_client_id, x_client_secret)
+        else:
+            print("\n[X] Skipped — X_CLIENT_ID or X_CLIENT_SECRET missing in .env")
 
+        # TikTok (uncomment when credentials are available):
         # if tiktok_client_key and tiktok_client_secret:
         #     await configure_network(client, "tiktok", tiktok_client_key, tiktok_client_secret)
-
-        # if x_client_id and x_client_secret:
-        #     await configure_network(client, "x", x_client_id, x_client_secret)
 
     print("\nDone. You can now call POST /social-media/connect/initiate for configured platforms.")
 

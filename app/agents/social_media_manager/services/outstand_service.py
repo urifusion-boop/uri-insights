@@ -159,23 +159,36 @@ class OutstandService:
         content: str,
         scheduled_at: Optional[str] = None,
         media_urls: Optional[List[str]] = None,
+        tweets: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
         Publish content to one or more connected accounts.
         outstand_account_ids: list of Outstand social account IDs (not platform names).
         scheduled_at: ISO 8601 datetime string if scheduling.
-        media_urls: optional list of publicly accessible image/video URLs.
+        media_urls: optional list of publicly accessible image/video URLs (attached to first container).
+        tweets: optional list of tweet strings for X/Twitter threads — each becomes its own container.
         """
+        # For X/Twitter threads, each tweet is its own container.
+        # For all other platforms (or single tweets), use one container.
+        if tweets and len(tweets) > 1:
+            containers = [{"content": t} for t in tweets]
+            # Attach media to the first tweet only
+            if media_urls:
+                containers[0]["media"] = [{"url": u} for u in media_urls]
+        else:
+            container: Dict[str, Any] = {"content": content}
+            if media_urls:
+                container["media"] = [{"url": u} for u in media_urls]
+            containers = [container]
+
         payload: Dict[str, Any] = {
             "accounts": outstand_account_ids,
-            "content": content,
+            "containers": containers,
         }
         if scheduled_at:
             payload["scheduledAt"] = scheduled_at
-        if media_urls:
-            payload["media"] = media_urls  # Outstand expects a plain list of URL strings
 
-        print(f"📡 Outstand POST /v1/posts/ payload keys={list(payload.keys())} media={payload.get('media')}")
+        print(f"📡 Outstand POST /v1/posts/ payload keys={list(payload.keys())} containers={len(containers)} media={media_urls}")
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             resp = await client.post(
                 f"{self.base_url}/v1/posts/",

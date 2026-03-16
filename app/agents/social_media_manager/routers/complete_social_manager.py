@@ -1,6 +1,6 @@
 # app/agents/social_media_manager/routers/complete_social_manager.py
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query, UploadFile, File
 from fastapi.responses import RedirectResponse
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pydantic import BaseModel, Field
@@ -126,7 +126,9 @@ class BrandProfileRequest(BaseModel):
     brand_name: Optional[str] = None
     industry: Optional[str] = None
     website: Optional[str] = None
+    tagline: Optional[str] = None
     product_description: Optional[str] = None
+    key_products_services: Optional[List[str]] = None
     # Identity
     logo_url: Optional[str] = None
     brand_colors: Optional[List[str]] = None
@@ -626,21 +628,46 @@ async def get_content_calendar(
         if platform:
             query["platform"] = platform
 
-        drafts = await db["content_drafts"].find(query).sort("created_at", -1).skip(skip).limit(limit).to_list(length=limit)
+        # Use aggregation to avoid transferring large base64 image_url values from
+        # MongoDB to the app server. For base64 images the pipeline emits a relative
+        # proxy path (/uri-insights/social-media/draft-image/<id>) so the browser
+        # fetches the image through the same gateway it uses for all API calls —
+        # avoiding any ngrok/tunnel interstitial or domain-mismatch issues.
+        pipeline = [
+            {"$match": query},
+            {"$sort": {"created_at": -1}},
+            {"$skip": skip},
+            {"$limit": limit},
+            {"$addFields": {
+                "_img_is_base64": {
+                    "$eq": [{"$substr": [{"$ifNull": ["$image_url", ""]}, 0, 5]}, "data:"]
+                },
+                "_img_exists": {
+                    "$gt": [{"$strLenCP": {"$ifNull": ["$image_url", ""]}}, 0]
+                },
+                "_draft_key": {"$ifNull": ["$id", "$draft_id"]},
+            }},
+            {"$addFields": {
+                "has_image": "$_img_exists",
+                "image_url": {
+                    "$cond": {
+                        "if": "$_img_is_base64",
+                        # Return a relative path — the frontend prepends its own API base URL
+                        "then": {"$concat": [
+                            "/uri-insights/social-media/draft-image/", "$_draft_key"
+                        ]},
+                        "else": {"$cond": {
+                            "if": "$_img_exists",
+                            "then": "$image_url",
+                            "else": None
+                        }}
+                    }
+                },
+            }},
+            {"$project": {"_id": 0, "_img_is_base64": 0, "_img_exists": 0, "_draft_key": 0}},
+        ]
 
-        # Clean up ObjectIds and strip large base64 image data
-        base_url = settings.URI_GATEWAY_BASE_API_URL.rstrip("/")
-        for draft in drafts:
-            draft.pop("_id", None)
-            image_url = draft.get("image_url") or ""
-            if image_url.startswith("data:"):
-                draft_id = draft.get("id") or draft.get("draft_id", "")
-                draft["image_url"] = f"{base_url}/uri-insights/social-media/draft-image/{draft_id}"
-                draft["has_image"] = True
-            elif image_url:
-                draft["has_image"] = True
-            else:
-                draft["has_image"] = False
+        drafts = await db["content_drafts"].aggregate(pipeline).to_list(length=limit)
 
         total_count = await db["content_drafts"].count_documents(query)
 
@@ -888,6 +915,60 @@ async def get_brand_profile(
         raise HTTPException(status_code=401, detail="User ID not found in token")
     try:
         return await BrandProfileService.get(user_id, db)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/brand-profile/logo")
+async def upload_brand_logo(
+    file: UploadFile = File(...),
+    db: AsyncIOMotorDatabase = Depends(get_db_dependency),
+    token: dict = Depends(JWTBearer()),
+):
+    """
+    Upload a brand logo image. Stores it to imgBB and saves the public URL
+    to the user's brand profile. Accepted formats: PNG, JPG, WEBP, SVG.
+    """
+    import base64
+    import httpx
+
+    user_id = _get_user_id(token)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID not found in token")
+
+    allowed_types = {"image/png", "image/jpeg", "image/jpg", "image/webp", "image/svg+xml"}
+    if file.content_type not in allowed_types:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {file.content_type}. Use PNG, JPG, WEBP, or SVG.")
+
+    try:
+        contents = await file.read()
+        if len(contents) > 5 * 1024 * 1024:  # 5 MB limit
+            raise HTTPException(status_code=400, detail="Logo file must be under 5 MB.")
+
+        b64 = base64.b64encode(contents).decode()
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                "https://api.imgbb.com/1/upload",
+                data={"key": settings.IMGBB_API_KEY, "image": b64},
+            )
+            resp_json = resp.json()
+
+        if not resp_json.get("success"):
+            raise HTTPException(status_code=502, detail=f"Image host upload failed: {resp_json.get('error', {}).get('message', 'unknown error')}")
+
+        logo_url = resp_json["data"]["url"]
+
+        await db["brand_profiles"].update_one(
+            {"user_id": user_id},
+            {"$set": {"logo_url": logo_url, "updated_at": datetime.utcnow()}},
+            upsert=True,
+        )
+
+        return UriResponse.get_single_data_response("logo_upload", {"logo_url": logo_url})
+
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

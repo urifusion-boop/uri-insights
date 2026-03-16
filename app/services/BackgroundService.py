@@ -124,6 +124,16 @@ class BackgroundService:
             replace_existing=False,
         )
 
+        from app.agents.social_media_manager.services.approval_workflow_service import ApprovalWorkflowService
+        scheduler.add_job(
+            ApprovalWorkflowService.publish_scheduled_content,
+            trigger="interval",
+            minutes=1,
+            kwargs={"db": db},
+            id="publish_scheduled_social_posts",
+            replace_existing=True,
+        )
+
         from app.agents.social_media_manager.services.auto_content_service import AutoContentService
         scheduler.add_job(
             AutoContentService.run_scheduled_auto_generation,

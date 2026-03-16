@@ -100,6 +100,14 @@ class Settings(BaseSettings):
     # Get a free key at https://api.imgbb.com/
     IMGBB_API_KEY: Optional[str] = None
 
+    # X (Twitter) OAuth 2.0 — from developer.twitter.com
+    X_CLIENT_ID: Optional[str] = None
+    X_CLIENT_SECRET: Optional[str] = None
+
+    # LinkedIn OAuth — from developer.linkedin.com
+    LINKEDIN_CLIENT_ID: Optional[str] = None
+    LINKEDIN_CLIENT_SECRET: Optional[str] = None
+
     # Local dev flags
     LOCAL_DEV_MODE: bool = False
     BYPASS_SUBSCRIPTION_CHECK: bool = False

@@ -216,40 +216,33 @@ class ImageContentService:
 
             aspect = specs.get('format', 'landscape') if specs else 'landscape'
 
-            # Extract all brand context fields
-            industry_name = 'business'
-            industry_overview = ''
-            themes_str = ''
-            brand_name = ''
-            brand_colors_str = ''
-            brand_voice = ''
-            target_audience = ''
-            tagline = ''
-            business_description_raw = ''
-            key_products_str = ''
+            # ── Extract every available brand context field ───────────────────
+            bc = brand_context or {}
 
-            if brand_context:
-                raw = brand_context.get('industry', 'business')
-                industry_name = str(raw) if raw else 'business'
-                industry_overview = brand_context.get('industry_overview', '')
-                themes = brand_context.get('content_themes', [])
-                if themes:
-                    labels = [
-                        t.get('theme', '') if isinstance(t, dict) else str(t)
-                        for t in themes[:4]
-                    ]
-                    themes_str = ', '.join(t for t in labels if t)
-                brand_name = brand_context.get('brand_name', '')
-                brand_voice = brand_context.get('brand_voice', '')
-                target_audience = brand_context.get('target_audience', '')
-                tagline = brand_context.get('tagline', '')
-                business_description_raw = brand_context.get('business_description', '')
-                colors = brand_context.get('brand_colors', [])
-                if colors:
-                    brand_colors_str = ', '.join(str(c) for c in colors)
-                products = brand_context.get('key_products_services', [])
-                if products:
-                    key_products_str = ', '.join(str(p) for p in products[:5])
+            industry_name        = str(bc.get('industry') or 'business')
+            brand_name           = bc.get('brand_name', '')
+            tagline              = bc.get('tagline', '')
+            business_description_raw = bc.get('business_description', '')
+            brand_voice          = bc.get('brand_voice', '')
+            target_audience      = bc.get('target_audience', '')
+            primary_goal         = bc.get('primary_goal', '')
+            region               = bc.get('region', '')
+            brand_colors_str     = ', '.join(str(c) for c in (bc.get('brand_colors') or []))
+            key_products_str     = ', '.join(str(p) for p in (bc.get('key_products_services') or [])[:5])
+            key_dates            = bc.get('key_dates', '')
+            preferred_formats    = ', '.join(bc.get('preferred_formats') or [])
+
+            # Content pillars → use as content themes for image brief
+            pillars = bc.get('content_pillars') or []
+            themes_str = ', '.join(
+                t.get('theme', '') if isinstance(t, dict) else str(t)
+                for t in pillars[:4]
+            ) if pillars else ''
+
+            # industry_overview — synthesised from business description + products
+            industry_overview = business_description_raw
+            if key_products_str and not industry_overview:
+                industry_overview = key_products_str
 
             business_description = industry_name
             if themes_str:
@@ -281,12 +274,16 @@ class ImageContentService:
             }
             platform_note = platform_notes.get(platform, platform_notes["instagram"])
 
-            # Build brand context block
+            # ── Build brand context block for the image prompt ────────────────
             brand_lines = []
             if brand_name:
                 brand_lines.append(f"Brand: {brand_name}")
+            if tagline:
+                brand_lines.append(f"Tagline: \"{tagline}\" — let this inform the aspirational feeling of the image.")
             if business_description_raw:
                 brand_lines.append(f"Business: {business_description_raw}")
+            if key_products_str:
+                brand_lines.append(f"Key products/services: {key_products_str} — show the most relevant one visually.")
             if brand_colors_str:
                 brand_lines.append(
                     f"Brand colors: {brand_colors_str} — these MUST appear prominently in the image. "
@@ -301,13 +298,25 @@ class ImageContentService:
                 brand_lines.append(
                     f"Target audience: {target_audience} — any people shown should match this demographic."
                 )
-            if key_products_str:
+            if primary_goal:
                 brand_lines.append(
-                    f"Key products/services: {key_products_str} — show the most relevant one visually."
+                    f"Brand goal: {primary_goal} — the image should visually reinforce this aspiration."
                 )
-            if tagline:
+            if region:
                 brand_lines.append(
-                    f"Tagline: \"{tagline}\" — let this inform the aspirational feeling of the image."
+                    f"Market region: {region} — use settings, aesthetics, and cultural cues specific to this region."
+                )
+            if preferred_formats:
+                brand_lines.append(
+                    f"Preferred content formats: {preferred_formats} — let this guide the visual style chosen."
+                )
+            if themes_str:
+                brand_lines.append(
+                    f"Content pillars/themes: {themes_str} — the image should visually anchor to the most relevant one."
+                )
+            if key_dates:
+                brand_lines.append(
+                    f"Upcoming key dates: {key_dates} — if relevant, let the image reflect a seasonal or event context."
                 )
             brand_block = (
                 "\n\nBRAND CONTEXT:\n" + "\n".join(brand_lines)
@@ -387,6 +396,23 @@ class ImageContentService:
                 "Apply the brand colors prominently. Write the full image prompt."
             )
 
+            logo_url = brand_context.get("logo_url") if brand_context else None
+
+            # Build user message — attach logo as a vision image if available so
+            # GPT-4.1 can extract exact brand colors and visual style from it.
+            if logo_url:
+                user_message_content = [
+                    {"type": "text", "text": (
+                        user_prompt +
+                        "\n\nA brand logo image is attached. Analyse its colors, shapes, and visual "
+                        "style and let these directly inform the image prompt you write. "
+                        "Reflect the logo's visual identity in the color palette and overall aesthetic."
+                    )},
+                    {"type": "image_url", "image_url": {"url": logo_url}},
+                ]
+            else:
+                user_message_content = user_prompt
+
             loop = asyncio.get_running_loop()
             response = await loop.run_in_executor(
                 None,
@@ -394,7 +420,7 @@ class ImageContentService:
                     model="gpt-4.1",
                     messages=[
                         {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
+                        {"role": "user", "content": user_message_content}
                     ],
                     max_tokens=700,
                     temperature=0.7
@@ -402,7 +428,8 @@ class ImageContentService:
             )
             brief = response.choices[0].message.content.strip()
             chosen_type = brief.split('\n')[0].replace('TYPE:', '').strip() if brief.startswith('TYPE:') else 'UNKNOWN'
-            print(f"🎨 Image brief generated — type: {chosen_type} ({len(brief)} chars)")
+            logo_note = " (logo reference used)" if logo_url else ""
+            print(f"🎨 Image brief generated — type: {chosen_type} ({len(brief)} chars){logo_note}")
             return brief
 
         except Exception as e:
@@ -439,24 +466,33 @@ class ImageContentService:
         industry = brand_context.get('industry', 'business') if brand_context else 'business'
         aspect = specs.get('format', 'landscape') if specs else 'landscape'
 
-        # Extract brand fields
-        colors = (brand_context.get('brand_colors', []) if brand_context else [])
+        # Extract brand fields (static fallback)
+        bc = brand_context or {}
+        colors    = bc.get('brand_colors') or []
         color_list = ', '.join(str(c) for c in colors[:3]) if colors else ''
-        audience = (brand_context.get('target_audience', '') if brand_context else '')
-        products = (brand_context.get('key_products_services', []) if brand_context else [])
-        brand_name = (brand_context.get('brand_name', '') if brand_context else '')
-        brand_voice = (brand_context.get('brand_voice', '') if brand_context else '')
+        audience   = bc.get('target_audience', '')
+        region_fb  = bc.get('region', '')
+        products   = bc.get('key_products_services') or []
+        brand_name = bc.get('brand_name', '')
+        brand_voice = bc.get('brand_voice', '')
+        tagline_fb  = bc.get('tagline', '')
+        primary_goal_fb = bc.get('primary_goal', '')
+        logo_url   = bc.get('logo_url')
 
         color_note = (
             f"Brand colors ({color_list}) must appear in the dominant palette. "
             if color_list else ""
         )
-        audience_note = f"Audience: {audience[:120]}. " if audience else ""
-        product_note = f"Show {products[0]} prominently. " if products else ""
-        voice_note = (
-            f"Mood and energy should feel: {brand_voice}. "
-            if brand_voice else ""
+        logo_note = (
+            "The brand logo's visual identity (shapes, colors, style) should inform the overall aesthetic. "
+            if logo_url else ""
         )
+        audience_note   = f"Audience: {audience[:120]}. " if audience else ""
+        region_note     = f"Regional setting: {region_fb}. " if region_fb else ""
+        product_note    = f"Show {products[0]} prominently. " if products else ""
+        tagline_note    = f'Aspirational feeling: "{tagline_fb}". ' if tagline_fb else ""
+        goal_note       = f"Brand goal: {primary_goal_fb}. " if primary_goal_fb else ""
+        voice_note      = f"Mood and energy should feel: {brand_voice}. " if brand_voice else ""
 
         # Pick image type by rotating deterministically on content hash
         content_hash = int(hashlib.md5(content[:100].encode()).hexdigest(), 16)
@@ -469,7 +505,7 @@ class ImageContentService:
             brand_ref = f"{brand_name} " if brand_name else ""
             return (
                 f"BACKGROUND: Bold flat graphic poster for a {industry} brand. "
-                f"{color_note}"
+                f"{color_note}{logo_note}"
                 f"Strong geometric shapes and color blocks in the brand palette fill the frame. "
                 f"FOCAL_ELEMENT: A single powerful visual — a Nigerian professional in action, "
                 f"or a stylised icon representing {industry} — placed in the upper two-thirds. "
@@ -498,14 +534,14 @@ class ImageContentService:
         if image_type == 'brand_illustration':
             return (
                 f"STYLE: Modern flat illustration with semi-realistic shading. Nigerian cultural context. "
-                f"{color_note}"
+                f"{color_note}{logo_note}"
                 f"SCENE: {scene.split('.')[0]} — illustrated in a clean flat design style. "
                 f"Lagos or Abuja environment, recognisable architectural details simplified into illustration. "
                 f"COLOR_PALETTE: {color_list if color_list else 'warm brand colors with neutral backgrounds'}. "
                 f"All colors drawn from the brand palette. "
                 f"CHARACTERS: Confident Nigerian {industry} professional with dark skin tones, "
-                f"natural hair, {industry}-appropriate attire. {audience_note}"
-                f"Warm authentic expression, caught mid-action. {voice_note}"
+                f"natural hair, {industry}-appropriate attire. {audience_note}{region_note}"
+                f"Warm authentic expression, caught mid-action. {tagline_note}{goal_note}{voice_note}"
                 f"CONSTRAINTS: no readable text, no watermarks, no logos, "
                 f"illustrated style only, not photographic."
             )
@@ -538,14 +574,15 @@ class ImageContentService:
             if color_list else ""
         )
 
+        location = f"{region_fb} business district" if region_fb else "Lagos business district, Victoria Island or Lekki Phase 1"
         return (
-            f"SCENE: {scene}, Lagos business district, Victoria Island or Lekki Phase 1. "
+            f"SCENE: {scene}, {location}. "
             f"SUBJECT: a confident Nigerian {industry} professional with warm dark-brown skin, "
             f"natural hair, actively engaged in the task — candid documentary, not posing. "
             f"Natural skin texture, visible pores, slight forehead shine. "
-            f"{audience_note}{product_note}"
+            f"{audience_note}{product_note}{region_note}"
             f"DETAILS: {camera_light}, {composition}, shallow depth of field. "
-            f"Colour: {colour}. {brand_color_note}{voice_note}"
+            f"Colour: {colour}. {brand_color_note}{logo_note}{tagline_note}{goal_note}{voice_note}"
             f"CONSTRAINTS: no text overlays, no watermarks, no logos, "
             f"not stock-photo aesthetic, not illustrated, not cinematic."
         )

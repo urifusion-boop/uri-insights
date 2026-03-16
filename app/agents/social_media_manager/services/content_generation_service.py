@@ -137,83 +137,189 @@ FORMAT:
 TONE: Inspirational Nigerian founder sharing the journey. Think visual storyteller meets business mentor.
 
 Write as if you're sharing behind-the-scenes insights from building a successful Nigerian business.
+        """,
+
+        "x": """
+You are creating a viral X (Twitter) thread optimized for Nigerian business and tech audiences. Think Jason Njoku, Tope Awotona, or Iyinoluwa Aboyeji sharing insights.
+
+CONTENT TO TRANSFORM: {seed_content}
+
+REQUIREMENTS:
+- Thread format: 3-5 tweets maximum
+- First tweet MUST be a contrarian or surprising hook
+- Each tweet max 250 characters (leave room for thread numbering)
+- No cringe emojis or excessive punctuation
+- Optimize for retweets and engagement
+- Each tweet should work standalone but flow as a sequence
+- Use thread numbering: (1/4), (2/4), etc.
+- Focus on insights, not fluff
+- Reference Nigerian context where relevant (Fintech growth, tech hubs, SME challenges)
+
+TONE: Punchy, confident, slightly contrarian. Think startup founder dropping knowledge bombs about African tech/business.
+
+FORMAT: Return as a JSON array of tweets like:
+[
+  "Tweet 1 content here (1/4)",
+  "Tweet 2 content here (2/4)",
+  "Tweet 3 content here (3/4)",
+  "Tweet 4 content here (4/4)"
+]
+
+Make people think "I never looked at it this way" and want to retweet.
+        """,
+
+        "linkedin": """
+You are a seasoned Nigerian business leader writing for LinkedIn. Your audience consists of CEOs, entrepreneurs, and professionals in Nigeria and across Africa.
+
+CONTENT TO TRANSFORM: {seed_content}
+
+REQUIREMENTS:
+- Start with a strong, attention-grabbing hook (first line must make people stop scrolling)
+- Professional but conversational tone (approachable authority)
+- Use lots of white space for readability (single line paragraphs)
+- Include 2-3 specific insights, stats, or examples relevant to Nigerian/African business
+- End with an engaging question to drive comments
+- 150-300 words maximum
+- Focus on business impact and lessons learned
+- Use Nigerian context when relevant (Lagos, Abuja, SMEs, Naira, local market dynamics)
+
+FORMAT:
+- Short, punchy opening line
+- 2-3 paragraphs with single-line spacing
+- Bullet points if listing benefits/insights
+- Thought-provoking question at the end
+
+TONE: Think Aliko Dangote sharing business wisdom, or Tony Elumelu discussing entrepreneurship.
+
+Do NOT include hashtags in the main content - they will be added separately.
+
+Write as if you're sharing hard-won business wisdom with fellow African entrepreneurs.
         """
     }
     
     @staticmethod
-    def _build_brand_block(brand_context: Optional[Dict[str, Any]]) -> str:
-        """Build directive brand instructions to inject at the top of the prompt."""
+    def _build_brand_block(brand_context: Optional[Dict[str, Any]], platform: str = "") -> str:
+        """
+        Build directive brand instructions from every onboarding field.
+        Injected at the top of every generation prompt.
+        """
         if not brand_context:
             return ""
 
         parts = ["BRAND INSTRUCTIONS — you are writing on behalf of this specific brand. Apply every rule below:"]
 
+        # ── Core identity ─────────────────────────────────────────────────────
         if brand_context.get("brand_name"):
             name = brand_context["brand_name"]
             parts.append(
-                f'- Brand name is "{name}". You MUST mention it naturally in the post '
-                f'(e.g. "At {name}..." or "{name} just launched..." or reference it as the subject).'
-            )
-
-        if brand_context.get("brand_voice"):
-            parts.append(
-                f'- Brand voice/tone: {brand_context["brand_voice"]}. '
-                f'This overrides any default tone — every sentence must sound like this brand.'
-            )
-
-        if brand_context.get("target_audience"):
-            parts.append(
-                f'- Target audience: {brand_context["target_audience"]}. '
-                f'Write as if speaking directly to this specific group — use their language, reference their context, and make the content immediately relevant to them.'
+                f'- Brand name is "{name}". Mention it naturally at least once '
+                f'(e.g. "At {name}..." or "{name} helps..." — never force it).'
             )
 
         if brand_context.get("tagline"):
             parts.append(
                 f'- Brand tagline: "{brand_context["tagline"]}". '
-                f'Weave it naturally into the post or use it as a closing line — do not force it, but do use it.'
-            )
-
-        if brand_context.get("business_description"):
-            parts.append(
-                f'- What the business does: {brand_context["business_description"]}. '
-                f'Use this to keep the content accurate and grounded in what the brand actually offers.'
+                f'Weave it naturally into the post or use it as a closing line.'
             )
 
         if brand_context.get("industry"):
             parts.append(
                 f'- Industry: {brand_context["industry"]}. '
-                f'Use industry-appropriate vocabulary and references that credible voices in this space would use.'
+                f'Use vocabulary and references that credible voices in this industry use.'
+            )
+
+        if brand_context.get("business_description"):
+            parts.append(
+                f'- What the business does: {brand_context["business_description"]}. '
+                f'Keep the content grounded in what the brand actually offers.'
             )
 
         if brand_context.get("key_products_services"):
-            services = ", ".join(brand_context["key_products_services"])
+            services = brand_context["key_products_services"]
+            if isinstance(services, list) and services:
+                parts.append(
+                    f'- Key products/services: {", ".join(services[:6])}. '
+                    f'Reference the most relevant one naturally — do not list them all mechanically.'
+                )
+
+        if brand_context.get("website"):
             parts.append(
-                f'- Key products/services: {services}. '
-                f'Reference the most relevant one(s) naturally — do not list all of them mechanically.'
+                f'- Brand website: {brand_context["website"]}. '
+                f'You may reference it naturally in a CTA if it fits the content.'
             )
 
-        if brand_context.get("brand_colors"):
-            colors = ", ".join(brand_context["brand_colors"])
+        # ── Voice & tone ──────────────────────────────────────────────────────
+        # Use platform-specific tone if available and same_tone_everywhere is False
+        platform_tones = brand_context.get("platform_tones") or {}
+        same_tone = brand_context.get("same_tone_everywhere", True)
+        platform_tone = platform_tones.get(platform) if (platform and not same_tone) else None
+
+        active_voice = platform_tone or brand_context.get("brand_voice", "")
+        if active_voice:
             parts.append(
-                f'- Brand colors: {colors}. '
-                f'These define the visual identity. Keep this in mind to ensure the tone and energy of the post feels consistent with this palette.'
+                f'- Brand voice/tone: {active_voice}. '
+                f'Every sentence must sound like this brand — this overrides any default tone.'
             )
 
-        # ── Richer fields from brand profile onboarding ──────────────
         if brand_context.get("voice_sample"):
             parts.append(
-                f'- Real example of this brand\'s writing voice: "{brand_context["voice_sample"][:400]}". '
+                f'- Real example of this brand\'s writing: "{brand_context["voice_sample"][:400]}". '
                 f'Mirror the sentence structure, vocabulary, and energy of this sample exactly.'
             )
 
+        # ── Audience ─────────────────────────────────────────────────────────
+        if brand_context.get("target_audience"):
+            parts.append(
+                f'- Target audience: {brand_context["target_audience"]}. '
+                f'Write as if speaking directly to them — use their language and reference their world.'
+            )
+
+        if brand_context.get("primary_goal"):
+            parts.append(
+                f'- Brand\'s primary goal: {brand_context["primary_goal"]}. '
+                f'Every post should move the reader one step closer to this goal.'
+            )
+
+        if brand_context.get("region"):
+            parts.append(
+                f'- Market/region: {brand_context["region"]}. '
+                f'Use cultural references and examples that resonate specifically in this market.'
+            )
+
+        if brand_context.get("languages"):
+            langs = brand_context["languages"]
+            if isinstance(langs, list) and langs and langs != ["English"]:
+                parts.append(
+                    f'- Write in: {", ".join(langs)}. '
+                    f'Default to English but naturally weave in local expressions where appropriate.'
+                )
+
+        # ── Content strategy ─────────────────────────────────────────────────
         if brand_context.get("content_pillars"):
             pillars = brand_context["content_pillars"]
             if isinstance(pillars, list) and pillars:
                 parts.append(
-                    f'- Content pillars (priority topics for this brand): {", ".join(pillars[:5])}. '
-                    f'Anchor the post to the most relevant pillar from this list.'
+                    f'- Content pillars (priority topics): {", ".join(pillars[:5])}. '
+                    f'Anchor the post to the most relevant pillar.'
                 )
 
+        if brand_context.get("preferred_formats"):
+            formats = brand_context["preferred_formats"]
+            if isinstance(formats, list) and formats:
+                parts.append(
+                    f'- Preferred content formats: {", ".join(formats[:4])}. '
+                    f'Structure the post to match one of these formats where appropriate.'
+                )
+
+        if brand_context.get("brand_colors"):
+            colors = brand_context["brand_colors"]
+            if isinstance(colors, list) and colors:
+                parts.append(
+                    f'- Brand colors: {", ".join(colors)}. '
+                    f'Let the tone and energy of the post feel consistent with this visual palette.'
+                )
+
+        # ── Guardrails ───────────────────────────────────────────────────────
         guardrails = brand_context.get("guardrails")
         if guardrails and isinstance(guardrails, dict):
             if guardrails.get("avoid_topics"):
@@ -231,27 +337,36 @@ Write as if you're sharing behind-the-scenes insights from building a successful
             if guardrails.get("compliance_notes"):
                 parts.append(f'- Compliance requirement: {guardrails["compliance_notes"]}.')
 
+        # ── CTAs & links ─────────────────────────────────────────────────────
         if brand_context.get("cta_styles"):
             ctas = brand_context["cta_styles"]
             if isinstance(ctas, list) and ctas:
                 parts.append(
-                    f'- Preferred call-to-action styles: {", ".join(ctas)}. '
-                    f'End the post with one of these CTAs (choose whichever fits the content best).'
+                    f'- Preferred CTAs: {", ".join(ctas)}. '
+                    f'End the post with the most fitting one.'
                 )
 
-        if brand_context.get("region"):
+        if brand_context.get("default_link"):
             parts.append(
-                f'- Market/region: {brand_context["region"]}. '
-                f'Use cultural references, examples, and language that resonate specifically in this market.'
+                f'- Default link for CTAs: {brand_context["default_link"]}. '
+                f'Include it in the CTA if the post calls for a direct link.'
             )
 
-        if brand_context.get("languages"):
-            langs = brand_context["languages"]
-            if isinstance(langs, list) and langs and langs != ["English"]:
+        # ── Competitive context ───────────────────────────────────────────────
+        if brand_context.get("competitor_handles"):
+            handles = brand_context["competitor_handles"]
+            if isinstance(handles, list) and handles:
                 parts.append(
-                    f'- Write in: {", ".join(langs)}. '
-                    f'If multiple languages, default to English but naturally incorporate local language expressions where appropriate.'
+                    f'- Competitor accounts: {", ".join(handles[:5])}. '
+                    f'Be aware of this competitive landscape — differentiate the brand\'s voice and value clearly.'
                 )
+
+        # ── Key dates / upcoming events ───────────────────────────────────────
+        if brand_context.get("key_dates"):
+            parts.append(
+                f'- Upcoming key dates/events for this brand: {brand_context["key_dates"]}. '
+                f'If any of these are relevant to the post topic, reference them naturally.'
+            )
 
         if len(parts) == 1:
             return ""
@@ -412,7 +527,7 @@ Write as if you're sharing behind-the-scenes insights from building a successful
         try:
             # Get platform-specific prompt
             prompt_template = ContentGenerationService.PLATFORM_PROMPTS[platform]
-            brand_block = ContentGenerationService._build_brand_block(brand_context)
+            brand_block = ContentGenerationService._build_brand_block(brand_context, platform=platform)
             platform_prompt = prompt_template.format(seed_content=seed_content)
             # Brand instructions go first so they govern everything that follows
             prompt = brand_block + platform_prompt if brand_block else platform_prompt
@@ -460,8 +575,8 @@ Write as if you're sharing behind-the-scenes insights from building a successful
                 'original_content': content,  # Store original for edit tracking
                 'hashtags': hashtags,
                 'ai_metadata': ai_metadata,
-                'is_twitter_thread': platform == 'twitter' and processed_content.get('is_thread', False),
-                'tweets': processed_content.get('tweets', []) if platform == 'twitter' else None
+                'is_twitter_thread': platform in ('twitter', 'x') and processed_content.get('is_thread', False),
+                'tweets': processed_content.get('tweets', []) if platform in ('twitter', 'x') else None
             })
             
         except Exception as e:
@@ -474,8 +589,8 @@ Write as if you're sharing behind-the-scenes insights from building a successful
         Post-process AI-generated content based on platform requirements
         """
         
-        if platform == "twitter":
-            # Handle Twitter thread format
+        if platform in ("twitter", "x"):
+            # Handle X/Twitter thread format
             try:
                 # Try to parse as JSON array first
                 if raw_content.strip().startswith('['):
@@ -629,9 +744,31 @@ Write as if you're sharing behind-the-scenes insights from building a successful
                 "hashtag_limit": 15,
                 "audience": "Young Nigerian entrepreneurs, creatives",
                 "context": "Behind-the-scenes business building in Nigeria"
-            }
+            },
+            "x": {
+                "max_length": 280,
+                "optimal_length": 250,
+                "tone": "Punchy, contrarian, tech-savvy Nigerian founder",
+                "format": "Thread format (3-5 tweets), each max 280 chars",
+                "hashtag_limit": 2,
+                "audience": "Nigerian tech community, startup founders",
+                "context": "Nigerian fintech, African tech ecosystem"
+            },
+            "linkedin": {
+                "max_length": 3000,
+                "optimal_length": 200,
+                "tone": "Professional B2B, Nigerian business leader",
+                "format": "Question-ending, white space, bullet points",
+                "hashtag_limit": 5,
+                "audience": "Nigerian/African CEOs, entrepreneurs, professionals",
+                "context": "Lagos business scene, African market insights"
+            },
         }
-        
+
+        # Allow 'twitter' as alias for 'x'
+        if platform == "twitter":
+            platform = "x"
+
         return requirements.get(platform, {})
     
     @staticmethod
