@@ -93,6 +93,11 @@ class Settings(BaseSettings):
     # Gemini Configuration (for LLM fallback)
     GEMINI_API_KEY: Optional[str] = None
 
+    # Public-facing API URL (used when building absolute URLs returned to browsers).
+    # Set this to https://api.uricreative.com:8443 on staging/prod.
+    # If unset, falls back to URI_GATEWAY_BASE_API_URL.
+    URI_PUBLIC_API_URL: Optional[str] = None
+
     # Outstand Configuration
     OUTSTAND_API_KEY: Optional[str] = None
 

@@ -98,20 +98,42 @@ class ImageContentService:
                         raw_image_url = image_result['responseData']['image_url']
                         draft['image_specs'] = image_result['responseData']['specs']
                         draft['has_image'] = True
-                        # Persist full image_url (base64 or CDN URL) to DB
+
+                        # Upload base64 image to imgBB so we always store a
+                        # public URL (avoids the internal-URL proxy problem).
+                        stored_url = raw_image_url
+                        if raw_image_url and raw_image_url.startswith("data:"):
+                            try:
+                                import base64 as _b64, re as _re, httpx as _httpx
+                                from app.core.config import settings as _cfg
+                                _match = _re.match(r"data:[^;]+;base64,(.+)", raw_image_url, _re.DOTALL)
+                                if _match and _cfg.IMGBB_API_KEY:
+                                    async with _httpx.AsyncClient(timeout=30) as _c:
+                                        _r = await _c.post(
+                                            "https://api.imgbb.com/1/upload",
+                                            data={"key": _cfg.IMGBB_API_KEY, "image": _match.group(1)},
+                                        )
+                                        _rj = _r.json()
+                                    if _rj.get("success"):
+                                        stored_url = _rj["data"]["url"]
+                                        print(f"☁️  Image uploaded to imgBB: {stored_url}")
+                                    else:
+                                        print(f"⚠️  imgBB upload failed: {_rj.get('error')}, keeping base64")
+                            except Exception as _imgbb_err:
+                                print(f"⚠️  imgBB upload error: {_imgbb_err}, keeping base64")
+
+                        # Persist URL to DB
                         if db is not None:
                             result = await db["content_drafts"].update_one(
                                 {"id": draft["id"]},
                                 {"$set": {
-                                    "image_url": raw_image_url,
+                                    "image_url": stored_url,
                                     "image_specs": draft['image_specs'],
                                     "has_image": True,
                                 }}
                             )
                             print(f"🖼️ Image saved to draft {draft['id']}: matched={result.matched_count}, modified={result.modified_count}")
-                        # Don't return base64 in the API response — too large for the browser.
-                        # The frontend should load the image via /draft-image/{draft_id}.
-                        draft['image_url'] = None
+                        draft['image_url'] = stored_url if not stored_url.startswith("data:") else None
                     else:
                         draft['has_image'] = False
                         image_errors.append({

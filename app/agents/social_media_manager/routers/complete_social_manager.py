@@ -669,13 +669,23 @@ async def get_content_calendar(
 
         drafts = await db["content_drafts"].aggregate(pipeline).to_list(length=limit)
 
-        # Replace relative image proxy paths with full absolute URLs so the
-        # frontend doesn't need to know the API base URL.
-        gateway_url = (getattr(settings, "URI_GATEWAY_BASE_API_URL", "") or "").rstrip("/")
+        # Replace relative image proxy paths with full absolute URLs.
+        # URI_GATEWAY_BASE_API_URL may be an internal Docker URL so we fall
+        # back to URI_PUBLIC_API_URL (set in .env) or omit the image entirely
+        # for base64 drafts that haven't been uploaded to imgBB yet.
+        public_url = (
+            getattr(settings, "URI_PUBLIC_API_URL", None)
+            or getattr(settings, "URI_GATEWAY_BASE_API_URL", None)
+            or ""
+        ).rstrip("/")
         for draft in drafts:
             img = draft.get("image_url") or ""
             if img.startswith("/uri-insights"):
-                draft["image_url"] = f"{gateway_url}{img}"
+                if public_url and not public_url.startswith("http://uri-gateway"):
+                    draft["image_url"] = f"{public_url}{img}"
+                else:
+                    # Can't serve an internal URL to the browser — hide the image
+                    draft["image_url"] = None
 
         total_count = await db["content_drafts"].count_documents(query)
 
