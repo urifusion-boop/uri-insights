@@ -59,16 +59,17 @@ jobs:
       # Checkout the code to access docker-compose.yml
       - uses: actions/checkout@v4
 
-      # Copy docker-compose file to VM
-      - name: Copy docker-compose.dev.yml to VM
+      # Copy source files and docker-compose to VM
+      - name: Copy source files to VM
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.VM_IP_DEV }}
           username: uridev
           key: ${{ secrets.SSH_PRIVATE_KEY_DEV }}
-          source: "./docker-compose.dev.yml"
+          source: "./app/,./docker-compose.dev.yml,./.env.example"
           target: "~/uri-insights/"
           strip_components: 0
+          rm: true
 
       # SSH into the VM and deploy the Docker container
       - name: SSH into VM and Deploy
@@ -86,9 +87,14 @@ jobs:
             fi
             cd ~/uri-insights
             echo '${{ secrets.DOCKER_PASSWORD }}' | docker login -u '${{ secrets.DOCKER_USERNAME }}' --password-stdin
+
+            # Build fresh images from synced source code
+            docker build -t uriteam/urisvc:uriinsightdev .
+            docker build -f Dockerfile.worker -t uriteam/urisvc:uriinsightworkerdev .
+
+            # Deploy containers
             docker-compose -f docker-compose.dev.yml down
-            docker-compose -f docker-compose.dev.yml pull
             docker-compose -f docker-compose.dev.yml up -d
 
-            # Cleanup redundant image
+            # Cleanup redundant images
             docker image prune -f
