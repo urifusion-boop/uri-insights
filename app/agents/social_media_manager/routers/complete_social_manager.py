@@ -669,6 +669,14 @@ async def get_content_calendar(
 
         drafts = await db["content_drafts"].aggregate(pipeline).to_list(length=limit)
 
+        # Replace relative image proxy paths with full absolute URLs so the
+        # frontend doesn't need to know the API base URL.
+        gateway_url = (getattr(settings, "URI_GATEWAY_BASE_API_URL", "") or "").rstrip("/")
+        for draft in drafts:
+            img = draft.get("image_url") or ""
+            if img.startswith("/uri-insights"):
+                draft["image_url"] = f"{gateway_url}{img}"
+
         total_count = await db["content_drafts"].count_documents(query)
 
         return UriResponse.get_single_data_response("content_calendar", {
