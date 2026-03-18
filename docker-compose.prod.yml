@@ -8,6 +8,7 @@ services:
       - .env
     environment:
       - ENV=Production
+      - URI_GATEWAY_BASE_API_URL=https://api.uricreative.com
       - SSL_CERT_PATH=/https/fullchain.pem
       - SSL_KEY_PATH=/https/privkey.pem
     volumes:

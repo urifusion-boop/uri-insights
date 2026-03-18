@@ -9,7 +9,7 @@ services:
       - .env
     environment:
       - ENV=Development
-      - URI_GATEWAY_BASE_API_URL=http://uri-gateway.api
+      - URI_GATEWAY_BASE_API_URL=https://20.164.0.168
     restart: always
     ports:
       - "9002:80"

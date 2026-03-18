@@ -308,73 +308,33 @@ async def outstand_oauth_callback(
     OAuth callback — Outstand redirects the user's browser here after they
     authorise on the social platform. No JWT required.
 
-    Returns an HTML page that closes the OAuth popup and passes the sessionToken
-    back to the parent window (for popup-based OAuth flow).
+    Redirects the user to the frontend brand-setup page with the sessionToken
+    so the frontend can call GET /connect/pending/{sessionToken} and then
+    POST /connect/finalize to complete the connection.
     """
     import urllib.parse
 
+    web_app_url = settings.WEB_APP_URL
     # Outstand may send the token as "session", "sessionToken", or "session_token"
     token_value = sessionToken or session_token or session
 
-    if error or not token_value:
-        error_msg = error or "missing_session_token"
-        # Return HTML that closes popup and signals error to parent
-        html_content = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>OAuth Error</title>
-            <style>
-                body {{ font-family: system-ui; text-align: center; padding: 50px; }}
-                .error {{ color: #DC2626; font-weight: 600; }}
-            </style>
-        </head>
-        <body>
-            <div class="error">Connection failed: {error_msg}</div>
-            <p>This window will close automatically...</p>
-            <script>
-                setTimeout(() => window.close(), 2000);
-            </script>
-        </body>
-        </html>
-        """
-        return HTMLResponse(content=html_content, status_code=400)
+    if error:
+        encoded_error = urllib.parse.quote(error)
+        return RedirectResponse(
+            f"{web_app_url}/social-media/brand-setup"
+            f"?connected=false&error={encoded_error}"
+        )
 
-    # Success - return HTML that passes sessionToken to parent and closes popup
-    encoded_token = urllib.parse.quote(token_value)
-    html_content = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Connecting...</title>
-        <style>
-            body {{ font-family: system-ui; text-align: center; padding: 50px; }}
-            .success {{ color: #059669; font-weight: 600; }}
-        </style>
-    </head>
-    <body>
-        <div class="success">✓ Connected successfully!</div>
-        <p>Loading your accounts...</p>
-        <script>
-            // Pass sessionToken back to parent window
-            if (window.opener) {{
-                const url = new URL(window.location.href);
-                url.searchParams.set('sessionToken', '{encoded_token}');
-                url.searchParams.set('connected', 'pending');
-                window.opener.postMessage({{
-                    type: 'oauth_callback',
-                    sessionToken: '{token_value}'
-                }}, window.opener.location.origin);
-                setTimeout(() => window.close(), 500);
-            }} else {{
-                // Fallback: redirect to brand-setup page if not opened as popup
-                window.location.href = '{settings.WEB_APP_URL}/social-media/brand-setup?sessionToken={encoded_token}&connected=pending';
-            }}
-        </script>
-    </body>
-    </html>
-    """
-    return HTMLResponse(content=html_content)
+    if not token_value:
+        return RedirectResponse(
+            f"{web_app_url}/social-media/brand-setup"
+            f"?connected=false&error=missing_session_token"
+        )
+
+    return RedirectResponse(
+        f"{web_app_url}/social-media/brand-setup"
+        f"?sessionToken={urllib.parse.quote(token_value)}&connected=pending"
+    )
 
 
 @router.get("/connect/pending/{session_token}")
