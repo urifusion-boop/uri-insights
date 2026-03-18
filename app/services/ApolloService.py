@@ -64,6 +64,13 @@ class ApolloService:
         if result and len(result) > 0:
             sample_names = [f"{r.first_name} {r.last_name}" for r in result[:3]]
             print(f"[PEOPLE LEADS] Sample lead names: {sample_names}")
+        else:
+            # Only send "All Caught Up" email if NO leads were actually created after processing
+            print(f"⚠️ [NO LEADS CREATED] Sending 'All Caught Up' email to user")
+            await ApolloService.handle_empty_search_result(
+                lead_form.get("user_id", ""),
+                lead_form.get("form_type", "")
+            )
         print(f"{'='*80}\n")
         return result
 
@@ -84,6 +91,15 @@ class ApolloService:
             search_result, lead_form.get("user_id", ""), db
         )
         print(f"[ORG LEADS] Completed. Leads to create: {len(result) if result else 0}")
+
+        if not result or len(result) == 0:
+            # Only send "All Caught Up" email if NO leads were actually created after processing
+            print(f"⚠️ [NO LEADS CREATED] Sending 'All Caught Up' email to user")
+            await ApolloService.handle_empty_search_result(
+                lead_form.get("user_id", ""),
+                lead_form.get("form_type", "")
+            )
+
         return result
 
     @staticmethod
@@ -1042,9 +1058,9 @@ class ApolloService:
         print(f"{'='*80}\n")
 
         if len(actual_data) == 0:
-            print(f"⚠️ [EMPTY RESULT] Sending 'All Caught Up' email to user {user_id}")
-            print(f"⚠️ [EMPTY RESULT] This means NO leads were found by Apollo API")
-            await ApolloService.handle_empty_search_result(user_id, lead_form_type=lead_form_type)
+            print(f"⚠️ [EMPTY RESULT] No leads in this page from Apollo API")
+            print(f"⚠️ [EMPTY RESULT] Will check after processing if any leads were created")
+            # Don't send email here - wait until after lead processing to confirm no leads created
             return
 
         # Handle pagination advancement
