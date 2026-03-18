@@ -459,35 +459,38 @@ Write as if you're sharing hard-won business wisdom with fellow African entrepre
 
         # Persist to DB so the approval workflow can look them up
         if db is not None and drafts:
-            # Save the request record
-            await db["content_requests"].replace_one(
-                {"id": request_id},
-                {
-                    "id": request_id,
-                    "user_id": user_id,
-                    "seed_content": seed_content,
-                    "seed_type": seed_type,
-                    "platforms": platforms,
-                    "status": status,
-                    "created_at": generated_at,
-                    "updated_at": generated_at,
-                },
-                upsert=True,
-            )
-            # Save each draft
-            for draft in drafts:
-                await db["content_drafts"].replace_one(
-                    {"id": draft["id"]},
+            try:
+                # Save the request record
+                await db["content_requests"].replace_one(
+                    {"id": request_id},
                     {
-                        **draft,
-                        "request_id": request_id,
+                        "id": request_id,
                         "user_id": user_id,
-                        "approval_status": "pending",
+                        "seed_content": seed_content,
+                        "seed_type": seed_type,
+                        "platforms": platforms,
+                        "status": status,
                         "created_at": generated_at,
                         "updated_at": generated_at,
                     },
                     upsert=True,
                 )
+                # Save each draft
+                for draft in drafts:
+                    await db["content_drafts"].replace_one(
+                        {"id": draft["id"]},
+                        {
+                            **draft,
+                            "request_id": request_id,
+                            "user_id": user_id,
+                            "approval_status": "pending",
+                            "created_at": generated_at,
+                            "updated_at": generated_at,
+                        },
+                        upsert=True,
+                    )
+            except Exception as db_err:
+                print(f"⚠️ DB persist failed for request_id={request_id}: {db_err}")
 
         response_data = {
             'request_id': request_id,

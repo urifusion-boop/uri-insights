@@ -1,5 +1,6 @@
 # app/agents/social_media_manager/routers/complete_social_manager.py
 
+import traceback
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query, UploadFile, File
 from fastapi.responses import RedirectResponse
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -223,9 +224,11 @@ async def generate_content(
             )
 
         return result
-        
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        error_detail = str(e) or repr(e)
+        print(f"❌ generate_content error for user={user_id}: {error_detail}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=error_detail)
 
 @router.post("/regenerate-content/{draft_id}")
 async def regenerate_content(

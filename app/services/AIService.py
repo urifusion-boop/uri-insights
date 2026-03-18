@@ -44,10 +44,14 @@ class AIService:
     @staticmethod
     async def chat_completion(request: ChatModel):
         try:
-            completion = client.chat.completions.create(
-                model=request.model,
-                messages=[message.dict() for message in request.messages],
-                temperature=request.temperature,
+            loop = asyncio.get_running_loop()
+            completion = await loop.run_in_executor(
+                None,
+                lambda: client.chat.completions.create(
+                    model=request.model,
+                    messages=[message.dict() for message in request.messages],
+                    temperature=request.temperature,
+                ),
             )
             print("Chat Completion Response: ", completion)
             return completion
