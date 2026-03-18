@@ -17,18 +17,27 @@ class SocialAccountService:
     async def initiate_connection_flow(
         user_id: str,
         platforms: List[str],
+        origin: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Build Outstand OAuth URLs for each requested platform.
         tenant_id is set to the URI user_id so Outstand can associate the
         connected account with the correct user.
         The frontend should open each auth_url for the user to authorise.
+
+        origin: Optional frontend origin URL (e.g. https://witty-plant-059090410.1.azurestaticapps.net)
+                If provided, callback URL will use this origin. Otherwise uses URI_GATEWAY_BASE_API_URL.
         """
         outstand = OutstandService()
-        callback_url = (
-            f"{settings.URI_GATEWAY_BASE_API_URL}"
-            "/uri-insights/social-media/connect/callback/outstand"
-        )
+
+        # Use origin from request if provided (for staging/dev), otherwise use production API
+        if origin:
+            callback_url = f"{origin}/uri-insights/social-media/connect/callback/outstand"
+        else:
+            callback_url = (
+                f"{settings.URI_GATEWAY_BASE_API_URL}"
+                "/uri-insights/social-media/connect/callback/outstand"
+            )
 
         auth_urls: Dict[str, str] = {}
         unsupported: List[str] = []

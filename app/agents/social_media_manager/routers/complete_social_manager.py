@@ -1,6 +1,6 @@
 # app/agents/social_media_manager/routers/complete_social_manager.py
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query, UploadFile, File, Request
 from fastapi.responses import RedirectResponse
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pydantic import BaseModel, Field
@@ -258,6 +258,7 @@ async def regenerate_content(
 @router.post("/connect/initiate")
 async def initiate_social_connections(
     request: SocialConnectionRequest,
+    http_request: Request,
     token: dict = Depends(JWTBearer()),
 ):
     """
@@ -274,9 +275,15 @@ async def initiate_social_connections(
     if not user_id:
         raise HTTPException(status_code=401, detail="User ID not found in token")
 
+    # Extract origin from request headers for dynamic redirect URL
+    origin = http_request.headers.get("origin") or http_request.headers.get("referer")
+    if origin and origin.endswith("/"):
+        origin = origin.rstrip("/")
+
     return await SocialAccountService.initiate_connection_flow(
         user_id=user_id,
         platforms=request.platforms,
+        origin=origin,
     )
 
 
