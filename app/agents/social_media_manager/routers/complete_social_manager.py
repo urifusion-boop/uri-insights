@@ -176,25 +176,23 @@ class BrandProfileRequest(BaseModel):
 @router.post("/generate-content")
 async def generate_content(
     request: ContentGenerationRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncIOMotorDatabase = Depends(get_db_dependency),
     token: dict = Depends(JWTBearer())
 ):
     """
-    Generate AI-powered social media content with optional images
-    
-    Features:
-    - Platform-native content (LinkedIn B2B, Twitter threads, etc.)
-    - Nigerian business context optimization
-    - Optional AI image generation
-    - Brand consistency across platforms
+    Generate AI-powered social media content with optional images.
+
+    Text content is always returned immediately.
+    When include_images=True, images are generated in the background and
+    saved to the draft — the frontend can pick them up via GET /content-calendar.
     """
     user_id = _get_user_id(token)
     if not user_id:
         raise HTTPException(status_code=401, detail="User ID not found in token")
-    
+
     try:
         # Load brand profile from onboarding (source of truth).
-        # Any explicit brand_context on the request overrides matching keys.
         profile_result = await BrandProfileService.get(user_id, db)
         profile_data = (profile_result.get("responseData") or {}) if profile_result.get("status") else {}
         brand_context_dict = BrandProfileService.to_brand_context(profile_data) if profile_data else {}
@@ -204,24 +202,30 @@ async def generate_content(
             overrides = request.brand_context.dict(exclude_none=True)
             brand_context_dict = {**brand_context_dict, **overrides}
 
-        if request.include_images:
-            result = await ImageContentService.generate_content_with_images(
-                user_id=user_id,
-                seed_content=request.seed_content,
-                platforms=request.platforms,
-                include_images=True,
-                brand_context=brand_context_dict,
-                db=db,
-            )
-        else:
-            result = await ContentGenerationService.generate_multi_platform_content(
-                user_id=user_id,
-                seed_content=request.seed_content,
-                platforms=request.platforms,
-                seed_type=request.seed_type,
-                brand_context=brand_context_dict,
-                db=db,
-            )
+        # Always generate text synchronously and return immediately.
+        result = await ContentGenerationService.generate_multi_platform_content(
+            user_id=user_id,
+            seed_content=request.seed_content,
+            platforms=request.platforms,
+            seed_type=request.seed_type,
+            brand_context=brand_context_dict,
+            db=db,
+        )
+
+        # If images were requested, kick off a background task per draft.
+        # The response is returned to the frontend before image generation starts.
+        if request.include_images and result.get("status"):
+            drafts = result.get("responseData", {}).get("drafts", [])
+            for draft in drafts:
+                background_tasks.add_task(
+                    _generate_image_bg,
+                    draft_id=draft["id"],
+                    platform=draft["platform"],
+                    content=draft["content"],
+                    seed_content=request.seed_content,
+                    brand_context=brand_context_dict,
+                    db=db,
+                )
 
         return result
 
@@ -1027,6 +1031,71 @@ async def save_brand_profile(
 # ==============================================================================
 # BACKGROUND TASKS
 # ==============================================================================
+
+async def _generate_image_bg(
+    draft_id: str,
+    platform: str,
+    content: str,
+    seed_content: str,
+    brand_context: Dict[str, Any],
+    db: AsyncIOMotorDatabase,
+):
+    """
+    Background task: generate an image for an existing draft and save it to DB.
+    Runs after the text-only response has already been returned to the frontend.
+    """
+    import re
+    import base64
+    import httpx
+    from app.core.config import settings as _cfg
+
+    try:
+        image_result = await ImageContentService._generate_platform_image(
+            platform=platform,
+            content=content,
+            seed_content=seed_content,
+            brand_context=brand_context,
+        )
+
+        if not image_result.get("status"):
+            print(f"⚠️ BG image gen failed for draft {draft_id}: {image_result.get('responseMessage')}")
+            return
+
+        raw_url = image_result["responseData"]["image_url"]
+        stored_url = raw_url
+
+        # Upload base64 image to imgBB for a public URL
+        if raw_url and raw_url.startswith("data:"):
+            try:
+                match = re.match(r"data:[^;]+;base64,(.+)", raw_url, re.DOTALL)
+                if match and _cfg.IMGBB_API_KEY:
+                    async with httpx.AsyncClient(timeout=30) as client:
+                        resp = await client.post(
+                            "https://api.imgbb.com/1/upload",
+                            data={"key": _cfg.IMGBB_API_KEY, "image": match.group(1)},
+                        )
+                        rj = resp.json()
+                    if rj.get("success"):
+                        stored_url = rj["data"]["url"]
+                        print(f"☁️  BG image uploaded to imgBB: {stored_url}")
+                    else:
+                        print(f"⚠️  BG imgBB upload failed: {rj.get('error')}")
+            except Exception as upload_err:
+                print(f"⚠️  BG imgBB upload error: {upload_err}")
+
+        final_url = stored_url if not stored_url.startswith("data:") else None
+        if final_url and db is not None:
+            result = await db["content_drafts"].update_one(
+                {"id": draft_id},
+                {"$set": {"image_url": final_url, "has_image": True}},
+            )
+            print(f"✅ BG image saved for draft {draft_id}: matched={result.matched_count}")
+        else:
+            print(f"⚠️  BG image not saved for draft {draft_id} (no public URL)")
+
+    except Exception as e:
+        print(f"❌ BG image task error for draft {draft_id}: {e}\n{traceback.format_exc()}")
+
 
 async def publish_content_background(db: AsyncIOMotorDatabase, user_id: str, draft_ids: List[str]):
     """Background task for immediate content publishing"""
