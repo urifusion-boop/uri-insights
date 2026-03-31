@@ -110,7 +110,7 @@ class GoogleMapsSearchFormInput(BaseFormInput):
     maps_latitude: Optional[float] = None  # Latitude for Nearby Search
     maps_longitude: Optional[float] = None  # Longitude for Nearby Search
     maps_radius_km: Optional[float] = None  # Search radius in kilometers
-    maps_business_types: Optional[List[str] = None  # Filter by business types
+    maps_business_types: Optional[List[str]] = None  # Filter by business types
     maps_min_rating: Optional[float] = None  # Minimum Google rating (0-5)
     maps_exclude_closed: Optional[bool] = True  # Exclude closed businesses
     maps_max_results: Optional[int] = 20  # Maximum results to return

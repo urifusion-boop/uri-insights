@@ -39,6 +39,9 @@ class SocialAccountService:
                 "/uri-insights/social-media/connect/callback/outstand"
             )
 
+        print(f"🔗 [OAUTH DEBUG] Origin received: {origin}")
+        print(f"🔗 [OAUTH DEBUG] Callback URL: {callback_url}")
+
         auth_urls: Dict[str, str] = {}
         unsupported: List[str] = []
 

@@ -27,6 +27,6 @@ services:
       - ENV=Production
     restart: always
     deploy:
-      replicas: 10
+      replicas: 5
     # Worker processes background jobs from Azure Service Bus queue
     # No ports needed - this service only consumes from queue
