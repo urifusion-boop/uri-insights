@@ -22,7 +22,7 @@ Context Analysis:
 - "Offices" suggests business locations, not postal services
 
 Output:
-{
+{{
     "form_title": "POS Agents - Akure",
     "maps_search_mode": "text",
     "maps_search_query": "Point of Sale agents, mobile money agents, POS terminals, POS services",
@@ -34,7 +34,7 @@ Output:
     "maps_max_results": 30,
     "business_context": "Financial services - mobile payment and POS terminal providers",
     "excluded_terms": ["post office", "postal service", "mail", "courier"]
-}
+}}
 
 ---
 
@@ -46,7 +46,7 @@ Context Analysis:
 - Include various dining types: fine dining, fast food, cafes, eateries
 
 Output:
-{
+{{
     "form_title": "Restaurants - Lekki",
     "maps_search_mode": "text",
     "maps_search_query": "restaurants, dining, eateries, food establishments",
@@ -58,7 +58,7 @@ Output:
     "maps_max_results": 40,
     "business_context": "Food and beverage - dining establishments",
     "excluded_terms": ["grocery store", "supermarket"]
-}
+}}
 
 ---
 
@@ -71,7 +71,7 @@ Context Analysis:
 - "near" suggests moderate radius
 
 Output:
-{
+{{
     "form_title": "Clinics & Pharmacies - Victoria Island",
     "maps_search_mode": "text",
     "maps_search_query": "medical clinics, pharmacies, healthcare centers, diagnostic centers",
@@ -83,7 +83,7 @@ Output:
     "maps_max_results": 25,
     "business_context": "Healthcare services - medical facilities and pharmacies",
     "excluded_terms": []
-}
+}}
 
 ---
 
@@ -95,7 +95,7 @@ Context Analysis:
 - "gyms" → Include fitness centers, workout spaces, yoga studios
 
 Output:
-{
+{{
     "form_title": "Gyms - Abuja",
     "maps_search_mode": "text",
     "maps_search_query": "gyms, fitness centers, workout facilities, fitness studios",
@@ -107,7 +107,7 @@ Output:
     "maps_max_results": 30,
     "business_context": "Fitness and wellness - gym and workout facilities",
     "excluded_terms": []
-}
+}}
 
 ---
 
@@ -120,7 +120,7 @@ Context Analysis:
 - Include various retail types
 
 Output:
-{
+{{
     "form_title": "Supermarkets - Ikeja (3km)",
     "maps_search_mode": "text",
     "maps_search_query": "supermarkets, grocery stores, convenience stores, mini marts",
@@ -132,7 +132,7 @@ Output:
     "maps_max_results": 25,
     "business_context": "Retail - grocery and food shopping",
     "excluded_terms": []
-}
+}}
 
 ---
 
@@ -144,7 +144,7 @@ Context Analysis:
 - Include barbershops, nail salons, massage
 
 Output:
-{
+{{
     "form_title": "Salons & Spas - Port Harcourt",
     "maps_search_mode": "text",
     "maps_search_query": "beauty salons, hair salons, spas, barbershops, nail salons",
@@ -156,7 +156,7 @@ Output:
     "maps_max_results": 30,
     "business_context": "Personal care - beauty and grooming services",
     "excluded_terms": []
-}
+}}
 
 ---
 
@@ -168,7 +168,7 @@ Context Analysis:
 - Include various car service types
 
 Output:
-{
+{{
     "form_title": "Auto Repair - Surulere",
     "maps_search_mode": "text",
     "maps_search_query": "mechanic shops, auto repair, car repair, garage, car service",
@@ -180,7 +180,7 @@ Output:
     "maps_max_results": 25,
     "business_context": "Automotive - vehicle repair and maintenance",
     "excluded_terms": []
-}
+}}
 
 ---
 
@@ -192,7 +192,7 @@ Context Analysis:
 - B2B focus
 
 Output:
-{
+{{
     "form_title": "Professional Services - Ikoyi",
     "maps_search_mode": "text",
     "maps_search_query": "law firms, legal services, accounting firms, audit firms",
@@ -204,7 +204,7 @@ Output:
     "maps_max_results": 20,
     "business_context": "Professional services - legal and financial consulting",
     "excluded_terms": []
-}
+}}
 
 ---
 
@@ -216,7 +216,7 @@ Context Analysis:
 - High quality requirement → min_rating 4.0+
 
 Output:
-{
+{{
     "form_title": "Hotels - Calabar (4+ stars)",
     "maps_search_mode": "text",
     "maps_search_query": "hotels, guest houses, lodges, accommodation",
@@ -228,7 +228,7 @@ Output:
     "maps_max_results": 20,
     "business_context": "Hospitality - quality accommodation services",
     "excluded_terms": []
-}
+}}
 
 ---
 
@@ -240,7 +240,7 @@ Context Analysis:
 - Tech training focus
 
 Output:
-{
+{{
     "form_title": "Training Institutes - Yaba",
     "maps_search_mode": "text",
     "maps_search_query": "training institutes, computer schools, tech academies, learning centers",
@@ -252,7 +252,7 @@ Output:
     "maps_max_results": 25,
     "business_context": "Education - professional and technical training",
     "excluded_terms": []
-}
+}}
 
 ---
 
