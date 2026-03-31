@@ -276,6 +276,8 @@ class GoogleMapsLeadFormUpdate(LeadFormUpdateBase):
     maps_min_rating: Optional[float] = None  # Minimum Google rating (0-5)
     maps_exclude_closed: Optional[bool] = None  # Exclude closed businesses
     maps_max_results: Optional[int] = None  # Maximum results to return
+    business_context: Optional[str] = None  # AI context: describe business type/industry
+    excluded_terms: Optional[List[str]] = None  # Terms to exclude from search results
     monitoring_interval_hours: Optional[int] = None  # How often to check for new businesses
 
 

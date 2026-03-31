@@ -1,5 +1,6 @@
 from enum import Enum
 from app.domain.enums.leadform_autopopulate_examples import AUTOPOPULATE_EXAMPLES
+from app.domain.enums.googlemaps_autopopulate_examples import GOOGLE_MAPS_AUTOPOPULATE_EXAMPLES
 
 
 # Enum for prompts
@@ -946,69 +947,60 @@ class LeadFormAutoPopulateEnum(Enum):
     """
 
     GOOGLE_MAPS_FORM_PROMPT = """
-        You are an expert local business discovery assistant. A user has provided a description of the types of local businesses or locations they want to find using Google Maps.
+        You are an expert local business discovery assistant with advanced query disambiguation capabilities.
 
-        Based on the user's input, extract structured parameters for a Google Maps/Places API search.
+        Your task is to interpret user queries (which may be ambiguous or use acronyms) and generate precise Google Maps search parameters.
+
+        ### CRITICAL: Handle Ambiguous Queries
+        - Detect acronyms (POS, ATM, PC, AI, etc.) and expand them contextually
+        - Use location and context clues to disambiguate
+        - Add synonyms and related terms to improve search accuracy
+        - Include excluded_terms to filter out wrong matches
 
         ### User Input:
         {data}
 
-        Return a JSON object optimized for Google Maps search:
+        Return a JSON object optimized for Google Maps search with enhanced context:
         {{
             "form_title": "<string>",
             "maps_search_mode": "text",
-            // Usually "text" for natural language, "nearby" for precise location + radius, "auto" to let system decide
+            // Usually "text" for natural language queries
             "maps_search_query": "<string>",
-            // Natural language query like "coffee shops", "restaurants", "gyms"
+            // EXPANDED query with synonyms and full forms
+            // Example: "POS" → "Point of Sale agents, mobile money agents, POS terminals"
+            // Example: "restaurants" → "restaurants, dining, eateries, food establishments"
             "maps_location": "<string>",
-            // City, neighborhood, or address like "Lagos, Nigeria", "Manhattan, NY"
+            // City, neighborhood, or address with country
             "maps_latitude": <number or null>,
             // Only if user provides exact coordinates
             "maps_longitude": <number or null>,
             // Only if user provides exact coordinates
             "maps_radius_km": <number>,
-            // Search radius in kilometers (e.g., 5, 10, 20)
+            // Default: 5km for cities, 10km for large metros
             "maps_business_types": ["<type>", "..."],
-            // Google Places types: restaurant, cafe, gym, store, bank, etc.
+            // Google Places types - use appropriate ones for industry
             "maps_min_rating": <number>,
-            // Minimum Google rating (0-5). Default 3.0 for quality results
+            // 3.0 default, 4.0+ for "good/best", 3.5 for quality
             "maps_exclude_closed": true,
-            // Usually true to only get active businesses
-            "maps_max_results": <number>
-            // How many businesses to find (10-50 recommended)
+            // Usually true
+            "maps_max_results": <number>,
+            // 20-40 typical
+            "business_context": "<string>",
+            // NEW: Describe the business type/industry for clarity
+            "excluded_terms": ["<term>", "..."]
+            // NEW: Terms to exclude from results (handle ambiguity)
         }}
 
-        ### Examples:
+        """ + GOOGLE_MAPS_AUTOPOPULATE_EXAMPLES + """
 
-        Input: "Find coffee shops in Ikeja, Lagos"
-        Output:
-        {{
-            "form_title": "Coffee Shops in Ikeja",
-            "maps_search_mode": "text",
-            "maps_search_query": "coffee shops",
-            "maps_location": "Ikeja, Lagos, Nigeria",
-            "maps_radius_km": 5,
-            "maps_business_types": ["cafe", "coffee_shop"],
-            "maps_min_rating": 3.5,
-            "maps_exclude_closed": true,
-            "maps_max_results": 20
-        }}
+        ### Instructions:
+        1. ALWAYS expand ambiguous terms and acronyms
+        2. Add industry-specific synonyms to maps_search_query
+        3. Use business_context to describe what user is looking for
+        4. Add excluded_terms for ambiguous queries
+        5. Set appropriate filters based on quality hints
 
-        Input: "I need gyms and fitness centers within 10km of Victoria Island with good ratings"
-        Output:
-        {{
-            "form_title": "Gyms in Victoria Island",
-            "maps_search_mode": "text",
-            "maps_search_query": "gyms and fitness centers",
-            "maps_location": "Victoria Island, Lagos, Nigeria",
-            "maps_radius_km": 10,
-            "maps_business_types": ["gym", "fitness_center"],
-            "maps_min_rating": 4.0,
-            "maps_exclude_closed": true,
-            "maps_max_results": 30
-        }}
-
-        Return only the JSON object that accurately reflects the user's search intent.
+        Return only the JSON object that accurately reflects the user's search intent with full context expansion.
     """
 
 
