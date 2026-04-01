@@ -158,6 +158,9 @@ class ApolloHelper:
             "maps_min_rating",
             "maps_exclude_closed",
             "maps_max_results",
+            # Google Maps AI enhancement fields (not sent to Apollo)
+            "business_context",
+            "excluded_terms",
             # Location Intelligence fields (URI-specific, not sent to Apollo)
             "enable_location_intelligence",
             "location_zone_center_lat",
