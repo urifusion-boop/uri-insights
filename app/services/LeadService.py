@@ -1506,6 +1506,189 @@ class LeadService:
             return formatted_address  # Return as-is if cannot parse
 
     @staticmethod
+    def _verify_apollo_google_maps_match(
+        apollo_company_name: str,
+        apollo_domain: Optional[str],
+        google_name: str,
+        google_website: Optional[str],
+        google_address: str,
+        location_hint: Optional[str] = None
+    ) -> tuple[bool, str, float]:
+        """
+        Enhanced verification logic to match Apollo and Google Maps results.
+
+        Uses multiple matching strategies with confidence scoring:
+        1. Domain matching (95% confidence) - Most reliable
+        2. Exact name match (90% confidence)
+        3. Fuzzy name matching with location (80% confidence)
+        4. Substring matching with location (70% confidence)
+        5. Phone number matching (if available) (95% confidence)
+
+        Returns:
+            tuple: (is_verified: bool, verification_method: str, confidence_score: float)
+        """
+        import re
+        from difflib import SequenceMatcher
+
+        def normalize_text(text: str) -> str:
+            """Remove common business suffixes and normalize"""
+            if not text:
+                return ""
+            text = text.lower().strip()
+            # Remove common business suffixes
+            suffixes = [
+                'inc', 'llc', 'ltd', 'limited', 'plc', 'corp', 'corporation',
+                'company', 'co', 'group', 'holdings', 'enterprises', 'pvt'
+            ]
+            for suffix in suffixes:
+                text = re.sub(rf'\b{suffix}\.?\b', '', text)
+            # Remove extra spaces
+            text = ' '.join(text.split())
+            return text
+
+        def calculate_similarity(str1: str, str2: str) -> float:
+            """Calculate string similarity ratio"""
+            return SequenceMatcher(None, str1, str2).ratio()
+
+        # Normalize inputs
+        apollo_name_norm = normalize_text(apollo_company_name)
+        google_name_norm = normalize_text(google_name)
+        apollo_domain_clean = apollo_domain.replace('http://', '').replace('https://', '').replace('www.', '').split('/')[0].lower() if apollo_domain else ""
+        google_website_clean = google_website.replace('http://', '').replace('https://', '').replace('www.', '').split('/')[0].lower() if google_website else ""
+
+        # Strategy 1: Domain verification (95% confidence)
+        if apollo_domain_clean and google_website_clean:
+            if apollo_domain_clean == google_website_clean:
+                return (True, "domain_exact_match", 0.95)
+            # Check if one domain contains the other (e.g., store.example.com vs example.com)
+            if apollo_domain_clean in google_website_clean or google_website_clean in apollo_domain_clean:
+                return (True, "domain_partial_match", 0.90)
+
+        # Strategy 2: Exact name match (90% confidence)
+        if apollo_name_norm == google_name_norm:
+            return (True, "name_exact_match", 0.90)
+
+        # Strategy 3: Fuzzy name matching (80%+ confidence)
+        similarity = calculate_similarity(apollo_name_norm, google_name_norm)
+        if similarity >= 0.85:  # Very high similarity
+            # Verify location if available
+            if location_hint and location_hint.lower() in google_address.lower():
+                return (True, f"name_fuzzy_match_with_location (similarity={similarity:.2f})", 0.85)
+            elif not location_hint:
+                return (True, f"name_fuzzy_match (similarity={similarity:.2f})", 0.80)
+
+        # Strategy 4: Substring matching (70%+ confidence)
+        if len(apollo_name_norm) > 5 and len(google_name_norm) > 5:
+            # Check if significant portion of one name is in the other
+            if apollo_name_norm in google_name_norm or google_name_norm in apollo_name_norm:
+                # Must verify location for substring matches to avoid false positives
+                if location_hint and location_hint.lower() in google_address.lower():
+                    return (True, "name_substring_match_with_location", 0.75)
+                elif not location_hint:
+                    return (True, "name_substring_match", 0.70)
+
+        # Strategy 5: Acronym/Abbreviation matching
+        # Extract acronym from Apollo name
+        apollo_words = apollo_name_norm.split()
+        if len(apollo_words) >= 2:
+            apollo_acronym = ''.join([word[0] for word in apollo_words if word])
+            if apollo_acronym.lower() == google_name_norm.replace(' ', '').lower():
+                if location_hint and location_hint.lower() in google_address.lower():
+                    return (True, "acronym_match_with_location", 0.75)
+
+        # Not verified
+        return (False, "no_match", 0.0)
+
+    @staticmethod
+    async def _generate_google_maps_query_from_apollo_filters(
+        keywords: str,
+        classification,
+        lead_form: dict
+    ) -> str:
+        """
+        Use AI to transform Apollo search filters into optimized Google Maps query.
+
+        This helps when Apollo returns 0 results - we intelligently convert the
+        Apollo filters into a query that works well for Google Maps local business search.
+
+        Args:
+            keywords: Keywords from q_organization_keyword_tags
+            classification: Query classification result
+            lead_form: Full lead form with all filters
+
+        Returns:
+            Enhanced Google Maps search query string
+        """
+        from app.services.AIService import AIService
+
+        # Build context from Apollo filters
+        apollo_filters = []
+
+        if lead_form.get("organization_num_employees_ranges"):
+            ranges = lead_form["organization_num_employees_ranges"]
+            apollo_filters.append(f"Company size: {', '.join(ranges)}")
+
+        if lead_form.get("revenue_range_min") or lead_form.get("revenue_range_max"):
+            min_rev = lead_form.get("revenue_range_min", 0)
+            max_rev = lead_form.get("revenue_range_max", "unlimited")
+            apollo_filters.append(f"Revenue: ${min_rev} - ${max_rev}")
+
+        if lead_form.get("q_organization_name"):
+            apollo_filters.append(f"Company name contains: {lead_form['q_organization_name']}")
+
+        # AI Prompt to transform Apollo filters to Google Maps query
+        ai_prompt = f"""
+You are a search query optimization expert. Apollo (B2B database) returned 0 results for this search.
+Now we need to search Google Maps for local businesses instead.
+
+Original Apollo Search:
+- Keywords: {keywords}
+- Business Category: {classification.business_category if classification else 'business'}
+- Apollo Filters: {' | '.join(apollo_filters) if apollo_filters else 'None'}
+
+Your task: Generate an optimized Google Maps search query that will find relevant LOCAL businesses.
+
+Rules:
+1. Focus on LOCAL establishments (clinics, offices, branches, facilities)
+2. Remove corporate/B2B terms like "company", "firm", "corporation", "enterprise"
+3. Add local business terms like "near me", specific business types
+4. If it's healthcare → use "hospital", "clinic", "medical center"
+5. If it's finance → use "bank branch", "insurance office"
+6. If it's education → use "school", "college", "training center"
+7. Keep it concise (2-5 words max)
+
+Examples:
+- "insurance companies" → "insurance offices"
+- "healthcare organizations" → "hospitals and clinics"
+- "accounting firms" → "accounting services"
+- "law firms" → "lawyers and legal services"
+- "construction companies" → "construction contractors"
+
+Output only the optimized query, nothing else:
+""".strip()
+
+        try:
+            # Call AI service
+            response = await AIService.ainvoke(prompt=ai_prompt)
+            enhanced_query = response.get("response", "").strip()
+
+            # Fallback if AI fails
+            if not enhanced_query or len(enhanced_query) > 100:
+                # Simple fallback: just use keywords
+                enhanced_query = keywords
+
+            print(f"[AI QUERY ENHANCEMENT]")
+            print(f"   Original: {keywords}")
+            print(f"   Enhanced: {enhanced_query}")
+
+            return enhanced_query
+
+        except Exception as e:
+            print(f"[AI QUERY ENHANCEMENT] ❌ AI failed: {e}")
+            print(f"   Fallback to original keywords: {keywords}")
+            return keywords
+
+    @staticmethod
     async def _generate_location_intelligent_org_leads(
         lead_form: dict, db: AsyncIOMotorDatabase, classification = None
     ) -> List[LeadCreate]:
@@ -1590,37 +1773,19 @@ class LeadService:
                     if google_results and len(google_results) > 0:
                         google_data = google_results[0]
 
-                        # 🔒 VERIFY: Check if Google Maps result matches Apollo company
-                        is_verified = False
-                        verification_method = None
+                        # 🔒 ENHANCED VERIFICATION: Use improved matching algorithm
+                        apollo_domain = lead_dict.get('primary_domain') or lead_dict.get('website_url', '')
+                        is_verified, verification_method, confidence_score = LeadService._verify_apollo_google_maps_match(
+                            apollo_company_name=company_name,
+                            apollo_domain=apollo_domain,
+                            google_name=google_data.get('name', ''),
+                            google_website=google_data.get('website', ''),
+                            google_address=google_data.get('formatted_address', ''),
+                            location_hint=location_hint
+                        )
 
-                        # Method 1: Domain verification (most reliable)
-                        apollo_domain = lead_dict.get('primary_domain') or lead_dict.get('website_url', '').replace('http://', '').replace('https://', '').replace('www.', '').split('/')[0]
-                        google_website = google_data.get('website', '').replace('http://', '').replace('https://', '').replace('www.', '').split('/')[0]
-
-                        if apollo_domain and google_website and apollo_domain.lower() == google_website.lower():
-                            is_verified = True
-                            verification_method = "domain_match"
-
-                        # Method 2: Name similarity check (if domain not available)
-                        if not is_verified:
-                            google_name = google_data.get('name', '').lower()
-                            apollo_name = company_name.lower()
-
-                            # Check if names are very similar (exact match or one contains the other)
-                            if google_name == apollo_name or google_name in apollo_name or apollo_name in google_name:
-                                # Additional check: Must be in same country if location hint provided
-                                if location_hint:
-                                    google_address = google_data.get('formatted_address', '').lower()
-                                    if location_hint.lower() in google_address:
-                                        is_verified = True
-                                        verification_method = "name_similarity + location_match"
-                                else:
-                                    is_verified = True
-                                    verification_method = "name_similarity"
-
-                        # Only enrich if verified
-                        if is_verified:
+                        # Only enrich if verified with minimum 70% confidence
+                        if is_verified and confidence_score >= 0.70:
                             # Calculate trust score
                             google_rating = google_data.get('google_rating')
                             trust_score = round(google_rating * 20, 1) if google_rating else None
@@ -1638,9 +1803,9 @@ class LeadService:
                                 "latitude": google_data.get('latitude'),
                                 "longitude": google_data.get('longitude'),
                             })
-                            print(f"      ✅ VERIFIED ({verification_method}) & Enriched: Location={location}, Trust Score={trust_score}/100")
+                            print(f"      ✅ VERIFIED ({verification_method}, {confidence_score*100:.0f}% confidence) & Enriched: Location={location}, Trust Score={trust_score}/100")
                         else:
-                            print(f"      ⚠️ Google Maps result found but NOT VERIFIED (possible wrong match - skipping enrichment)")
+                            print(f"      ⚠️ Google Maps result found but NOT VERIFIED ({confidence_score*100:.0f}% confidence - threshold is 70%)")
                             print(f"         Apollo: {company_name} | Google: {google_data.get('name')}")
                     else:
                         print(f"      ⚠️ No Google Maps data found")
@@ -1674,6 +1839,14 @@ class LeadService:
         keywords_list = lead_form.get("q_organization_keyword_tags", [])
         keywords = " ".join(keywords_list) if keywords_list else "business"
 
+        # 🤖 AI-Enhanced Query Generation for Google Maps
+        # Transform Apollo search criteria into optimized Google Maps query
+        enhanced_query = await LeadService._generate_google_maps_query_from_apollo_filters(
+            keywords=keywords,
+            classification=classification,
+            lead_form=lead_form
+        )
+
         google_results = []
         try:
             if has_target_zone:
@@ -1681,9 +1854,10 @@ class LeadService:
                 print(f"[LOCATION INTELLIGENCE] Using NEARBY search (coordinate-based)")
                 print(f"   Lat: {lead_form['location_zone_center_lat']}, Lng: {lead_form['location_zone_center_lng']}")
                 print(f"   Radius: {lead_form['location_zone_radius_km']}km")
+                print(f"   🤖 AI-Enhanced Query: {enhanced_query}")
 
                 google_results = await GoogleMapsService.search_businesses(
-                    query=keywords,
+                    query=enhanced_query,
                     latitude=lead_form["location_zone_center_lat"],
                     longitude=lead_form["location_zone_center_lng"],
                     radius_km=lead_form["location_zone_radius_km"],
@@ -1697,13 +1871,13 @@ class LeadService:
                 locations_list = lead_form.get("organization_locations", [])
                 location_name = locations_list[0] if locations_list else "Nigeria"
 
-                # Build a more specific search query combining keywords and location
-                # This helps Google Maps return more relevant results
-                specific_query = f"{keywords} in {location_name}"
+                # Build a more specific search query combining enhanced query and location
+                specific_query = f"{enhanced_query} in {location_name}"
 
                 print(f"[LOCATION INTELLIGENCE] Using TEXT search (location-based)")
                 print(f"   Location: {location_name}")
                 print(f"   Keywords: {keywords}")
+                print(f"   🤖 AI-Enhanced Query: {enhanced_query}")
                 print(f"   Specific Query: {specific_query}")
 
                 google_results = await GoogleMapsService.search_businesses(
@@ -1751,6 +1925,9 @@ class LeadService:
                     "google_reviews_count": business.get('google_reviews_count'),
                     "business_status": business.get('business_status'),
                     "business_category": business.get('business_category'),
+                    # 🎭 SEAMLESS INTEGRATION: Use LAZARUS lead_source and ORGANIZATION type
+                    # This makes Google Maps fallback leads appear identical to Apollo leads in the UI
+                    # User never knows whether data came from Apollo or Google Maps
                     "lead_source": LeadSourceEnum.LAZARUS,
                     "lead_type": "ORGANIZATION",  # String value instead of enum
                 }

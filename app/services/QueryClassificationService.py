@@ -108,33 +108,81 @@ class QueryClassificationService:
     # These can exist as both corporate entities and local offices/branches
     HYBRID_KEYWORDS = {
         # Healthcare institutions
-        'hospital', 'hospitals', 'medical', 'healthcare',
+        'hospital', 'hospitals', 'medical', 'healthcare', 'health', 'clinic', 'clinics',
+        'medical center', 'medical centers', 'diagnostic center', 'diagnostic centers',
+        'dental', 'dentist', 'dentists', 'dental clinic', 'optician', 'opticians',
 
         # Education
         'school', 'schools', 'university', 'universities', 'college', 'colleges',
         'training institute', 'training institutes', 'academy', 'academies',
-        'learning center', 'education center',
+        'learning center', 'education center', 'educational institution',
+        'polytechnic', 'tech school', 'vocational school', 'tutoring center',
 
         # Professional services (can be both corporate HQ and local branches)
-        'law firm', 'law firms', 'legal', 'lawyer', 'lawyers', 'attorney',
-        'accounting firm', 'accounting firms', 'audit firm', 'accountant',
-        'consulting company', 'consulting companies',
+        'law firm', 'law firms', 'legal', 'lawyer', 'lawyers', 'attorney', 'attorneys',
+        'accounting firm', 'accounting firms', 'audit firm', 'accountant', 'accountants',
+        'consulting company', 'consulting companies', 'consultancy', 'consultancies',
+        'tax consultant', 'tax consultants', 'business consultant', 'notary',
 
         # Financial institutions
-        'bank', 'banks', 'insurance company', 'insurance companies',
-        'microfinance', 'financial institution', 'financial services',
+        'bank', 'banks', 'insurance company', 'insurance companies', 'insurance firm',
+        'microfinance', 'financial institution', 'financial services', 'investment firm',
+        'wealth management', 'brokerage', 'credit union', 'savings and loan',
 
         # Real estate
-        'real estate', 'real estate company', 'real estate companies',
-        'property', 'property company', 'property management',
+        'real estate', 'real estate company', 'real estate companies', 'real estate agency',
+        'property', 'property company', 'property management', 'realtor', 'realtors',
+        'estate agent', 'estate agents', 'property developer', 'property developers',
 
-        # Construction
-        'construction company', 'construction companies', 'contractor',
-        'contractors', 'building company', 'engineering firm',
+        # Construction & Engineering
+        'construction company', 'construction companies', 'contractor', 'contractors',
+        'building company', 'engineering firm', 'engineering firms', 'architect', 'architects',
+        'architecture firm', 'surveyor', 'surveyors', 'civil engineering', 'quantity surveyor',
 
-        # Recruitment
-        'recruitment agency', 'recruitment agencies', 'staffing agency',
-        'hr consultancy', 'talent acquisition',
+        # Recruitment & HR
+        'recruitment agency', 'recruitment agencies', 'staffing agency', 'staffing agencies',
+        'hr consultancy', 'talent acquisition', 'employment agency', 'headhunter', 'headhunters',
+
+        # Telecommunications
+        'telecom', 'telecommunications', 'internet provider', 'isp', 'network provider',
+        'broadband provider', 'mobile network', 'telecom company',
+
+        # Hospitality (Hotels/Restaurants with corporate presence)
+        'hotel chain', 'hotel group', 'restaurant chain', 'restaurant group',
+        'hospitality company', 'hospitality group',
+
+        # Retail Chains (both corporate HQ and branches)
+        'retail chain', 'retail company', 'store chain', 'franchise',
+        'supermarket chain', 'department store',
+
+        # Logistics & Transportation
+        'logistics company', 'logistics companies', 'courier', 'courier service',
+        'delivery company', 'freight', 'transportation company', 'shipping company',
+        'trucking company', 'moving company',
+
+        # Media & Publishing
+        'media company', 'media companies', 'publishing house', 'publisher', 'publishers',
+        'newspaper', 'magazine', 'broadcasting', 'radio station', 'tv station',
+
+        # Security Services
+        'security company', 'security companies', 'security firm', 'security service',
+        'private security', 'guard service',
+
+        # Automotive (Dealerships & Service Centers)
+        'car dealership', 'car dealer', 'auto dealer', 'vehicle dealer',
+        'car service center', 'auto service',
+
+        # Pharmaceutical
+        'pharmaceutical company', 'pharmaceutical companies', 'pharma', 'drug manufacturer',
+        'pharmacy chain',
+
+        # Manufacturing (with distribution/retail presence)
+        'manufacturing company', 'manufacturer', 'manufacturers', 'factory', 'factories',
+        'production company', 'industrial company',
+
+        # Energy & Utilities
+        'energy company', 'utility company', 'power company', 'gas company',
+        'water company', 'electricity provider',
     }
 
     @classmethod
