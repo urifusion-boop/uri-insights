@@ -1232,7 +1232,7 @@ class LeadService:
             print(f"   - Route Type: {classification.route_type}")
             print(f"   - Business Category: {classification.business_category}")
             print(f"   - Location: {classification.location}")
-            print(f"   - Matched Keywords: {classification.matched_keywords}")
+            print(f"   - Keywords: {classification.keywords}")
             print(f"   - Confidence: {classification.confidence}")
             print(f"{'='*80}\n")
 
