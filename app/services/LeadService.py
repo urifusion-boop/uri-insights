@@ -1225,8 +1225,7 @@ class LeadService:
 
             classification = QueryClassificationService.classify_query(
                 user_prompt=user_prompt,
-                organization_keywords=organization_keywords,
-                organization_locations=organization_locations
+                organization_keywords=organization_keywords
             )
 
             print(f"📊 [QUERY CLASSIFICATION] Result:")
