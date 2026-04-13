@@ -89,6 +89,9 @@ class ApolloHelper:
             "maps_min_rating",
             "maps_exclude_closed",
             "maps_max_results",
+            # Google Maps AI enhancement fields (not sent to Apollo)
+            "business_context",
+            "excluded_terms",
         ]
 
         lead_form.copy()
